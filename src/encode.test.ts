@@ -24,8 +24,6 @@ Deno.test("Encodes and decodes", () => {
 
   const encoded = encodeEntry(entry);
 
-  console.log(encoded);
-
   const decoded = decodeEntry(encoded, { digestLength: 4, pubKeyLength: 4 });
 
   assertEquals(decoded, entry);
