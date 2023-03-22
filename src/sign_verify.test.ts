@@ -97,7 +97,7 @@ Deno.test("Signs and verifies", async () => {
       return window.crypto.subtle.verify(
         {
           name: "ECDSA",
-          hash: { name: "SHA-384" },
+          hash: { name: "SHA-256" },
         },
         publicKey,
         signature,
