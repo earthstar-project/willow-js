@@ -1,24 +1,9 @@
 import { signEntry, verifyEntry } from "./sign_verify.ts";
-import { Entry } from "./types.ts";
+import { Entry, SignedEntry } from "./types.ts";
 import {
   assert,
   assertEquals,
 } from "https://deno.land/std@0.177.0/testing/asserts.ts";
-
-function makeKeypair() {
-  return crypto.subtle.generateKey(
-    {
-      name: "ECDSA",
-      namedCurve: "P-256",
-    },
-    true,
-    ["sign", "verify"],
-  );
-}
-
-function exportKey(key: CryptoKey) {
-  return window.crypto.subtle.exportKey("raw", key);
-}
 
 Deno.test("Signs and verifies", async () => {
   const namespaceKeypair = await makeKeypair();
@@ -48,7 +33,7 @@ Deno.test("Signs and verifies", async () => {
     namespaceKeypair: namespaceKeypair,
     authorKeypair: authorKeypair,
     sign: (keypair, entryEncoded) => {
-      return window.crypto.subtle.sign(
+      return crypto.subtle.sign(
         {
           name: "ECDSA",
           hash: { name: "SHA-256" },
@@ -61,21 +46,21 @@ Deno.test("Signs and verifies", async () => {
 
   assertEquals(entry, signed.entry);
 
-  const verified = await verifyEntry<CryptoKey>({
-    namespacePubkey: namespaceKeypair.publicKey,
-    authorPubkey: authorKeypair.publicKey,
+  const verified = await verifyEntry({
     signedEntry: signed,
-    verify: (
+    verify: async (
       publicKey,
       signature,
       encodedEntry,
     ) => {
-      return window.crypto.subtle.verify(
+      const cryptoKey = await importPublicKey(publicKey);
+
+      return crypto.subtle.verify(
         {
           name: "ECDSA",
           hash: { name: "SHA-256" },
         },
-        publicKey,
+        cryptoKey,
         signature,
         encodedEntry,
       );
@@ -84,22 +69,28 @@ Deno.test("Signs and verifies", async () => {
 
   assert(verified);
 
+  const badSigned: SignedEntry = {
+    entry: signed.entry,
+    authorSignature: new Uint8Array([1, 2, 3, 4]).buffer,
+    namespaceSignature: new Uint8Array([5, 6, 7, 8]).buffer,
+  };
+
   // Swap the author / namespace keypairs
-  const failedVerification = await verifyEntry<CryptoKey>({
-    namespacePubkey: authorKeypair.publicKey,
-    authorPubkey: namespaceKeypair.publicKey,
-    signedEntry: signed,
-    verify: (
+  const failedVerification = await verifyEntry({
+    signedEntry: badSigned,
+    verify: async (
       publicKey,
       signature,
       encodedEntry,
     ) => {
-      return window.crypto.subtle.verify(
+      const cryptoKey = await importPublicKey(publicKey);
+
+      return crypto.subtle.verify(
         {
           name: "ECDSA",
           hash: { name: "SHA-256" },
         },
-        publicKey,
+        cryptoKey,
         signature,
         encodedEntry,
       );
@@ -108,3 +99,31 @@ Deno.test("Signs and verifies", async () => {
 
   assert(failedVerification === false);
 });
+
+function makeKeypair() {
+  return crypto.subtle.generateKey(
+    {
+      name: "ECDSA",
+      namedCurve: "P-256",
+    },
+    true,
+    ["sign", "verify"],
+  );
+}
+
+function importPublicKey(raw: ArrayBuffer) {
+  return crypto.subtle.importKey(
+    "raw",
+    raw,
+    {
+      name: "ECDSA",
+      namedCurve: "P-256",
+    },
+    true,
+    ["verify"],
+  );
+}
+
+function exportKey(key: CryptoKey) {
+  return window.crypto.subtle.exportKey("raw", key);
+}

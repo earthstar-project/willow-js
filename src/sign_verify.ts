@@ -30,13 +30,11 @@ export async function signEntry<KeyType>(
   };
 }
 
-export async function verifyEntry<PubKeyType>(
+export async function verifyEntry(
   opts: {
     signedEntry: SignedEntry;
-    namespacePubkey: PubKeyType;
-    authorPubkey: PubKeyType;
     verify: (
-      publicKey: PubKeyType,
+      publicKey: ArrayBuffer,
       signature: ArrayBuffer,
       signed: ArrayBuffer,
     ) => Promise<boolean>;
@@ -45,13 +43,13 @@ export async function verifyEntry<PubKeyType>(
   const signedBytes = encodeEntry(opts.signedEntry.entry);
 
   const namespaceVerified = await opts.verify(
-    opts.namespacePubkey,
+    opts.signedEntry.entry.identifier.namespace,
     opts.signedEntry.namespaceSignature,
     signedBytes,
   );
 
   const authorVerified = await opts.verify(
-    opts.authorPubkey,
+    opts.signedEntry.entry.identifier.author,
     opts.signedEntry.authorSignature,
     signedBytes,
   );
