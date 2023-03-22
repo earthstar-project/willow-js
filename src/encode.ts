@@ -17,7 +17,7 @@ export function encodeEntry(
   const totalLength = recordIdentifierLength + recordLength;
 
   const ui8 = new Uint8Array(totalLength);
-  const dataView = new DataView(ui8);
+  const dataView = new DataView(ui8.buffer);
 
   let currentPosition = 0;
 
@@ -29,7 +29,7 @@ export function encodeEntry(
   currentPosition += entry.identifier.namespace.byteLength;
 
   // Author pubkey
-  ui8.set(entry.identifier.namespace, currentPosition);
+  ui8.set(entry.identifier.author, currentPosition);
 
   currentPosition += entry.identifier.author.byteLength;
 
@@ -64,7 +64,7 @@ export function decodeEntry(
     digestLength: number;
   },
 ): Entry {
-  const dataView = new DataView(encodedEntry);
+  const dataView = new DataView(encodedEntry.buffer);
 
   const pathLength = encodedEntry.byteLength - (8 + opts.digestLength) -
     (opts.pubKeyLength * 2 + 8);
@@ -72,13 +72,16 @@ export function decodeEntry(
   return {
     identifier: {
       namespace: encodedEntry.subarray(0, opts.pubKeyLength),
-      author: encodedEntry.subarray(opts.pubKeyLength, opts.pubKeyLength),
+      author: encodedEntry.subarray(opts.pubKeyLength, opts.pubKeyLength * 2),
       timestamp: dataView.getBigUint64(opts.pubKeyLength * 2),
-      path: encodedEntry.subarray(opts.pubKeyLength * 2 + 16, pathLength),
+      path: encodedEntry.subarray(
+        opts.pubKeyLength * 2 + 8,
+        opts.pubKeyLength * 2 + 8 + pathLength,
+      ),
     },
     record: {
-      length: dataView.getBigUint64(opts.pubKeyLength * 2 + 16 + pathLength),
-      hash: encodedEntry.subarray(opts.pubKeyLength * 2 + 16 + pathLength + 16),
+      length: dataView.getBigUint64(opts.pubKeyLength * 2 + 8 + pathLength),
+      hash: encodedEntry.subarray(opts.pubKeyLength * 2 + 8 + pathLength + 8),
     },
   };
 }
