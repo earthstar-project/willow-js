@@ -2,8 +2,8 @@
 
 - [x] encoding entry
 - [x] decoding entry
-- [ ] signing entry
-- [ ] verifying entry
+- [x] signing entry
+- [x] verifying entry
 
 ## Replicas
 
