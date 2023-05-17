@@ -35,11 +35,6 @@ export function encodeEntry(
 
   currentPosition += entry.identifier.author.byteLength;
 
-  // Timestamp
-  dataView.setBigUint64(currentPosition, entry.identifier.timestamp);
-
-  currentPosition += 8;
-
   // Path
   const pathUi8 = new Uint8Array(entry.identifier.path);
   ui8.set(pathUi8, currentPosition);
@@ -47,6 +42,11 @@ export function encodeEntry(
   currentPosition += entry.identifier.path.byteLength;
 
   // Record
+
+  // Timestamp
+  dataView.setBigUint64(currentPosition, entry.record.timestamp);
+
+  currentPosition += 8;
 
   // Length
   dataView.setBigUint64(currentPosition, entry.record.length);
@@ -78,14 +78,14 @@ export function decodeEntry(
       namespace: encodedUi8.subarray(0, opts.pubKeyLength).buffer,
       author:
         encodedUi8.subarray(opts.pubKeyLength, opts.pubKeyLength * 2).buffer,
-      timestamp: dataView.getBigUint64(opts.pubKeyLength * 2),
       path: encodedUi8.subarray(
-        opts.pubKeyLength * 2 + 8,
-        opts.pubKeyLength * 2 + 8 + pathLength,
+        opts.pubKeyLength * 2,
+        opts.pubKeyLength * 2 + pathLength,
       ).buffer,
     },
     record: {
-      length: dataView.getBigUint64(opts.pubKeyLength * 2 + 8 + pathLength),
+      timestamp: dataView.getBigUint64(opts.pubKeyLength * 2 + pathLength),
+      length: dataView.getBigUint64(opts.pubKeyLength * 2 + pathLength + 8),
       hash:
         encodedUi8.subarray(opts.pubKeyLength * 2 + 8 + pathLength + 8).buffer,
     },

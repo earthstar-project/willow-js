@@ -19,10 +19,10 @@ Deno.test("Signs and verifies", async () => {
     identifier: {
       namespace: namespacePubkeyBytes,
       author: authorPubkeyBytes,
-      timestamp: BigInt(1679467892424),
       path: pathBytes,
     },
     record: {
+      timestamp: BigInt(1679467892424),
       length: BigInt(256),
       hash: hashBytes,
     },
@@ -75,7 +75,6 @@ Deno.test("Signs and verifies", async () => {
     namespaceSignature: new Uint8Array([5, 6, 7, 8]).buffer,
   };
 
-  // Swap the author / namespace keypairs
   const failedVerification = await verifyEntry({
     signedEntry: badSigned,
     verify: async (

@@ -13,10 +13,11 @@ Deno.test("Encodes and decodes", () => {
     identifier: {
       namespace: namespaceBytes,
       author: authorBytes,
-      timestamp: BigInt(1679467892424),
+
       path: pathBytes,
     },
     record: {
+      timestamp: BigInt(1679467892424),
       length: BigInt(256),
       hash: hashBytes,
     },

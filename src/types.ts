@@ -3,13 +3,13 @@ export type RecordIdentifier = {
   namespace: ArrayBuffer;
   /** The author's public key as a fixed-width integer*/
   author: ArrayBuffer;
-  /** 64 bit integer (interpreted as microseconds since the Unix epoch). Big-endian. */
-  timestamp: bigint;
   /** Bit string of length at most 2048 */
   path: ArrayBuffer;
 };
 
 export type Record = {
+  /** 64 bit integer (interpreted as microseconds since the Unix epoch). Big-endian. */
+  timestamp: bigint;
   /** 64 bit integer */
   length: bigint;
   /** digest-length bit integer*/
