@@ -33,6 +33,52 @@ const compare = (a: string, b: string) => {
   }
 };
 
+Deno.test("Skiplist storage", async () => {
+  const kv = await Deno.openKv();
+
+  for await (const result of kv.list({ start: [-1], end: [100] })) {
+    await kv.delete(result.key);
+  }
+
+  const skiplist = new Skiplist(
+    {
+      monoid: concatMonoid,
+      compare,
+      kv,
+    },
+  );
+
+  const encoder = new TextEncoder();
+
+  const keys = ["a", "b", "c", "d", "e", "f", "g"];
+
+  const map = new Map();
+
+  for (const letter of keys) {
+    map.set(letter, encoder.encode(letter));
+  }
+
+  for (const [key, value] of map) {
+    await skiplist.insert(key, value);
+  }
+
+  const listContents = [];
+
+  for await (const item of skiplist.allEntries()) {
+    listContents.push(item.value);
+  }
+
+  assertEquals(Array.from(map.values()), listContents);
+
+  for (const [key, value] of map) {
+    const storedValue = await skiplist.find(key);
+
+    assertEquals(storedValue, value);
+  }
+
+  kv.close();
+});
+
 Deno.test("Skiplist summarise (basics)", async () => {
   const kv = await Deno.openKv();
 
@@ -51,18 +97,21 @@ Deno.test("Skiplist summarise (basics)", async () => {
   const set = ["a", "b", "c", "d", "e", "f", "g"];
 
   for (const item of set) {
-    await skiplist.insert(item);
+    await skiplist.insert(item, new Uint8Array());
   }
-
-  const listContents = [];
-
-  for await (const item of skiplist.lnrValues()) {
-    listContents.push(item);
-  }
-
-  //assertEquals(set, listContents);
 
   for (const vector of rangeVectors) {
+    const items = [];
+
+    for await (const entry of skiplist.entries(vector[0][0], vector[0][1])) {
+      items.push(entry.key);
+    }
+
+    assertEquals(
+      items,
+      vector[3],
+    );
+
     const { fingerprint, size } = await skiplist.summarise(
       vector[0][0],
       vector[0][1],
@@ -153,7 +202,7 @@ Deno.test("Skiplist summarise (fuzz 10k)", async () => {
 
     for (const item of set) {
       tree.insert(item);
-      await skiplist.insert(item);
+      await skiplist.insert(item, new Uint8Array());
     }
 
     for (let i = 0; i < 100; i++) {
@@ -161,6 +210,17 @@ Deno.test("Skiplist summarise (fuzz 10k)", async () => {
 
       const treeFingerprint = tree.getFingerprint(start, end);
       const listFingeprint = await skiplist.summarise(start, end);
+
+      const listItems = [];
+
+      for await (const entry of skiplist.entries(start, end)) {
+        listItems.push(entry.key);
+      }
+
+      assertEquals(
+        listItems,
+        treeFingerprint.items,
+      );
 
       assertEquals(
         {

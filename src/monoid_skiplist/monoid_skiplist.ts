@@ -90,12 +90,17 @@ export class Skiplist<
 
   private async checkUndoneWork() {
     // Check for presence of insertion or delete operations that were left unfinished.
-    const existingInsert = await this.kv.get<ValueType>([-1, "insert"]);
+    const existingInsert = await this.kv.get<[ValueType, Uint8Array]>([
+      -1,
+      "insert",
+    ]);
     const existingRemove = await this.kv.get<ValueType>([-1, "remove"]);
 
     if (existingInsert.value) {
-      await this.remove(existingInsert.value, { doNotWaitForCheck: true });
-      await this.insert(existingInsert.value, { doNotWaitForCheck: true });
+      await this.remove(existingInsert.value[0], { doNotWaitForCheck: true });
+      await this.insert(existingInsert.value[0], existingInsert.value[1], {
+        doNotWaitForCheck: true,
+      });
     }
 
     if (existingRemove.value) {
@@ -116,7 +121,8 @@ export class Skiplist<
   }
 
   async insert(
-    insertedValue: ValueType,
+    key: ValueType,
+    value: Uint8Array,
     opts?: { layer?: number; doNotWaitForCheck?: boolean },
   ) {
     if (
@@ -126,7 +132,7 @@ export class Skiplist<
       await this.checkedUndoneWork;
     }
 
-    await this.kv.set([-1, "insert"], insertedValue);
+    await this.kv.set([-1, "insert"], [key, value]);
 
     const level = opts?.layer !== undefined ? opts.layer : randomLevel();
     const atomicOperation = this.kv.atomic();
@@ -139,18 +145,18 @@ export class Skiplist<
       // Compute new values.
       {
         if (currentLayer === 0) {
-          const label = this.monoid.lift(insertedValue);
+          const label = this.monoid.lift(key);
 
-          atomicOperation.set([currentLayer, insertedValue], [
+          atomicOperation.set([currentLayer, key], [
             label,
-            new Uint8Array(),
+            value,
           ]);
 
           justInsertedLabel = label;
         } else {
           const whereToStop = await this.getRightItemAbstract(
             currentLayer,
-            insertedValue,
+            key,
           );
 
           let acc = justInsertedLabel;
@@ -158,7 +164,7 @@ export class Skiplist<
           for await (
             const entry of this.kv.list<SkiplistValue<LiftedType>>(
               {
-                start: [currentLayer - 1, insertedValue],
+                start: [currentLayer - 1, key],
                 end: whereToStop
                   ? [currentLayer - 1, whereToStop.key[1]]
                   : [currentLayer],
@@ -168,9 +174,9 @@ export class Skiplist<
             acc = this.monoid.combine(acc, entry.value[0]);
           }
 
-          atomicOperation.set([currentLayer, insertedValue], [
+          atomicOperation.set([currentLayer, key], [
             acc,
-            new Uint8Array(),
+            value,
           ]);
           justInsertedLabel = acc;
         }
@@ -178,7 +184,7 @@ export class Skiplist<
 
       // Recompute preceding values
       {
-        const prevItem = await this.getLeftItem(currentLayer, insertedValue);
+        const prevItem = await this.getLeftItem(currentLayer, key);
 
         if (!prevItem) {
           continue;
@@ -209,7 +215,7 @@ export class Skiplist<
           justModifiedPredecessor![1],
         );
 
-        atomicOperation.set(prevItem.key, [newLabel, new Uint8Array()]);
+        atomicOperation.set(prevItem.key, [newLabel, prevItem.value[1]]);
 
         justModifiedPredecessor = [prevItem.key[1] as ValueType, newLabel];
       }
@@ -218,7 +224,7 @@ export class Skiplist<
     for (let i = level; i < await this.currentLevel(); i++) {
       // Recompute preceding values on HIGHER levels.
 
-      const itemNeedingNewLabel = await this.getLeftItem(i, insertedValue);
+      const itemNeedingNewLabel = await this.getLeftItem(i, key);
 
       if (!itemNeedingNewLabel) {
         // There won't be any other items on higher levels.
@@ -244,7 +250,7 @@ export class Skiplist<
       ) {
         if (
           hasUsedJustInserted === false &&
-          this.compare(item.key[1] as ValueType, insertedValue) > 0
+          this.compare(item.key[1] as ValueType, key) > 0
         ) {
           acc = this.monoid.combine(acc, justInsertedLabel);
           acc = this.monoid.combine(acc, item.value[0]);
@@ -261,14 +267,14 @@ export class Skiplist<
 
       const shouldAppend = hasUsedJustInserted === false &&
         (whereToStop &&
-            this.compare(whereToStop.key[1] as ValueType, insertedValue) > 0 ||
+            this.compare(whereToStop.key[1] as ValueType, key) > 0 ||
           whereToStop !== undefined);
 
       atomicOperation.set(
         itemNeedingNewLabel.key,
         [
           shouldAppend ? this.monoid.combine(acc, justInsertedLabel) : acc,
-          new Uint8Array(),
+          itemNeedingNewLabel.value[1],
         ],
       );
 
@@ -393,25 +399,14 @@ export class Skiplist<
     return removed;
   }
 
-  async hasKey(key: ValueType) {
-    const result = await this.kv.get([0, key]);
+  async find(key: ValueType) {
+    const result = await this.kv.get<SkiplistValue<LiftedType>>([0, key]);
 
     if (result.value) {
-      return true;
+      return result.value[1];
     }
 
-    return false;
-  }
-
-  async *items(start: ValueType, end: ValueType): AsyncIterable<ValueType> {
-    const results = this.kv.list<ValueType>({
-      start: [0, start],
-      end: [0, end],
-    });
-
-    for await (const entry of results) {
-      yield entry.key[1] as ValueType;
-    }
+    return undefined;
   }
 
   async summarise(
@@ -572,7 +567,6 @@ export class Skiplist<
 
       return { fingerprint, size };
     } else if (argOrder > 0) {
-      // Do some fancy shit.
       const firstHalf = await accumulateLabel({
         layer: await this.currentLevel() - 1,
         upperBound: end,
@@ -595,14 +589,54 @@ export class Skiplist<
     }
   }
 
-  async *lnrValues(): AsyncIterable<ValueType> {
-    const iter = this.kv.list<LiftedType>({
+  async *entries(
+    start: ValueType,
+    end: ValueType,
+  ): AsyncIterable<{ key: ValueType; value: Uint8Array }> {
+    const argOrder = this.compare(start, end);
+
+    if (argOrder === 0) {
+      for await (const result of this.allEntries()) {
+        yield result;
+      }
+    } else if (argOrder < 0) {
+      const results = this.kv.list<SkiplistValue<LiftedType>>({
+        start: [0, start],
+        end: [0, end],
+      });
+
+      for await (const entry of results) {
+        yield { key: entry.key[1] as ValueType, value: entry.value[1] };
+      }
+    } else {
+      const firstHalf = this.kv.list<SkiplistValue<LiftedType>>({
+        start: [0],
+        end: [0, end],
+      });
+
+      for await (const entry of firstHalf) {
+        yield { key: entry.key[1] as ValueType, value: entry.value[1] };
+      }
+
+      const secondHalf = this.kv.list<SkiplistValue<LiftedType>>({
+        start: [0, start],
+        end: [1],
+      });
+
+      for await (const entry of secondHalf) {
+        yield { key: entry.key[1] as ValueType, value: entry.value[1] };
+      }
+    }
+  }
+
+  async *allEntries(): AsyncIterable<{ key: ValueType; value: Uint8Array }> {
+    const iter = this.kv.list<SkiplistValue<LiftedType>>({
       start: [0],
       end: [1],
     });
 
     for await (const entry of iter) {
-      yield entry.key[1] as ValueType;
+      yield { key: entry.key[1] as ValueType, value: entry.value[1] };
     }
   }
 }
