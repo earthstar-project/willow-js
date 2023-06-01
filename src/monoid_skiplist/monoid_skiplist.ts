@@ -67,6 +67,7 @@ export class Skiplist<
   private kv: Deno.Kv;
   private currentHighestLevel = 0;
   private isSetup = deferred();
+  private checkedUndoneWork = deferred();
   private monoid: LiftingMonoid<ValueType, LiftedType>;
 
   constructor(opts: SkiplistOpts<ValueType, LiftedType>) {
@@ -75,6 +76,7 @@ export class Skiplist<
     this.compare = opts.compare;
     this.monoid = opts.monoid;
 
+    this.checkUndoneWork();
     this.setup();
   }
 
@@ -111,6 +113,23 @@ export class Skiplist<
     this.isSetup.resolve();
   }
 
+  private async checkUndoneWork() {
+    // Check for presence of insertion or delete operations that were left unfinished.
+    const existingInsert = await this.kv.get<ValueType>([-1, "insert"]);
+    const existingRemove = await this.kv.get<ValueType>([-1, "remove"]);
+
+    if (existingInsert.value) {
+      await this.remove(existingInsert.value, { doNotWaitForCheck: true });
+      await this.insert(existingInsert.value, { doNotWaitForCheck: true });
+    }
+
+    if (existingRemove.value) {
+      await this.remove(existingRemove.value, { doNotWaitForCheck: true });
+    }
+
+    this.checkedUndoneWork.resolve();
+  }
+
   async currentLevel() {
     await this.isSetup;
 
@@ -121,8 +140,20 @@ export class Skiplist<
     this.currentHighestLevel = level;
   }
 
-  async insert(insertedValue: ValueType, layer?: number) {
-    const level = layer !== undefined ? layer : randomLevel();
+  async insert(
+    insertedValue: ValueType,
+    opts?: { layer?: number; doNotWaitForCheck?: boolean },
+  ) {
+    if (
+      opts?.doNotWaitForCheck === false || opts === undefined ||
+      opts.doNotWaitForCheck === undefined
+    ) {
+      await this.checkedUndoneWork;
+    }
+
+    await this.kv.set([-1, "insert"], insertedValue);
+
+    const level = opts?.layer !== undefined ? opts.layer : randomLevel();
     const atomicOperation = this.kv.atomic();
 
     let justInsertedLabel: LiftedType = this.monoid.neutral;
@@ -272,24 +303,14 @@ export class Skiplist<
 
     await atomicOperation.commit();
 
+    await this.kv.delete([-1, "insert"]);
+
     if (level > await this.currentLevel()) {
       this.setCurrentLevel(level);
     }
   }
 
-  async getBelowItem(key: Deno.KvKey) {
-    const res = await this.kv.get<LiftedType>([(key[0] as number) - 1, key[1]]);
-
-    if (res.value === null) {
-      throw new Error(
-        "Requested below item and did not get a result, malformed skiplist?",
-      );
-    }
-
-    return res as Deno.KvEntry<LiftedType>;
-  }
-
-  async getRightItemAbstract(
+  private async getRightItemAbstract(
     layer: number,
     key: ValueType,
   ) {
@@ -308,7 +329,7 @@ export class Skiplist<
     return undefined;
   }
 
-  async getRightItemConcrete(
+  private async getRightItemConcrete(
     key: Deno.KvKey,
   ) {
     const nextItems = this.kv.list<LiftedType>({
@@ -332,7 +353,7 @@ export class Skiplist<
     return undefined;
   }
 
-  async getLeftItem(layer: number, key: Deno.KvKeyPart) {
+  private async getLeftItem(layer: number, key: Deno.KvKeyPart) {
     const nextItems = this.kv.list<LiftedType>({
       start: [layer],
       end: [layer, key],
@@ -349,7 +370,16 @@ export class Skiplist<
     return undefined;
   }
 
-  async remove(key: string) {
+  async remove(key: ValueType, opts?: { doNotWaitForCheck?: boolean }) {
+    if (
+      opts?.doNotWaitForCheck === false || opts === undefined ||
+      opts.doNotWaitForCheck === undefined
+    ) {
+      await this.checkedUndoneWork;
+    }
+
+    await this.kv.set([-1, "remove"], key);
+
     let removed = false;
 
     for (let i = 0; i < LAYER_LEVEL_LIMIT; i++) {
@@ -381,60 +411,30 @@ export class Skiplist<
       }
     }
 
+    await this.kv.delete([-1, "remove"]);
+
     return removed;
   }
 
-  async find(key: ValueType) {
-    return this.findOnLayer(await this.currentLevel(), key);
+  async hasKey(key: ValueType) {
+    const result = await this.kv.get([0, key]);
+
+    if (result.value) {
+      return true;
+    }
+
+    return false;
   }
 
-  private async findOnLayer(
-    layer: number,
-    key: ValueType,
-    layerStart?: string,
-  ): Promise<ValueType | undefined> {
+  async *items(start: ValueType, end: ValueType): AsyncIterable<ValueType> {
     const results = this.kv.list<ValueType>({
-      start: layerStart ? [layer, layerStart] : [layer],
-      end: [LAYER_LEVEL_LIMIT + 1],
+      start: [0, start],
+      end: [0, end],
     });
 
-    let lastSmallerKey = layerStart || "";
-
-    for await (const result of results) {
-      const order = this.compare(result.key[1] as ValueType, key);
-
-      //	If the key is the same, we found it. Yay!
-      if (order === 0) {
-        return result.value;
-      }
-
-      // If the result is bigger than what we're looking for,
-      // We need to drop down a layer,
-      // starting from the previous key we were bigger than.
-      if (order > 0) {
-        const nextLayerDown = layer - 1;
-
-        if (nextLayerDown < 0) {
-          return undefined;
-        }
-
-        return this.findOnLayer(nextLayerDown, key, lastSmallerKey);
-      }
-
-      // If the key is smaller than the one we are looking for
-      // then we set the last smaller key to this.
-      if (order < 0) {
-        lastSmallerKey = result.key[1] as string;
-      }
+    for await (const entry of results) {
+      yield entry.key[1] as ValueType;
     }
-
-    const nextLayerDown = layer - 1;
-
-    if (nextLayerDown < 0) {
-      return undefined;
-    }
-
-    return this.findOnLayer(nextLayerDown, key, lastSmallerKey);
   }
 
   async summarise(start: ValueType, end: ValueType) {
@@ -611,39 +611,15 @@ export class Skiplist<
     }
   }
 
-  async leastValue() {
-    for await (
-      const entry of this.kv.list({
-        start: [0],
-        end: [1],
-      })
-    ) {
-      return entry.key[1] as ValueType;
-    }
-
-    return undefined;
-  }
-
-  lnrValues(): AsyncIterable<ValueType> {
+  async *lnrValues(): AsyncIterable<ValueType> {
     const iter = this.kv.list<LiftedType>({
       start: [0],
       end: [1],
     });
 
-    return {
-      [Symbol.asyncIterator]() {
-        return {
-          async next() {
-            const next = await iter.next();
-
-            return Promise.resolve({
-              done: next.done,
-              value: next.value?.key[1] as ValueType,
-            });
-          },
-        };
-      },
-    };
+    for await (const entry of iter) {
+      yield entry.key[1] as ValueType;
+    }
   }
 }
 
