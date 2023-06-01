@@ -36,7 +36,9 @@ const compare = (a: string, b: string) => {
 Deno.test("Skiplist storage", async () => {
   const kv = await Deno.openKv();
 
-  for await (const result of kv.list({ start: [-1], end: [100] })) {
+  for await (
+    const result of kv.list({ start: ["test", -1], end: ["test", 100] })
+  ) {
     await kv.delete(result.key);
   }
 
@@ -45,6 +47,7 @@ Deno.test("Skiplist storage", async () => {
       monoid: concatMonoid,
       compare,
       kv,
+      keyPrefix: "test",
     },
   );
 
@@ -82,7 +85,9 @@ Deno.test("Skiplist storage", async () => {
 Deno.test("Skiplist summarise (basics)", async () => {
   const kv = await Deno.openKv();
 
-  for await (const result of kv.list({ start: [-1], end: [100] })) {
+  for await (
+    const result of kv.list({ start: ["test", -1], end: ["test", 100] })
+  ) {
     await kv.delete(result.key);
   }
 
@@ -91,6 +96,7 @@ Deno.test("Skiplist summarise (basics)", async () => {
       monoid: concatMonoid,
       compare,
       kv,
+      keyPrefix: "test",
     },
   );
 
@@ -188,7 +194,9 @@ Deno.test("Skiplist summarise (fuzz 10k)", async () => {
 
     const kv = await Deno.openKv();
 
-    for await (const result of kv.list({ start: [0], end: [100] })) {
+    for await (
+      const result of kv.list({ start: ["test", -1], end: ["test", 100] })
+    ) {
       await kv.delete(result.key);
     }
 
@@ -197,6 +205,7 @@ Deno.test("Skiplist summarise (fuzz 10k)", async () => {
         monoid: concatMonoid,
         compare,
         kv,
+        keyPrefix: "test",
       },
     );
 
