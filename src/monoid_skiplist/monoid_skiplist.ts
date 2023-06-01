@@ -1,37 +1,5 @@
 import { deferred } from "https://deno.land/std@0.188.0/async/deferred.ts";
-
-type LiftingMonoid<
-  ValueType extends
-    | Uint8Array
-    | string
-    | number
-    | bigint
-    | boolean,
-  LiftedType,
-> = {
-  lift: (i: ValueType) => LiftedType;
-  combine: (
-    a: LiftedType,
-    b: LiftedType,
-  ) => LiftedType;
-  neutral: LiftedType;
-};
-
-/** A monoid which lifts the member as a string, and combines by concatenating together. */
-export const concatMonoid: LiftingMonoid<string, string> = {
-  lift: (a: string) => a,
-  combine: (a: string, b: string) => {
-    if (a === "0" && b === "0") {
-      return "0";
-    }
-
-    const fst = a === "0" ? "" : a;
-    const snd = b === "0" ? "" : b;
-
-    return fst + snd;
-  },
-  neutral: "0",
-};
+import { combineMonoid, LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
 
 const LAYER_INSERT_PROBABILITY = 0.5;
 // TODO: This should be 64 but it is 5 because otherwise we will go over the atomic operations limit.
@@ -51,6 +19,13 @@ type SkiplistOpts<
   monoid: LiftingMonoid<ValueType, LiftedType>;
 };
 
+type SkiplistValue<LiftedType> = [
+  /** The precomputed label for this. */
+  [LiftedType, number],
+  /** The payload associated with this identifier. */
+  Uint8Array,
+];
+
 // TODO: Add size + items monoid.
 // TODO: Raise the limit
 // TODO: Add remove method
@@ -68,13 +43,13 @@ export class Skiplist<
   private currentHighestLevel = 0;
   private isSetup = deferred();
   private checkedUndoneWork = deferred();
-  private monoid: LiftingMonoid<ValueType, LiftedType>;
+  private monoid: LiftingMonoid<ValueType, [LiftedType, number]>;
 
   constructor(opts: SkiplistOpts<ValueType, LiftedType>) {
     this.kv = opts.kv;
 
     this.compare = opts.compare;
-    this.monoid = opts.monoid;
+    this.monoid = combineMonoid(opts.monoid, sizeMonoid);
 
     this.checkUndoneWork();
     this.setup();
@@ -156,8 +131,9 @@ export class Skiplist<
     const level = opts?.layer !== undefined ? opts.layer : randomLevel();
     const atomicOperation = this.kv.atomic();
 
-    let justInsertedLabel: LiftedType = this.monoid.neutral;
-    let justModifiedPredecessor: [ValueType, LiftedType] | null = null;
+    let justInsertedLabel: [LiftedType, number] = this.monoid.neutral;
+    let justModifiedPredecessor: [ValueType, [LiftedType, number]] | null =
+      null;
 
     for (let currentLayer = 0; currentLayer < level; currentLayer++) {
       // Compute new values.
@@ -165,7 +141,10 @@ export class Skiplist<
         if (currentLayer === 0) {
           const label = this.monoid.lift(insertedValue);
 
-          atomicOperation.set([currentLayer, insertedValue], label);
+          atomicOperation.set([currentLayer, insertedValue], [
+            label,
+            new Uint8Array(),
+          ]);
 
           justInsertedLabel = label;
         } else {
@@ -177,7 +156,7 @@ export class Skiplist<
           let acc = justInsertedLabel;
 
           for await (
-            const entry of this.kv.list<LiftedType>(
+            const entry of this.kv.list<SkiplistValue<LiftedType>>(
               {
                 start: [currentLayer - 1, insertedValue],
                 end: whereToStop
@@ -186,10 +165,13 @@ export class Skiplist<
               },
             )
           ) {
-            acc = this.monoid.combine(acc, entry.value);
+            acc = this.monoid.combine(acc, entry.value[0]);
           }
 
-          atomicOperation.set([currentLayer, insertedValue], acc);
+          atomicOperation.set([currentLayer, insertedValue], [
+            acc,
+            new Uint8Array(),
+          ]);
           justInsertedLabel = acc;
         }
       }
@@ -205,7 +187,7 @@ export class Skiplist<
         if (currentLayer === 0) {
           justModifiedPredecessor = [
             prevItem.key[1] as ValueType,
-            prevItem.value,
+            prevItem.value[0],
           ];
 
           continue;
@@ -214,12 +196,12 @@ export class Skiplist<
         let acc = this.monoid.neutral;
 
         for await (
-          const entry of this.kv.list<LiftedType>({
+          const entry of this.kv.list<SkiplistValue<LiftedType>>({
             start: [currentLayer - 1, prevItem.key[1]],
             end: [currentLayer - 1, justModifiedPredecessor![0]],
           })
         ) {
-          acc = this.monoid.combine(acc, entry.value);
+          acc = this.monoid.combine(acc, entry.value[0]);
         }
 
         const newLabel = this.monoid.combine(
@@ -227,7 +209,7 @@ export class Skiplist<
           justModifiedPredecessor![1],
         );
 
-        atomicOperation.set(prevItem.key, newLabel);
+        atomicOperation.set(prevItem.key, [newLabel, new Uint8Array()]);
 
         justModifiedPredecessor = [prevItem.key[1] as ValueType, newLabel];
       }
@@ -253,7 +235,7 @@ export class Skiplist<
 
       // Accumulate values until next is read.
       for await (
-        const item of this.kv.list<LiftedType>(
+        const item of this.kv.list<SkiplistValue<LiftedType>>(
           {
             start: [i - 1, itemNeedingNewLabel.key[1]],
             end: whereToStop ? [i - 1, whereToStop.key[1]] : [i],
@@ -265,19 +247,11 @@ export class Skiplist<
           this.compare(item.key[1] as ValueType, insertedValue) > 0
         ) {
           acc = this.monoid.combine(acc, justInsertedLabel);
-          acc = this.monoid.combine(acc, item.value);
+          acc = this.monoid.combine(acc, item.value[0]);
 
           hasUsedJustInserted = true;
-        } else if (
-          this.compare(
-            item.key[1] as ValueType,
-            justModifiedPredecessor![0],
-          ) === 0
-        ) {
-          // do i need this
-          acc = this.monoid.combine(acc, justModifiedPredecessor![1]);
         } else {
-          acc = this.monoid.combine(acc, item.value);
+          acc = this.monoid.combine(acc, item.value[0]);
         }
       }
 
@@ -292,7 +266,10 @@ export class Skiplist<
 
       atomicOperation.set(
         itemNeedingNewLabel.key,
-        shouldAppend ? this.monoid.combine(acc, justInsertedLabel) : acc,
+        [
+          shouldAppend ? this.monoid.combine(acc, justInsertedLabel) : acc,
+          new Uint8Array(),
+        ],
       );
 
       justModifiedPredecessor = [
@@ -314,7 +291,7 @@ export class Skiplist<
     layer: number,
     key: ValueType,
   ) {
-    const nextItems = this.kv.list<LiftedType>({
+    const nextItems = this.kv.list<SkiplistValue<LiftedType>>({
       start: [layer, key],
       end: [layer + 1],
     }, {
@@ -332,7 +309,7 @@ export class Skiplist<
   private async getRightItemConcrete(
     key: Deno.KvKey,
   ) {
-    const nextItems = this.kv.list<LiftedType>({
+    const nextItems = this.kv.list<SkiplistValue<LiftedType>>({
       start: key,
       end: [(key[0] as number) + 1],
     }, {
@@ -354,7 +331,7 @@ export class Skiplist<
   }
 
   private async getLeftItem(layer: number, key: Deno.KvKeyPart) {
-    const nextItems = this.kv.list<LiftedType>({
+    const nextItems = this.kv.list<SkiplistValue<LiftedType>>({
       start: [layer],
       end: [layer, key],
     }, {
@@ -437,7 +414,10 @@ export class Skiplist<
     }
   }
 
-  async summarise(start: ValueType, end: ValueType) {
+  async summarise(
+    start: ValueType,
+    end: ValueType,
+  ): Promise<{ fingerprint: LiftedType; size: number }> {
     const accumulateLabel = async (
       { layer, lowerBound, upperBound }: {
         layer: number;
@@ -445,15 +425,15 @@ export class Skiplist<
         lowerBound?: ValueType;
         upperBound?: ValueType;
       },
-    ): Promise<LiftedType> => {
+    ): Promise<[LiftedType, number]> => {
       // Loop over layer.
-      const iter = this.kv.list<LiftedType>({
+      const iter = this.kv.list<SkiplistValue<LiftedType>>({
         start: lowerBound ? [layer, lowerBound] : [layer],
         end: upperBound ? [layer, upperBound] : [layer + 1],
       });
 
       let acc = this.monoid.neutral;
-      let accumulateCandidate: [ValueType, LiftedType] | null = null;
+      let accumulateCandidate: [ValueType, [LiftedType, number]] | null = null;
 
       const isLessThanLowerBound = (value: ValueType) => {
         if (lowerBound) {
@@ -514,7 +494,7 @@ export class Skiplist<
         } else if (isEqualLowerBound(entryValue)) {
           // That is lucky.
 
-          accumulateCandidate = [entryValue, entry.value];
+          accumulateCandidate = [entryValue, entry.value[0]];
           foundHead = true;
         } else if (
           isGtLowerBound(entryValue) && isLessThanUpperBound(entryValue)
@@ -534,7 +514,7 @@ export class Skiplist<
             }
           }
 
-          accumulateCandidate = [entryValue, entry.value];
+          accumulateCandidate = [entryValue, entry.value[0]];
         } else if (isEqualUpperbound(entryValue)) {
           // Hooray!
           // Accumulate last value.
@@ -584,11 +564,13 @@ export class Skiplist<
     const argOrder = this.compare(start, end);
 
     if (argOrder < 0) {
-      return accumulateLabel({
+      const [fingerprint, size] = await accumulateLabel({
         layer: await this.currentLevel() - 1,
         lowerBound: start,
         upperBound: end,
       });
+
+      return { fingerprint, size };
     } else if (argOrder > 0) {
       // Do some fancy shit.
       const firstHalf = await accumulateLabel({
@@ -601,13 +583,15 @@ export class Skiplist<
         lowerBound: start,
       });
 
-      return this.monoid.combine(firstHalf, secondHalf);
-    } else {
-      // Also do some fancy shit? Geez.
+      const [fingerprint, size] = this.monoid.combine(firstHalf, secondHalf);
 
-      return accumulateLabel({
+      return { fingerprint, size };
+    } else {
+      const [fingerprint, size] = await accumulateLabel({
         layer: await this.currentLevel() - 1,
       });
+
+      return { fingerprint, size };
     }
   }
 

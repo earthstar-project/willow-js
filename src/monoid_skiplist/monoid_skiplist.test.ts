@@ -2,7 +2,8 @@ import {
   FingerprintTree,
 } from "https://deno.land/x/range_reconcile@1.0.2/mod.ts";
 import { assertEquals } from "https://deno.land/std@0.158.0/testing/asserts.ts";
-import { concatMonoid, Skiplist } from "./monoid_skiplist.ts";
+import { Skiplist } from "./monoid_skiplist.ts";
+import { concatMonoid } from "./lifting_monoid.ts";
 
 // The range, the fingerprint, size, collected items.
 type RangeVector = [[string, string], string, number, string[]];
@@ -18,7 +19,7 @@ const rangeVectors: RangeVector[] = [
   [["c", "b"], "acdefg", 6, ["a", "c", "d", "e", "f", "g"]],
   [["e", "b"], "aefg", 4, ["a", "e", "f", "g"]],
   [["m", "d"], "abc", 3, ["a", "b", "c"]],
-  [["m", "z"], "0", 0, []],
+  [["m", "z"], "", 0, []],
   [["f", "z"], "fg", 2, ["f", "g"]],
 ];
 
@@ -35,7 +36,7 @@ const compare = (a: string, b: string) => {
 Deno.test("Skiplist summarise (basics)", async () => {
   const kv = await Deno.openKv();
 
-  for await (const result of kv.list({ start: [0], end: [100] })) {
+  for await (const result of kv.list({ start: [-1], end: [100] })) {
     await kv.delete(result.key);
   }
 
@@ -62,11 +63,14 @@ Deno.test("Skiplist summarise (basics)", async () => {
   //assertEquals(set, listContents);
 
   for (const vector of rangeVectors) {
-    const result = await skiplist.summarise(vector[0][0], vector[0][1]);
+    const { fingerprint, size } = await skiplist.summarise(
+      vector[0][0],
+      vector[0][1],
+    );
 
     assertEquals(
-      result,
-      vector[1],
+      [fingerprint, size],
+      [vector[1], vector[2]],
     );
   }
 
@@ -155,10 +159,16 @@ Deno.test("Skiplist summarise (fuzz 10k)", async () => {
     for (let i = 0; i < 100; i++) {
       const { start, end } = makeRandomRange(set);
 
-      const treeFingerprint = tree.getFingerprint(start, end).fingerprint;
+      const treeFingerprint = tree.getFingerprint(start, end);
       const listFingeprint = await skiplist.summarise(start, end);
 
-      assertEquals(treeFingerprint, listFingeprint);
+      assertEquals(
+        {
+          fingerprint: treeFingerprint.fingerprint,
+          size: treeFingerprint.size,
+        },
+        listFingeprint,
+      );
     }
 
     kv.close();
