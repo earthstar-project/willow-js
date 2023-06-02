@@ -7,6 +7,7 @@ export type KeyPart =
 export type Key = KeyPart[];
 
 export interface KvDriver {
+  prefixLevel: number;
   get<ValueType>(key: Key): Promise<ValueType | undefined>;
   set(key: Key, value: unknown): Promise<void>;
   delete(key: Key): Promise<void>;
@@ -19,5 +20,5 @@ export interface KvDriver {
       batchSize?: number;
     },
   ): AsyncIterable<{ key: Key; value: ValueType }>;
-  clear(opts?: { start: Key; end: Key }): Promise<void>;
+  clear(opts?: { prefix: Key; start: Key; end: Key }): Promise<void>;
 }

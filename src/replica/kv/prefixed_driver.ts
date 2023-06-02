@@ -4,9 +4,12 @@ export class PrefixedDriver implements KvDriver {
   private parentDriver: KvDriver;
   private prefix: Key;
 
+  prefixLevel: number;
+
   constructor(prefix: Key, driver: KvDriver) {
     this.parentDriver = driver;
     this.prefix = prefix;
+    this.prefixLevel = driver.prefixLevel + 1;
   }
 
   get<ValueType>(key: Key): Promise<ValueType | undefined> {
@@ -45,9 +48,12 @@ export class PrefixedDriver implements KvDriver {
     );
   }
 
-  clear(opts?: { start: Key; end: Key } | undefined): Promise<void> {
+  clear(
+    opts?: { prefix: Key; start: Key; end: Key } | undefined,
+  ): Promise<void> {
     if (opts) {
       return this.parentDriver.clear({
+        prefix: [...this.prefix, ...opts.prefix],
         start: [...this.prefix, ...opts.start],
         end: [...this.prefix, ...opts.start],
       });

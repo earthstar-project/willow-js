@@ -38,18 +38,13 @@ Deno.test("Skiplist storage", async () => {
   const kv = await Deno.openKv();
   const driver = new KvDriverDeno(kv);
 
-  for await (
-    const result of kv.list({ start: ["test", -1], end: ["test", 100] })
-  ) {
-    await kv.delete(result.key);
-  }
+  await driver.clear();
 
   const skiplist = new Skiplist(
     {
       monoid: concatMonoid,
       compare,
       kv: driver,
-      keyPrefix: "test",
     },
   );
 
@@ -88,18 +83,13 @@ Deno.test("Skiplist summarise (basics)", async () => {
   const kv = await Deno.openKv();
   const driver = new KvDriverDeno(kv);
 
-  for await (
-    const result of kv.list({ start: ["test", -1], end: ["test", 100] })
-  ) {
-    await kv.delete(result.key);
-  }
+  await driver.clear();
 
   const skiplist = new Skiplist(
     {
       monoid: concatMonoid,
       compare,
       kv: driver,
-      keyPrefix: "test",
     },
   );
 
@@ -198,18 +188,13 @@ Deno.test("Skiplist summarise (fuzz 10k)", async () => {
     const kv = await Deno.openKv();
     const driver = new KvDriverDeno(kv);
 
-    for await (
-      const result of kv.list({ start: ["test", -1], end: ["test", 100] })
-    ) {
-      await kv.delete(result.key);
-    }
+    await driver.clear();
 
     const skiplist = new Skiplist(
       {
         monoid: concatMonoid,
         compare,
         kv: driver,
-        keyPrefix: "test",
       },
     );
 

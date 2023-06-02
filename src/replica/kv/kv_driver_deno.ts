@@ -1,6 +1,8 @@
 import { Key, KvDriver } from "./types.ts";
 
 export class KvDriverDeno implements KvDriver {
+  prefixLevel = 0;
+
   private kv: Deno.Kv;
 
   constructor(kv: Deno.Kv) {
@@ -51,11 +53,17 @@ export class KvDriverDeno implements KvDriver {
   async clear<ValueType>(
     opts?: { prefix: Key; start: Key; end: Key } | undefined,
   ): Promise<void> {
-    const iter = this.kv.list<ValueType>({
-      prefix: opts?.prefix || [],
-      start: opts?.start,
-      end: opts?.end,
-    });
+    if (!opts) {
+      const iter = this.kv.list<ValueType>({ prefix: [] });
+
+      for await (const entry of iter) {
+        await this.delete(entry.key as Key);
+      }
+
+      return;
+    }
+
+    const iter = this.kv.list<ValueType>(opts);
 
     for await (const entry of iter) {
       await this.delete(entry.key as Key);
