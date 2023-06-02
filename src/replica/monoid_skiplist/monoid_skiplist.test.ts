@@ -4,6 +4,7 @@ import {
 import { assertEquals } from "https://deno.land/std@0.158.0/testing/asserts.ts";
 import { Skiplist } from "./monoid_skiplist.ts";
 import { concatMonoid } from "./lifting_monoid.ts";
+import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
 
 // The range, the fingerprint, size, collected items.
 type RangeVector = [[string, string], string, number, string[]];
@@ -35,6 +36,7 @@ const compare = (a: string, b: string) => {
 
 Deno.test("Skiplist storage", async () => {
   const kv = await Deno.openKv();
+  const driver = new KvDriverDeno(kv);
 
   for await (
     const result of kv.list({ start: ["test", -1], end: ["test", 100] })
@@ -46,7 +48,7 @@ Deno.test("Skiplist storage", async () => {
     {
       monoid: concatMonoid,
       compare,
-      kv,
+      kv: driver,
       keyPrefix: "test",
     },
   );
@@ -84,6 +86,7 @@ Deno.test("Skiplist storage", async () => {
 
 Deno.test("Skiplist summarise (basics)", async () => {
   const kv = await Deno.openKv();
+  const driver = new KvDriverDeno(kv);
 
   for await (
     const result of kv.list({ start: ["test", -1], end: ["test", 100] })
@@ -95,7 +98,7 @@ Deno.test("Skiplist summarise (basics)", async () => {
     {
       monoid: concatMonoid,
       compare,
-      kv,
+      kv: driver,
       keyPrefix: "test",
     },
   );
@@ -193,6 +196,7 @@ Deno.test("Skiplist summarise (fuzz 10k)", async () => {
     const tree = new FingerprintTree(concatMonoid, compare);
 
     const kv = await Deno.openKv();
+    const driver = new KvDriverDeno(kv);
 
     for await (
       const result of kv.list({ start: ["test", -1], end: ["test", 100] })
@@ -204,7 +208,7 @@ Deno.test("Skiplist summarise (fuzz 10k)", async () => {
       {
         monoid: concatMonoid,
         compare,
-        kv,
+        kv: driver,
         keyPrefix: "test",
       },
     );

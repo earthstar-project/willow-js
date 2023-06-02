@@ -1,5 +1,6 @@
-import { deferred } from "https://deno.land/std@0.188.0/async/deferred.ts";
+import { Key, KeyPart, KvDriver } from "../kv/types.ts";
 import { combineMonoid, LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
+import { deferred } from "https://deno.land/std@0.188.0/async/deferred.ts";
 
 const LAYER_INSERT_PROBABILITY = 0.5;
 // TODO: This should be 64 but it is 5 because otherwise we will go over the atomic operations limit.
@@ -15,7 +16,7 @@ type SkiplistOpts<
   LiftedType,
 > = {
   compare: (a: ValueType, b: ValueType) => number;
-  kv: Deno.Kv;
+  kv: KvDriver;
   monoid: LiftingMonoid<ValueType, LiftedType>;
   keyPrefix: string;
 };
@@ -31,16 +32,11 @@ type SkiplistValue<LiftedType> = [
 // TODO: Raise the limit
 // TODO: Add remove method
 export class Skiplist<
-  ValueType extends
-    | Uint8Array
-    | string
-    | number
-    | bigint
-    | boolean,
+  ValueType extends KeyPart,
   LiftedType,
 > {
   private compare: (a: ValueType, b: ValueType) => number;
-  private kv: Deno.Kv;
+  private kv: KvDriver;
   private currentHighestLevel = 0;
   private isSetup = deferred();
   private checkedUndoneWork = deferred();
@@ -105,15 +101,15 @@ export class Skiplist<
       "remove",
     ]);
 
-    if (existingInsert.value) {
-      await this.remove(existingInsert.value[0], { doNotWaitForCheck: true });
-      await this.insert(existingInsert.value[0], existingInsert.value[1], {
+    if (existingInsert) {
+      await this.remove(existingInsert[0], { doNotWaitForCheck: true });
+      await this.insert(existingInsert[0], existingInsert[1], {
         doNotWaitForCheck: true,
       });
     }
 
-    if (existingRemove.value) {
-      await this.remove(existingRemove.value, { doNotWaitForCheck: true });
+    if (existingRemove) {
+      await this.remove(existingRemove, { doNotWaitForCheck: true });
     }
 
     this.checkedUndoneWork.resolve();
@@ -144,7 +140,7 @@ export class Skiplist<
     await this.kv.set([this.keyPrefix, -1, "insert"], [key, value]);
 
     const level = opts?.layer !== undefined ? opts.layer : randomLevel();
-    const atomicOperation = this.kv.atomic();
+    // const atomicOperation = this.kv.atomic();
 
     let justInsertedLabel: [LiftedType, number] = this.monoid.neutral;
     let justModifiedPredecessor: [ValueType, [LiftedType, number]] | null =
@@ -156,7 +152,7 @@ export class Skiplist<
         if (currentLayer === 0) {
           const label = this.monoid.lift(key);
 
-          atomicOperation.set([this.keyPrefix, currentLayer, key], [
+          await this.kv.set([this.keyPrefix, currentLayer, key], [
             label,
             value,
           ]);
@@ -183,7 +179,7 @@ export class Skiplist<
             acc = this.monoid.combine(acc, entry.value[0]);
           }
 
-          atomicOperation.set([this.keyPrefix, currentLayer, key], [
+          await this.kv.set([this.keyPrefix, currentLayer, key], [
             acc,
             value,
           ]);
@@ -228,7 +224,7 @@ export class Skiplist<
           justModifiedPredecessor![1],
         );
 
-        atomicOperation.set(prevItem.key, [newLabel, prevItem.value[1]]);
+        await this.kv.set(prevItem.key, [newLabel, prevItem.value[1]]);
 
         justModifiedPredecessor = [prevItem.key[2] as ValueType, newLabel];
       }
@@ -285,7 +281,7 @@ export class Skiplist<
             this.compare(whereToStop.key[2] as ValueType, key) > 0 ||
           whereToStop !== undefined);
 
-      atomicOperation.set(
+      await this.kv.set(
         itemNeedingNewLabel.key,
         [
           shouldAppend ? this.monoid.combine(acc, justInsertedLabel) : acc,
@@ -299,7 +295,7 @@ export class Skiplist<
       ];
     }
 
-    await atomicOperation.commit();
+    // await atomicOperation.commit();
 
     await this.kv.delete([this.keyPrefix, -1, "insert"]);
 
@@ -328,7 +324,7 @@ export class Skiplist<
   }
 
   private async getRightItemConcrete(
-    key: Deno.KvKey,
+    key: Key,
   ) {
     const nextItems = this.kv.list<SkiplistValue<LiftedType>>({
       start: key,
@@ -383,7 +379,7 @@ export class Skiplist<
     for (let i = 0; i < LAYER_LEVEL_LIMIT; i++) {
       const result = await this.kv.get([this.keyPrefix, i, key]);
 
-      if (result.value === null) {
+      if (result === undefined) {
         break;
       }
 
@@ -421,8 +417,8 @@ export class Skiplist<
       key,
     ]);
 
-    if (result.value) {
-      return result.value[1];
+    if (result) {
+      return result[1];
     }
 
     return undefined;
