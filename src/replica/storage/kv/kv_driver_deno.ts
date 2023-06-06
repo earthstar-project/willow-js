@@ -1,4 +1,4 @@
-import { Key, KvDriver } from "./types.ts";
+import { Key, KvBatch, KvDriver } from "./types.ts";
 
 export class KvDriverDeno implements KvDriver {
   prefixLevel = 0;
@@ -68,5 +68,41 @@ export class KvDriverDeno implements KvDriver {
     for await (const entry of iter) {
       await this.delete(entry.key as Key);
     }
+  }
+
+  batch(): KvBatch {
+    const OPS_LIMIT = 10;
+
+    let currentAtomicOperation = this.kv.atomic();
+    let currentOps = 0;
+
+    const fullBatches: Deno.AtomicOperation[] = [];
+
+    const incrementAtomic = () => {
+      currentOps += 1;
+
+      if (currentOps === OPS_LIMIT) {
+        fullBatches.push(currentAtomicOperation);
+        currentAtomicOperation = this.kv.atomic();
+        currentOps = 0;
+      }
+    };
+
+    return {
+      set(key, value) {
+        currentAtomicOperation.set(key, value);
+        incrementAtomic();
+      },
+      delete(key) {
+        currentAtomicOperation.delete(key);
+        incrementAtomic();
+      },
+      async commit() {
+        await Promise.all([
+          fullBatches.map((batch) => batch.commit()),
+          currentAtomicOperation.commit(),
+        ]);
+      },
+    };
   }
 }

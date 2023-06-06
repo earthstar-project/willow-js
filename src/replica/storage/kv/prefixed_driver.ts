@@ -1,4 +1,4 @@
-import { Key, KvDriver } from "./types.ts";
+import { Key, KvBatch, KvDriver } from "./types.ts";
 
 export class PrefixedDriver implements KvDriver {
   private parentDriver: KvDriver;
@@ -60,5 +60,20 @@ export class PrefixedDriver implements KvDriver {
     }
 
     return this.parentDriver.clear();
+  }
+
+  batch(): KvBatch {
+    const prefix = this.prefix;
+    const batch = this.parentDriver.batch();
+
+    return {
+      set(key, value) {
+        return batch.set([...prefix, ...key], value);
+      },
+      delete(key) {
+        return batch.delete([...prefix, ...key]);
+      },
+      commit: batch.commit,
+    };
   }
 }

@@ -6,6 +6,12 @@ export type KeyPart =
   | boolean;
 export type Key = KeyPart[];
 
+export type KvBatch = {
+  set: (key: Key, value: unknown) => void;
+  delete: (key: Key) => void;
+  commit: () => Promise<void>;
+};
+
 export interface KvDriver {
   prefixLevel: number;
   get<ValueType>(key: Key): Promise<ValueType | undefined>;
@@ -21,4 +27,5 @@ export interface KvDriver {
     },
   ): AsyncIterable<{ key: Key; value: ValueType }>;
   clear(opts?: { prefix: Key; start: Key; end: Key }): Promise<void>;
+  batch(): KvBatch;
 }

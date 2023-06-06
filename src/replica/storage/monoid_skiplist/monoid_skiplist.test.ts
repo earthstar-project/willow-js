@@ -1,9 +1,7 @@
-import {
-  FingerprintTree,
-} from "https://deno.land/x/range_reconcile@1.0.2/mod.ts";
+import { MonoidRbTree } from "../monoid_rbtree/monoid_rbtree.ts";
 import { assertEquals } from "https://deno.land/std@0.158.0/testing/asserts.ts";
 import { Skiplist } from "./monoid_skiplist.ts";
-import { concatMonoid } from "./lifting_monoid.ts";
+import { concatMonoid } from "../lifting_monoid.ts";
 import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
 
 // The range, the fingerprint, size, collected items.
@@ -71,7 +69,7 @@ Deno.test("Skiplist storage", async () => {
   assertEquals(Array.from(map.values()), listContents);
 
   for (const [key, value] of map) {
-    const storedValue = await skiplist.find(key);
+    const storedValue = await skiplist.get(key);
 
     assertEquals(storedValue, value);
   }
@@ -165,12 +163,20 @@ function makeRandomSet() {
     }
   }
 
+  if (newSet.length === 0) {
+    newSet.push(
+      letters[
+        Math.floor(Math.random() * letters.length)
+      ],
+    );
+  }
+
   return newSet;
 }
 
 function makeRandomRange(set: string[]) {
-  const startIndex = Math.floor(Math.random() * (set.length - 0) + set.length);
-  const endIndex = Math.floor(Math.random() * (set.length - 0) + set.length);
+  const startIndex = Math.floor(Math.random() * set.length);
+  const endIndex = Math.floor(Math.random() * set.length);
 
   return { start: set[startIndex], end: set[endIndex] };
 }
@@ -183,7 +189,7 @@ Deno.test("Skiplist summarise (fuzz 10k)", async () => {
   }
 
   for (const set of sets) {
-    const tree = new FingerprintTree(concatMonoid, compare);
+    const tree = new MonoidRbTree({ monoid: concatMonoid, compare });
 
     const kv = await Deno.openKv();
     const driver = new KvDriverDeno(kv);
@@ -199,14 +205,34 @@ Deno.test("Skiplist summarise (fuzz 10k)", async () => {
     );
 
     for (const item of set) {
-      tree.insert(item);
+      await tree.insert(item, new Uint8Array());
       await skiplist.insert(item, new Uint8Array());
     }
+
+    // Randomly delete an element.
+
+    const toDelete = set[Math.floor(Math.random() * set.length)];
+
+    const treeItems = [];
+    const listItems = [];
+
+    for await (const treeValue of tree.allEntries()) {
+      treeItems.push(treeValue.key);
+    }
+
+    for await (const listValue of skiplist.allEntries()) {
+      listItems.push(listValue.key);
+    }
+
+    tree.remove(toDelete);
+    await skiplist.remove(toDelete);
+
+    assertEquals(treeItems, listItems);
 
     for (let i = 0; i < 100; i++) {
       const { start, end } = makeRandomRange(set);
 
-      const treeFingerprint = tree.getFingerprint(start, end);
+      const treeFingerprint = await tree.summarise(start, end);
       const listFingeprint = await skiplist.summarise(start, end);
 
       const listItems = [];
@@ -215,17 +241,20 @@ Deno.test("Skiplist summarise (fuzz 10k)", async () => {
         listItems.push(entry.key);
       }
 
+      const treeItems = [];
+
+      for await (const entry of tree.entries(start, end)) {
+        treeItems.push(entry.key);
+      }
+
       assertEquals(
         listItems,
-        treeFingerprint.items,
+        treeItems,
       );
 
       assertEquals(
-        {
-          fingerprint: treeFingerprint.fingerprint,
-          size: treeFingerprint.size,
-        },
         listFingeprint,
+        treeFingerprint,
       );
     }
 

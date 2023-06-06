@@ -1,10 +1,10 @@
 import { Key, KeyPart, KvDriver } from "../kv/types.ts";
-import { combineMonoid, LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
+import { SummarisableStorage } from "../types.ts";
+import { combineMonoid, LiftingMonoid, sizeMonoid } from "../lifting_monoid.ts";
 import { deferred } from "https://deno.land/std@0.188.0/async/deferred.ts";
 
 const LAYER_INSERT_PROBABILITY = 0.5;
-// TODO: This should be 64 but it is 5 because otherwise we will go over the atomic operations limit.
-const LAYER_LEVEL_LIMIT = 5;
+const LAYER_LEVEL_LIMIT = 64;
 
 type SkiplistOpts<
   ValueType extends
@@ -33,7 +33,7 @@ type SkiplistValue<LiftedType> = [
 export class Skiplist<
   ValueType extends KeyPart,
   LiftedType,
-> {
+> implements SummarisableStorage<ValueType, LiftedType> {
   private compare: (a: ValueType, b: ValueType) => number;
   private kv: KvDriver;
   private currentHighestLevel = 0;
@@ -140,7 +140,8 @@ export class Skiplist<
     await this.kv.set([-1, "insert"], [key, value]);
 
     const level = opts?.layer !== undefined ? opts.layer : randomLevel();
-    // const atomicOperation = this.kv.atomic();
+
+    const batch = this.kv.batch();
 
     let justInsertedLabel: [LiftedType, number] = this.monoid.neutral;
     let justModifiedPredecessor: [ValueType, [LiftedType, number]] | null =
@@ -152,7 +153,7 @@ export class Skiplist<
         if (currentLayer === 0) {
           const label = this.monoid.lift(key);
 
-          await this.kv.set([currentLayer, key], [
+          batch.set([currentLayer, key], [
             label,
             value,
           ]);
@@ -179,7 +180,7 @@ export class Skiplist<
             acc = this.monoid.combine(acc, entry.value[0]);
           }
 
-          await this.kv.set([currentLayer, key], [
+          batch.set([currentLayer, key], [
             acc,
             value,
           ]);
@@ -223,7 +224,7 @@ export class Skiplist<
           justModifiedPredecessor![1],
         );
 
-        await this.kv.set(prevItem.key, [newLabel, prevItem.value[1]]);
+        batch.set(prevItem.key, [newLabel, prevItem.value[1]]);
 
         justModifiedPredecessor = [
           prevItem.key[this.valueKeyIndex] as ValueType,
@@ -286,7 +287,7 @@ export class Skiplist<
               ) > 0 ||
           whereToStop !== undefined);
 
-      await this.kv.set(
+      batch.set(
         itemNeedingNewLabel.key,
         [
           shouldAppend ? this.monoid.combine(acc, justInsertedLabel) : acc,
@@ -300,13 +301,39 @@ export class Skiplist<
       ];
     }
 
-    // await atomicOperation.commit();
+    await batch.commit();
 
     await this.kv.delete([-1, "insert"]);
 
     if (level > await this.currentLevel()) {
       this.setCurrentLevel(level);
     }
+  }
+
+  private async getRightItem(
+    layer: number,
+    key: ValueType,
+    abstract = false,
+  ) {
+    const nextItems = this.kv.list<SkiplistValue<LiftedType>>({
+      start: [layer, key],
+      end: [layer + 1],
+    }, {
+      limit: abstract ? 1 : 2,
+      batchSize: abstract ? 1 : 2,
+    });
+
+    let shouldReturn = abstract;
+
+    for await (const next of nextItems) {
+      if (shouldReturn) {
+        return next;
+      } else {
+        shouldReturn = true;
+      }
+    }
+
+    return undefined;
   }
 
   private async getRightItemAbstract(
@@ -379,18 +406,62 @@ export class Skiplist<
 
     await this.kv.set([-1, "remove"], key);
 
+    const batch = this.kv.batch();
+
     let removed = false;
 
-    for (let i = 0; i < LAYER_LEVEL_LIMIT; i++) {
-      const result = await this.kv.get([i, key]);
+    let justModified: [ValueType, [LiftedType, number]] | null = null;
 
-      if (result === undefined) {
-        break;
+    for (let i = 0; i < LAYER_LEVEL_LIMIT; i++) {
+      const result = await this.kv.get<SkiplistValue<LiftedType>>([i, key]);
+
+      if (result) {
+        removed = true;
+
+        batch.delete([i, key]);
       }
 
-      removed = true;
+      const precedingValue = await this.getLeftItem(i, key);
 
-      await this.kv.delete([i, key]);
+      if (precedingValue && i !== 0) {
+        const nextValue = await this.getRightItem(
+          i,
+          key,
+          result ? false : true,
+        );
+
+        const iter = this.kv.list<SkiplistValue<LiftedType>>({
+          start: [i - 1, precedingValue.key[this.valueKeyIndex]],
+          end: nextValue ? [i - 1, nextValue.key[this.valueKeyIndex]] : [i],
+        });
+
+        let acc = this.monoid.neutral;
+
+        for await (const entry of iter) {
+          const entryValue = entry.key[this.valueKeyIndex] as ValueType;
+
+          if (
+            justModified && this.compare(
+                entryValue,
+                justModified[0],
+              ) === 0
+          ) {
+            acc = this.monoid.combine(acc, justModified[1]);
+          } else if (this.compare(entryValue, key) === 0) {
+            continue;
+          } else {
+            acc = this.monoid.combine(acc, entry.value[0]);
+          }
+        }
+
+        justModified = [
+          precedingValue.key[this.valueKeyIndex] as ValueType,
+          acc,
+        ];
+        batch.set(precedingValue.key, [acc, precedingValue.value[1]]);
+
+        console.groupEnd();
+      }
 
       const remainingOnThisLayer = this.kv.list<ValueType>({
         start: [i],
@@ -410,12 +481,14 @@ export class Skiplist<
       }
     }
 
+    await batch.commit();
+
     await this.kv.delete([-1, "remove"]);
 
     return removed;
   }
 
-  async find(key: ValueType) {
+  async get(key: ValueType) {
     const result = await this.kv.get<SkiplistValue<LiftedType>>([
       0,
       key,
