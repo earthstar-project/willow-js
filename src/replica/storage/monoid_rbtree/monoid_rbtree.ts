@@ -156,7 +156,8 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
     const nodeToUse = node || this.root;
 
     if (!nodeToUse) {
-      throw new Error("Can't print a tree with no items");
+      console.log("Empty");
+      return;
     }
 
     console.group(

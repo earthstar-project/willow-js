@@ -1,5 +1,5 @@
 import { signEntry, verifyEntry } from "./sign_verify.ts";
-import { Entry, SignedEntry } from "./types.ts";
+import { Entry, SignedEntry } from "../types.ts";
 import {
   assert,
   assertEquals,

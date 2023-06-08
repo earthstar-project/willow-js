@@ -19,6 +19,18 @@ export interface SummarisableStorage<ValueType, LiftedType> {
   allEntries(): AsyncIterable<{ key: ValueType; value: Uint8Array }>;
 }
 
+export interface WriteAheadFlag<ValueType, KeyType> {
+  wasInserting: () => Promise<[KeyType, ValueType] | undefined>;
+  wasRemoving: () => Promise<KeyType | undefined>;
+  flagInsertion: (key: KeyType, value: ValueType) => Promise<void>;
+  unflagInsertion: () => Promise<void>;
+  flagRemoval: (key: KeyType) => Promise<void>;
+  unflagRemoval: () => Promise<void>;
+}
+
 export interface ReplicaDriver {
-  createSummarisableStorage: () => SummarisableStorage<Uint8Array, Uint8Array>;
+  createSummarisableStorage: (
+    id: string,
+  ) => SummarisableStorage<Uint8Array, Uint8Array>;
+  writeAheadFlag: WriteAheadFlag<Uint8Array, Uint8Array>;
 }

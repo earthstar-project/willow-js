@@ -38,7 +38,6 @@ export class Skiplist<
   private kv: KvDriver;
   private currentHighestLevel = 0;
   private isSetup = deferred();
-  private checkedUndoneWork = deferred();
   private monoid: LiftingMonoid<ValueType, [LiftedType, number]>;
 
   private layerKeyIndex: number;
@@ -53,7 +52,6 @@ export class Skiplist<
     this.compare = opts.compare;
     this.monoid = combineMonoid(opts.monoid, sizeMonoid);
 
-    this.checkUndoneWork();
     this.setup();
   }
 
@@ -90,31 +88,6 @@ export class Skiplist<
     this.isSetup.resolve();
   }
 
-  private async checkUndoneWork() {
-    // Check for presence of insertion or delete operations that were left unfinished.
-    const existingInsert = await this.kv.get<[ValueType, Uint8Array]>([
-      -1,
-      "insert",
-    ]);
-    const existingRemove = await this.kv.get<ValueType>([
-      -1,
-      "remove",
-    ]);
-
-    if (existingInsert) {
-      await this.remove(existingInsert[0], { doNotWaitForCheck: true });
-      await this.insert(existingInsert[0], existingInsert[1], {
-        doNotWaitForCheck: true,
-      });
-    }
-
-    if (existingRemove) {
-      await this.remove(existingRemove, { doNotWaitForCheck: true });
-    }
-
-    this.checkedUndoneWork.resolve();
-  }
-
   async currentLevel() {
     await this.isSetup;
 
@@ -128,17 +101,8 @@ export class Skiplist<
   async insert(
     key: ValueType,
     value: Uint8Array,
-    opts?: { layer?: number; doNotWaitForCheck?: boolean },
+    opts?: { layer?: number },
   ) {
-    if (
-      opts?.doNotWaitForCheck === false || opts === undefined ||
-      opts.doNotWaitForCheck === undefined
-    ) {
-      await this.checkedUndoneWork;
-    }
-
-    await this.kv.set([-1, "insert"], [key, value]);
-
     const level = opts?.layer !== undefined ? opts.layer : randomLevel();
 
     const batch = this.kv.batch();
@@ -303,8 +267,6 @@ export class Skiplist<
 
     await batch.commit();
 
-    await this.kv.delete([-1, "insert"]);
-
     if (level > await this.currentLevel()) {
       this.setCurrentLevel(level);
     }
@@ -396,16 +358,7 @@ export class Skiplist<
     return undefined;
   }
 
-  async remove(key: ValueType, opts?: { doNotWaitForCheck?: boolean }) {
-    if (
-      opts?.doNotWaitForCheck === false || opts === undefined ||
-      opts.doNotWaitForCheck === undefined
-    ) {
-      await this.checkedUndoneWork;
-    }
-
-    await this.kv.set([-1, "remove"], key);
-
+  async remove(key: ValueType) {
     const batch = this.kv.batch();
 
     let removed = false;
@@ -480,8 +433,6 @@ export class Skiplist<
     }
 
     await batch.commit();
-
-    await this.kv.delete([-1, "remove"]);
 
     return removed;
   }
