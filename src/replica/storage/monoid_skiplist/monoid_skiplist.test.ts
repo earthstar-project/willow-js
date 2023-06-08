@@ -181,6 +181,24 @@ function makeRandomRange(set: string[]) {
   return { start: set[startIndex], end: set[endIndex] };
 }
 
+function makeRandomItemsQuery(set: string[]) {
+  const startIndex = Math.random() > 0.1
+    ? Math.floor(Math.random() * set.length)
+    : undefined;
+  const endIndex = Math.random() > 0.1
+    ? Math.floor(Math.random() * set.length)
+    : undefined;
+
+  return {
+    start: startIndex ? set[startIndex] : undefined,
+    end: endIndex ? set[endIndex] : undefined,
+    reverse: Math.random() > 0.5 ? true : false,
+    limit: Math.random() > 0.5
+      ? Math.floor(Math.random() * (set.length - 1 + 1) + 1)
+      : undefined,
+  };
+}
+
 Deno.test("Skiplist summarise (fuzz 10k)", async () => {
   const sets: string[][] = [];
 
@@ -235,6 +253,11 @@ Deno.test("Skiplist summarise (fuzz 10k)", async () => {
       const treeFingerprint = await tree.summarise(start, end);
       const listFingeprint = await skiplist.summarise(start, end);
 
+      assertEquals(
+        listFingeprint,
+        treeFingerprint,
+      );
+
       const listItems = [];
 
       for await (const entry of skiplist.entries(start, end)) {
@@ -252,9 +275,33 @@ Deno.test("Skiplist summarise (fuzz 10k)", async () => {
         treeItems,
       );
 
+      const randomQuery = makeRandomItemsQuery(set);
+
+      const queryListItems = [];
+
+      for await (
+        const entry of skiplist.entries(randomQuery.start, randomQuery.end, {
+          limit: randomQuery.limit,
+          reverse: randomQuery.reverse,
+        })
+      ) {
+        queryListItems.push(entry.key);
+      }
+
+      const queryTreeItems = [];
+
+      for await (
+        const entry of tree.entries(randomQuery.start, randomQuery.end, {
+          limit: randomQuery.limit,
+          reverse: randomQuery.reverse,
+        })
+      ) {
+        queryTreeItems.push(entry.key);
+      }
+
       assertEquals(
-        listFingeprint,
-        treeFingerprint,
+        queryListItems,
+        queryTreeItems,
       );
     }
 

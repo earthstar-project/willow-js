@@ -9,8 +9,16 @@ export interface SummarisableStorage<ValueType, LiftedType> {
   ): Promise<{ fingerprint: LiftedType; size: number }>;
 
   entries(
-    start: ValueType,
-    end: ValueType,
+    start: ValueType | undefined,
+    end: ValueType | undefined,
+    opts?: {
+      reverse?: boolean;
+      limit?: number;
+    },
   ): AsyncIterable<{ key: ValueType; value: Uint8Array }>;
   allEntries(): AsyncIterable<{ key: ValueType; value: Uint8Array }>;
+}
+
+export interface ReplicaDriver {
+  createSummarisableStorage: () => SummarisableStorage<Uint8Array, Uint8Array>;
 }

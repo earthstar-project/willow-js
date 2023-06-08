@@ -151,7 +151,7 @@ export class Skiplist<
       // Compute new values.
       {
         if (currentLayer === 0) {
-          const label = this.monoid.lift(key);
+          const label = await this.monoid.lift(key);
 
           batch.set([currentLayer, key], [
             label,
@@ -459,8 +459,6 @@ export class Skiplist<
           acc,
         ];
         batch.set(precedingValue.key, [acc, precedingValue.value[1]]);
-
-        console.groupEnd();
       }
 
       const remainingOnThisLayer = this.kv.list<ValueType>({
@@ -682,19 +680,49 @@ export class Skiplist<
   }
 
   async *entries(
-    start: ValueType,
-    end: ValueType,
+    start: ValueType | undefined,
+    end: ValueType | undefined,
+    opts?: {
+      limit?: number;
+      reverse?: boolean;
+    },
   ): AsyncIterable<{ key: ValueType; value: Uint8Array }> {
-    const argOrder = this.compare(start, end);
+    let yielded = 0;
+    const hitLimit = () => {
+      if (opts?.limit) {
+        yielded++;
+
+        if (yielded >= opts.limit) {
+          return true;
+        }
+      }
+
+      return false;
+    };
+
+    if (!start && !end) {
+      for await (const result of this.allEntries(opts?.reverse)) {
+        yield result;
+        if (hitLimit()) break;
+      }
+
+      return;
+    }
+
+    const argOrder = start && end ? this.compare(start, end) : -1;
 
     if (argOrder === 0) {
-      for await (const result of this.allEntries()) {
+      for await (const result of this.allEntries(opts?.reverse)) {
         yield result;
+        if (hitLimit()) break;
       }
     } else if (argOrder < 0) {
       const results = this.kv.list<SkiplistValue<LiftedType>>({
-        start: [0, start],
-        end: [0, end],
+        start: start ? [0, start] : [0],
+        end: end ? [0, end] : [1],
+      }, {
+        limit: opts?.limit,
+        reverse: opts?.reverse,
       });
 
       for await (const entry of results) {
@@ -703,10 +731,38 @@ export class Skiplist<
           value: entry.value[1],
         };
       }
+    } else if (opts?.reverse) {
+      const secondHalf = this.kv.list<SkiplistValue<LiftedType>>({
+        start: start ? [0, start] : [0],
+        end: [1],
+      }, { reverse: true });
+
+      for await (const entry of secondHalf) {
+        yield {
+          key: entry.key[this.valueKeyIndex] as ValueType,
+          value: entry.value[1],
+        };
+
+        if (hitLimit()) break;
+      }
+
+      const firstHalf = this.kv.list<SkiplistValue<LiftedType>>({
+        start: [0],
+        end: end ? [0, end] : [1],
+      }, { reverse: true });
+
+      for await (const entry of firstHalf) {
+        yield {
+          key: entry.key[this.valueKeyIndex] as ValueType,
+          value: entry.value[1],
+        };
+
+        if (hitLimit()) break;
+      }
     } else {
       const firstHalf = this.kv.list<SkiplistValue<LiftedType>>({
         start: [0],
-        end: [0, end],
+        end: end ? [0, end] : [1],
       });
 
       for await (const entry of firstHalf) {
@@ -714,10 +770,12 @@ export class Skiplist<
           key: entry.key[this.valueKeyIndex] as ValueType,
           value: entry.value[1],
         };
+
+        if (hitLimit()) break;
       }
 
       const secondHalf = this.kv.list<SkiplistValue<LiftedType>>({
-        start: [0, start],
+        start: start ? [0, start] : [0],
         end: [1],
       });
 
@@ -726,14 +784,20 @@ export class Skiplist<
           key: entry.key[this.valueKeyIndex] as ValueType,
           value: entry.value[1],
         };
+
+        if (hitLimit()) break;
       }
     }
   }
 
-  async *allEntries(): AsyncIterable<{ key: ValueType; value: Uint8Array }> {
+  async *allEntries(
+    reverse?: boolean,
+  ): AsyncIterable<{ key: ValueType; value: Uint8Array }> {
     const iter = this.kv.list<SkiplistValue<LiftedType>>({
       start: [0],
       end: [1],
+    }, {
+      reverse,
     });
 
     for await (const entry of iter) {
