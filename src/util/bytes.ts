@@ -1,3 +1,5 @@
+import { bytesConcat } from "../../deps.ts";
+import { WillowFormat } from "../replica/types.ts";
 import { Entry } from "../types.ts";
 
 export function compareBytes(a: Uint8Array, b: Uint8Array): number {
@@ -234,5 +236,31 @@ export function detailsFromBytes(
     author,
     path,
     timestamp,
+  };
+}
+
+export function concatSummarisableStorageValue(
+  hash: ArrayBuffer,
+  namespaceSig: ArrayBuffer,
+  authorSig: ArrayBuffer,
+): Uint8Array {
+  return bytesConcat(
+    new Uint8Array(hash),
+    new Uint8Array(namespaceSig),
+    new Uint8Array(authorSig),
+  );
+}
+
+export function sliceSummarisableStorageValue<KeypairType>(
+  bytes: Uint8Array,
+  format: WillowFormat<KeypairType>,
+) {
+  return {
+    hash: bytes.slice(0, format.hashLength),
+    namespaceSignature: bytes.slice(
+      format.hashLength,
+      format.hashLength + format.pubkeyLength,
+    ),
+    authorSignature: bytes.slice(format.hashLength + format.pubkeyLength),
   };
 }

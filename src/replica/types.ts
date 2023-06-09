@@ -1,0 +1,86 @@
+import { SignFn, VerifyFn } from "../sign_verify/types.ts";
+import { SignedEntry } from "../types.ts";
+import { ReplicaDriver } from "./storage/types.ts";
+
+export interface WillowFormat<KeypairType> {
+  sign: SignFn<KeypairType>;
+  verify: VerifyFn;
+  pubkeyLength: number;
+  hashLength: number;
+  pubkeyBytesFromPair: (pair: KeypairType) => Promise<Uint8Array>;
+}
+
+export type ReplicaOpts<KeypairType> = {
+  namespace: Uint8Array;
+  driver?: ReplicaDriver;
+  format: WillowFormat<KeypairType>;
+};
+
+export type QueryOrder =
+  /** By path, then timestamp, then author */
+  | "path"
+  /** By timestamp, then author, then path */
+  | "timestamp"
+  /** By author, then path, then timestamp */
+  | "author";
+
+export interface QueryBase {
+  order: QueryOrder;
+  limit?: number;
+  reverse?: boolean;
+}
+
+export interface PathQuery extends QueryBase {
+  order: "path";
+  lowerBound?: Uint8Array;
+  upperBound?: Uint8Array;
+}
+
+export interface AuthorQuery extends QueryBase {
+  order: "author";
+  lowerBound?: Uint8Array;
+  upperBound?: Uint8Array;
+}
+
+export interface TimestampQuery extends QueryBase {
+  order: "timestamp";
+  lowerBound?: bigint;
+  upperBound?: bigint;
+}
+
+export type Query = PathQuery | AuthorQuery | TimestampQuery;
+
+export type IngestEventFailure = {
+  kind: "failure";
+  reason: "write_failure" | "invalid_entry";
+  message: string;
+  err: Error | null;
+};
+
+export type IngestEventNoOp = {
+  kind: "no_op";
+  reason: "obsolete_from_same_author";
+};
+
+export type IngestEventSuccess = {
+  kind: "success";
+  entry: SignedEntry;
+  /** An ID representing the source of this ingested entry. */
+  sourceId: string;
+};
+
+export type IngestEvent =
+  | IngestEventFailure
+  | IngestEventNoOp
+  | IngestEventSuccess;
+
+export type Payload = {
+  bytes: () => Promise<Uint8Array>;
+  stream: ReadableStream<Uint8Array>;
+};
+
+export type EntryInput = {
+  path: Uint8Array;
+  payload: Uint8Array | ReadableStream<Uint8Array>;
+  timestamp?: bigint;
+};

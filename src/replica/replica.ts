@@ -1,107 +1,35 @@
 import { ReplicaDriverMemory } from "./storage/memory_driver.ts";
 import { ReplicaDriver, SummarisableStorage } from "./storage/types.ts";
 import { Entry, SignedEntry } from "../types.ts";
-import { ui8Equals } from "../../deps.ts";
-import { SignFn, VerifyFn } from "../sign_verify/types.ts";
+import { bytesEquals, deferred } from "../../deps.ts";
 import { signEntry, verifyEntry } from "../sign_verify/sign_verify.ts";
 import {
   bigintToBytes,
   compareBytes,
+  concatSummarisableStorageValue,
   detailsFromBytes,
   entryAuthorPathBytes,
   entryKeyBytes,
   incrementLastByte,
+  sliceSummarisableStorageValue,
 } from "../util/bytes.ts";
-import { deferred } from "https://deno.land/std@0.188.0/async/deferred.ts";
-
-interface WillowFormat<KeypairType> {
-  sign: SignFn<KeypairType>;
-  verify: VerifyFn;
-  pubkeyLength: number;
-  hashLength: number;
-  pubkeyBytesFromPair: (pair: KeypairType) => Promise<Uint8Array>;
-}
-
-type ReplicaOpts<KeypairType> = {
-  namespace: Uint8Array;
-  driver?: ReplicaDriver;
-  format: WillowFormat<KeypairType>;
-};
-
-type QueryOrder =
-  /** By path, then timestamp, then author */
-  | "path"
-  /** By timestamp, then author, then path */
-  | "timestamp"
-  /** By author, then path, then timestamp */
-  | "author";
-
-interface QueryBase {
-  order: QueryOrder;
-  limit?: number;
-  reverse?: boolean;
-}
-
-interface PathQuery extends QueryBase {
-  order: "path";
-  lowerBound?: Uint8Array;
-  upperBound?: Uint8Array;
-}
-
-interface AuthorQuery extends QueryBase {
-  order: "author";
-  lowerBound?: Uint8Array;
-  upperBound?: Uint8Array;
-}
-
-interface TimestampQuery extends QueryBase {
-  order: "timestamp";
-  lowerBound?: bigint;
-  upperBound?: bigint;
-}
-
-type Query = PathQuery | AuthorQuery | TimestampQuery;
-
-type IngestEventFailure = {
-  kind: "failure";
-  reason: "write_failure" | "invalid_entry";
-  message: string;
-  err: Error | null;
-};
-
-type IngestEventNoOp = {
-  kind: "no_op";
-  reason: "obsolete_from_same_author";
-};
-
-type IngestEventSuccess = {
-  kind: "success";
-  entry: SignedEntry;
-  /** An ID representing the source of this ingested entry. */
-  sourceId: string;
-};
-
-type IngestEvent = IngestEventFailure | IngestEventNoOp | IngestEventSuccess;
-
-type Payload = {
-  bytes: () => Promise<Uint8Array>;
-  stream: ReadableStream<Uint8Array>;
-};
-
-type EntryInput = {
-  path: Uint8Array;
-  payload: Uint8Array | ReadableStream<Uint8Array>;
-  timestamp?: bigint;
-};
+import {
+  EntryInput,
+  IngestEvent,
+  Payload,
+  Query,
+  ReplicaOpts,
+  WillowFormat,
+} from "./types.ts";
 
 export class Replica<KeypairType> {
   private namespace: Uint8Array;
 
   private format: WillowFormat<KeypairType>;
 
-  private ptaList: SummarisableStorage<Uint8Array, Uint8Array>;
-  private aptList: SummarisableStorage<Uint8Array, Uint8Array>;
-  private tapList: SummarisableStorage<Uint8Array, Uint8Array>;
+  private ptaStorage: SummarisableStorage<Uint8Array, Uint8Array>;
+  private aptStorage: SummarisableStorage<Uint8Array, Uint8Array>;
+  private tapStorage: SummarisableStorage<Uint8Array, Uint8Array>;
 
   private driver: ReplicaDriver;
 
@@ -115,9 +43,9 @@ export class Replica<KeypairType> {
 
     this.driver = driver;
 
-    this.ptaList = driver.createSummarisableStorage("pta");
-    this.aptList = driver.createSummarisableStorage("apt");
-    this.tapList = driver.createSummarisableStorage("tap");
+    this.ptaStorage = driver.createSummarisableStorage("pta");
+    this.aptStorage = driver.createSummarisableStorage("apt");
+    this.tapStorage = driver.createSummarisableStorage("tap");
 
     this.checkWriteAheadFlag();
   }
@@ -142,16 +70,16 @@ export class Replica<KeypairType> {
 
       // Remove key for each storage.
       await Promise.all([
-        this.ptaList.remove(keys.pta),
-        this.tapList.remove(keys.tap),
-        this.aptList.remove(keys.apt),
+        this.ptaStorage.remove(keys.pta),
+        this.tapStorage.remove(keys.tap),
+        this.aptStorage.remove(keys.apt),
       ]);
 
       // Insert key for each storage.
       await Promise.all([
-        this.ptaList.insert(keys.pta, existingInsert[1]),
-        this.tapList.insert(keys.tap, existingInsert[1]),
-        this.aptList.insert(keys.apt, existingInsert[1]),
+        this.ptaStorage.insert(keys.pta, existingInsert[1]),
+        this.tapStorage.insert(keys.tap, existingInsert[1]),
+        this.aptStorage.insert(keys.apt, existingInsert[1]),
       ]);
 
       // Unflag insert.
@@ -175,9 +103,9 @@ export class Replica<KeypairType> {
 
       // Remove key for each storage.
       await Promise.all([
-        this.ptaList.remove(keys.pta),
-        this.tapList.remove(keys.tap),
-        this.aptList.remove(keys.apt),
+        this.ptaStorage.remove(keys.pta),
+        this.tapStorage.remove(keys.tap),
+        this.aptStorage.remove(keys.apt),
       ]);
 
       // Unflag remove
@@ -260,7 +188,7 @@ export class Replica<KeypairType> {
     await this.checkedWriteAheadFlag;
 
     if (
-      !ui8Equals(
+      !bytesEquals(
         this.namespace,
         new Uint8Array(signedEntry.entry.identifier.namespace),
       )
@@ -288,7 +216,7 @@ export class Replica<KeypairType> {
     const entryAuthorPathKeyUpper = incrementLastByte(entryAuthorPathKey);
 
     for await (
-      const otherEntry of this.aptList.entries(
+      const otherEntry of this.aptStorage.entries(
         entryAuthorPathKey,
         entryAuthorPathKeyUpper,
       )
@@ -354,9 +282,9 @@ export class Replica<KeypairType> {
       await this.driver.writeAheadFlag.flagRemoval(keys.pta);
 
       Promise.all([
-        this.ptaList.remove(keys.pta),
-        this.tapList.remove(keys.tap),
-        this.aptList.remove(keys.apt),
+        this.ptaStorage.remove(keys.pta),
+        this.tapStorage.remove(keys.tap),
+        this.aptStorage.remove(keys.apt),
       ]);
 
       await this.driver.writeAheadFlag.unflagRemoval();
@@ -372,14 +300,18 @@ export class Replica<KeypairType> {
     );
 
     //  TODO: Store signatures in here!
-    const hashBytes = new Uint8Array(signedEntry.entry.record.hash);
+    const toStore = concatSummarisableStorageValue(
+      signedEntry.entry.record.hash,
+      signedEntry.namespaceSignature,
+      signedEntry.authorSignature,
+    );
 
-    await this.driver.writeAheadFlag.flagInsertion(keys.pta, hashBytes);
+    await this.driver.writeAheadFlag.flagInsertion(keys.pta, toStore);
 
     await Promise.all([
-      this.ptaList.insert(keys.pta, hashBytes),
-      this.aptList.insert(keys.apt, hashBytes),
-      this.tapList.insert(keys.tap, hashBytes),
+      this.ptaStorage.insert(keys.pta, toStore),
+      this.aptStorage.insert(keys.apt, toStore),
+      this.tapStorage.insert(keys.tap, toStore),
     ]);
 
     await this.driver.writeAheadFlag.unflagInsertion();
@@ -402,12 +334,12 @@ export class Replica<KeypairType> {
       case "path":
         lowerBound = query.lowerBound;
         upperBound = query.upperBound;
-        listToUse = this.ptaList;
+        listToUse = this.ptaStorage;
         break;
       case "author":
         lowerBound = query.lowerBound;
         upperBound = query.upperBound;
-        listToUse = this.aptList;
+        listToUse = this.aptStorage;
         break;
       case "timestamp": {
         if (query.lowerBound) {
@@ -418,7 +350,7 @@ export class Replica<KeypairType> {
           upperBound = bigintToBytes(query.upperBound);
         }
 
-        listToUse = this.tapList;
+        listToUse = this.tapStorage;
         break;
       }
     }
@@ -435,10 +367,12 @@ export class Replica<KeypairType> {
         this.format.pubkeyLength,
       );
 
+      const { hash, namespaceSignature, authorSignature } =
+        sliceSummarisableStorageValue(entry.value, this.format);
+
       const signedEntry: SignedEntry = {
-        // TODO: Retrieve real signatures!
-        authorSignature: new Uint8Array(),
-        namespaceSignature: new Uint8Array(),
+        authorSignature: authorSignature,
+        namespaceSignature: namespaceSignature,
         entry: {
           identifier: {
             author,
@@ -446,7 +380,7 @@ export class Replica<KeypairType> {
             path,
           },
           record: {
-            hash: entry.value,
+            hash,
             // TODO: Return actual length.
             length: BigInt(8),
             timestamp,

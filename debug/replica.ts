@@ -114,6 +114,10 @@ for await (
     `Author: ${signed.entry.identifier.author.slice(0, 4)} (etc. etc.)`,
   );
   console.log(`Timestamp: ${signed.entry.record.timestamp}`);
+  console.log(
+    `Namespace sig: ${signed.namespaceSignature.slice(0, 4)}... etc.`,
+  );
+  console.log(`Author sig: ${signed.authorSignature.slice(0, 4)}... etc.`);
   console.groupEnd();
 }
 
