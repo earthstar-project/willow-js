@@ -1,19 +1,22 @@
 import { SignFn, VerifyFn } from "../sign_verify/types.ts";
 import { SignedEntry } from "../types.ts";
-import { ReplicaDriver } from "./storage/types.ts";
+import { EntryDriver, PayloadDriver } from "./storage/types.ts";
 
-export interface WillowFormat<KeypairType> {
+export interface ProtocolParameters<KeypairType> {
   sign: SignFn<KeypairType>;
   verify: VerifyFn;
+  hash: (bytes: Uint8Array | ReadableStream<Uint8Array>) => Promise<Uint8Array>;
   pubkeyLength: number;
   hashLength: number;
+  signatureLength: number;
   pubkeyBytesFromPair: (pair: KeypairType) => Promise<Uint8Array>;
 }
 
 export type ReplicaOpts<KeypairType> = {
   namespace: Uint8Array;
-  driver?: ReplicaDriver;
-  format: WillowFormat<KeypairType>;
+  protocolParameters: ProtocolParameters<KeypairType>;
+  entryDriver?: EntryDriver;
+  payloadDriver?: PayloadDriver;
 };
 
 export type QueryOrder =
@@ -84,3 +87,22 @@ export type EntryInput = {
   payload: Uint8Array | ReadableStream<Uint8Array>;
   timestamp?: bigint;
 };
+
+export type IngestPayloadEventFailure = {
+  kind: "failure";
+  reason: "no_entry" | "mismatched_hash";
+};
+
+export type IngestPayloadEventNoOp = {
+  kind: "no_op";
+  reason: "already_have_it";
+};
+
+export type IngestPayloadEventSuccess = {
+  kind: "success";
+};
+
+export type IngestPayloadEvent =
+  | IngestPayloadEventFailure
+  | IngestPayloadEventNoOp
+  | IngestPayloadEventSuccess;

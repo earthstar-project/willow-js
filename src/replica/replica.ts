@@ -1,5 +1,9 @@
-import { ReplicaDriverMemory } from "./storage/memory_driver.ts";
-import { ReplicaDriver, SummarisableStorage } from "./storage/types.ts";
+import { EntryDriverMemory } from "./storage/memory_driver.ts";
+import {
+  EntryDriver,
+  PayloadDriver,
+  SummarisableStorage,
+} from "./storage/types.ts";
 import { Entry, SignedEntry } from "../types.ts";
 import { bytesEquals, deferred } from "../../deps.ts";
 import { signEntry, verifyEntry } from "../sign_verify/sign_verify.ts";
@@ -16,43 +20,49 @@ import {
 import {
   EntryInput,
   IngestEvent,
+  IngestPayloadEvent,
   Payload,
+  ProtocolParameters,
   Query,
   ReplicaOpts,
-  WillowFormat,
 } from "./types.ts";
+import { PayloadDriverMemory } from "./storage/payload_drivers/memory.ts";
 
 export class Replica<KeypairType> {
   private namespace: Uint8Array;
 
-  private format: WillowFormat<KeypairType>;
+  private protocolParams: ProtocolParameters<KeypairType>;
 
   private ptaStorage: SummarisableStorage<Uint8Array, Uint8Array>;
   private aptStorage: SummarisableStorage<Uint8Array, Uint8Array>;
   private tapStorage: SummarisableStorage<Uint8Array, Uint8Array>;
 
-  private driver: ReplicaDriver;
+  private entryDriver: EntryDriver;
+  private payloadDriver: PayloadDriver;
 
   private checkedWriteAheadFlag = deferred();
 
   constructor(opts: ReplicaOpts<KeypairType>) {
     this.namespace = opts.namespace;
-    this.format = opts.format;
+    this.protocolParams = opts.format;
 
-    const driver = opts.driver || new ReplicaDriverMemory();
+    const entryDriver = opts.entryDriver || new EntryDriverMemory();
+    const payloadDriver = opts.payloadDriver ||
+      new PayloadDriverMemory(opts.format);
 
-    this.driver = driver;
+    this.entryDriver = entryDriver;
+    this.payloadDriver = payloadDriver;
 
-    this.ptaStorage = driver.createSummarisableStorage("pta");
-    this.aptStorage = driver.createSummarisableStorage("apt");
-    this.tapStorage = driver.createSummarisableStorage("tap");
+    this.ptaStorage = entryDriver.createSummarisableStorage("pta");
+    this.aptStorage = entryDriver.createSummarisableStorage("apt");
+    this.tapStorage = entryDriver.createSummarisableStorage("tap");
 
     this.checkWriteAheadFlag();
   }
 
   private async checkWriteAheadFlag() {
-    const existingInsert = await this.driver.writeAheadFlag.wasInserting();
-    const existingRemove = await this.driver.writeAheadFlag.wasRemoving();
+    const existingInsert = await this.entryDriver.writeAheadFlag.wasInserting();
+    const existingRemove = await this.entryDriver.writeAheadFlag.wasRemoving();
 
     if (existingInsert) {
       const ptaKey = existingInsert[0];
@@ -60,7 +70,7 @@ export class Replica<KeypairType> {
       const details = detailsFromBytes(
         ptaKey,
         "path",
-        this.format.pubkeyLength,
+        this.protocolParams.pubkeyLength,
       );
       const keys = entryKeyBytes(
         details.path,
@@ -83,7 +93,7 @@ export class Replica<KeypairType> {
       ]);
 
       // Unflag insert.
-      await this.driver.writeAheadFlag.unflagInsertion();
+      await this.entryDriver.writeAheadFlag.unflagInsertion();
     }
 
     if (existingRemove) {
@@ -93,7 +103,7 @@ export class Replica<KeypairType> {
       const details = detailsFromBytes(
         ptaKey,
         "path",
-        this.format.pubkeyLength,
+        this.protocolParams.pubkeyLength,
       );
       const keys = entryKeyBytes(
         details.path,
@@ -109,7 +119,7 @@ export class Replica<KeypairType> {
       ]);
 
       // Unflag remove
-      await this.driver.writeAheadFlag.unflagRemoval();
+      await this.entryDriver.writeAheadFlag.unflagRemoval();
     }
 
     this.checkedWriteAheadFlag.resolve();
@@ -118,7 +128,7 @@ export class Replica<KeypairType> {
   private verify(signedEntry: SignedEntry) {
     return verifyEntry({
       signedEntry,
-      verify: this.format.verify,
+      verify: this.protocolParams.verify,
     });
   }
 
@@ -131,7 +141,7 @@ export class Replica<KeypairType> {
       entry,
       namespaceKeypair,
       authorKeypair,
-      sign: this.format.sign,
+      sign: this.protocolParams.sign,
     });
   }
 
@@ -142,7 +152,7 @@ export class Replica<KeypairType> {
   ) {
     const identifier = {
       namespace: this.namespace,
-      author: await this.format.pubkeyBytesFromPair(authorKeypair),
+      author: await this.protocolParams.pubkeyBytesFromPair(authorKeypair),
       path: input.path,
     };
 
@@ -165,12 +175,14 @@ export class Replica<KeypairType> {
       }
     }
 
+    // Stage it with the driver
+    const stagedResult = await this.payloadDriver.stage(input.payload);
+
     const record = {
       timestamp,
       // TODO: Use real payload length.
-      length: BigInt(8),
-      // TODO: Use real hash.
-      hash: new Uint8Array(this.format.hashLength),
+      length: BigInt(stagedResult.length),
+      hash: stagedResult.hash,
     };
 
     const signed = await this.sign(
@@ -179,10 +191,18 @@ export class Replica<KeypairType> {
       authorKeypair,
     );
 
-    return this.ingest(signed);
+    const ingestResult = await this.ingestEntry(signed);
+
+    if (ingestResult.kind !== "success") {
+      return ingestResult;
+    }
+
+    await stagedResult.commit();
+
+    return ingestResult;
   }
 
-  async ingest(
+  async ingestEntry(
     signedEntry: SignedEntry,
   ): Promise<IngestEvent> {
     await this.checkedWriteAheadFlag;
@@ -226,7 +246,7 @@ export class Replica<KeypairType> {
       );
 
       const otherEntryTimestamp = otherEntryTimestampBytesView.getBigUint64(
-        entryAuthorPathKey.byteLength,
+        otherEntry.key.byteLength - 8,
       );
 
       //  If there is something existing and the timestamp is greater than ours, we have a no-op.
@@ -253,11 +273,12 @@ export class Replica<KeypairType> {
       }
 
       // TODO: Get actual payload length from driver.
-      const payloadLengthOrder: number = 1;
+      const otherPayloadLengthIsGreater =
+        signedEntry.entry.record.length < otherEntryTimestamp;
 
       if (
         otherEntryTimestamp === signedEntry.entry.record.timestamp &&
-        hashOrder === 0 && payloadLengthOrder === -1
+        hashOrder === 0 && otherPayloadLengthIsGreater
       ) {
         return {
           kind: "no_op",
@@ -270,7 +291,7 @@ export class Replica<KeypairType> {
       const otherDetails = detailsFromBytes(
         otherEntry.key,
         "author",
-        this.format.pubkeyLength,
+        this.protocolParams.pubkeyLength,
       );
       const keys = entryKeyBytes(
         otherDetails.path,
@@ -279,7 +300,7 @@ export class Replica<KeypairType> {
       );
 
       // TODO: This does only recovers the removal, not the entry we mean to ingest...
-      await this.driver.writeAheadFlag.flagRemoval(keys.pta);
+      await this.entryDriver.writeAheadFlag.flagRemoval(keys.pta);
 
       Promise.all([
         this.ptaStorage.remove(keys.pta),
@@ -287,7 +308,7 @@ export class Replica<KeypairType> {
         this.aptStorage.remove(keys.apt),
       ]);
 
-      await this.driver.writeAheadFlag.unflagRemoval();
+      await this.entryDriver.writeAheadFlag.unflagRemoval();
     }
 
     // We passed all the criteria!
@@ -299,14 +320,16 @@ export class Replica<KeypairType> {
       new Uint8Array(signedEntry.entry.identifier.author),
     );
 
-    //  TODO: Store signatures in here!
     const toStore = concatSummarisableStorageValue(
-      signedEntry.entry.record.hash,
-      signedEntry.namespaceSignature,
-      signedEntry.authorSignature,
+      {
+        payloadHash: signedEntry.entry.record.hash,
+        namespaceSignature: signedEntry.namespaceSignature,
+        authorSignature: signedEntry.authorSignature,
+        payloadLength: signedEntry.entry.record.length,
+      },
     );
 
-    await this.driver.writeAheadFlag.flagInsertion(keys.pta, toStore);
+    await this.entryDriver.writeAheadFlag.flagInsertion(keys.pta, toStore);
 
     await Promise.all([
       this.ptaStorage.insert(keys.pta, toStore),
@@ -314,7 +337,7 @@ export class Replica<KeypairType> {
       this.tapStorage.insert(keys.tap, toStore),
     ]);
 
-    await this.driver.writeAheadFlag.unflagInsertion();
+    await this.entryDriver.writeAheadFlag.unflagInsertion();
 
     // TODO: Store the path in a radix tree.
 
@@ -325,7 +348,83 @@ export class Replica<KeypairType> {
     };
   }
 
-  async *query(query: Query): AsyncIterable<[SignedEntry, Payload]> {
+  async ingestPayload(
+    entryDetails: {
+      path: Uint8Array;
+      timestamp: bigint;
+      author: Uint8Array;
+    },
+    payload: Uint8Array | ReadableStream<Uint8Array>,
+  ): Promise<IngestPayloadEvent> {
+    // Check that there is an entry for this, and get the payload hash!
+    const keyLength = 8 + entryDetails.author.byteLength +
+      entryDetails.path.byteLength;
+    const ptaBytes = new Uint8Array(keyLength);
+
+    ptaBytes.set(entryDetails.path, 0);
+    const ptaDv = new DataView(ptaBytes.buffer);
+    ptaDv.setBigUint64(
+      entryDetails.path.byteLength,
+      entryDetails.timestamp,
+    );
+    ptaBytes.set(entryDetails.author, entryDetails.path.byteLength + 8);
+
+    for await (
+      const entry of this.ptaStorage.entries(
+        ptaBytes,
+        incrementLastByte(ptaBytes),
+        {
+          limit: 1,
+        },
+      )
+    ) {
+      if (!bytesEquals(entry.key, ptaBytes)) {
+        break;
+      }
+
+      // Check if we already have it.
+      const { payloadHash } = sliceSummarisableStorageValue(
+        entry.value,
+        this.protocolParams,
+      );
+
+      const existingPayload = await this.payloadDriver.get(payloadHash);
+
+      if (existingPayload) {
+        return {
+          kind: "no_op",
+          reason: "already_have_it",
+        };
+      }
+
+      // Stage it with the driver
+      const stagedResult = await this.payloadDriver.stage(payload);
+
+      if (!compareBytes(stagedResult.hash, payloadHash)) {
+        await stagedResult.reject();
+
+        return {
+          kind: "failure",
+          reason: "mismatched_hash",
+        };
+      }
+
+      await stagedResult.commit();
+
+      return {
+        kind: "success",
+      };
+    }
+
+    return {
+      kind: "failure",
+      reason: "no_entry",
+    };
+  }
+
+  async *query(
+    query: Query,
+  ): AsyncIterable<[SignedEntry, Payload | undefined]> {
     let listToUse: SummarisableStorage<Uint8Array, Uint8Array>;
     let lowerBound: Uint8Array | undefined;
     let upperBound: Uint8Array | undefined;
@@ -364,11 +463,15 @@ export class Replica<KeypairType> {
       const { author, path, timestamp } = detailsFromBytes(
         entry.key,
         query.order,
-        this.format.pubkeyLength,
+        this.protocolParams.pubkeyLength,
       );
 
-      const { hash, namespaceSignature, authorSignature } =
-        sliceSummarisableStorageValue(entry.value, this.format);
+      const {
+        payloadHash,
+        namespaceSignature,
+        authorSignature,
+        payloadLength,
+      } = sliceSummarisableStorageValue(entry.value, this.protocolParams);
 
       const signedEntry: SignedEntry = {
         authorSignature: authorSignature,
@@ -380,19 +483,14 @@ export class Replica<KeypairType> {
             path,
           },
           record: {
-            hash,
-            // TODO: Return actual length.
-            length: BigInt(8),
+            hash: payloadHash,
+            length: payloadLength,
             timestamp,
           },
         },
       };
 
-      const payload: Payload = {
-        // TODO: Return actual bytes and stream.
-        bytes: () => Promise.resolve(new Uint8Array()),
-        stream: new ReadableStream(),
-      };
+      const payload = await this.payloadDriver.get(payloadHash);
 
       yield [signedEntry, payload];
     }

@@ -1,5 +1,5 @@
 import { bytesConcat } from "../../deps.ts";
-import { WillowFormat } from "../replica/types.ts";
+import { ProtocolParameters } from "../replica/types.ts";
 import { Entry } from "../types.ts";
 
 export function compareBytes(a: Uint8Array, b: Uint8Array): number {
@@ -26,7 +26,7 @@ export function compareBytes(a: Uint8Array, b: Uint8Array): number {
 
 export function bigintToBytes(bigint: bigint): Uint8Array {
   const bytes = new Uint8Array(8);
-  const view = new DataView(bytes);
+  const view = new DataView(bytes.buffer);
 
   view.setBigUint64(0, bigint);
 
@@ -85,8 +85,9 @@ export function entryKeyBytes(
   aptBytes.set(authorBytes, 0);
   aptBytes.set(
     pathBytes,
-    authorBytes.length,
+    authorBytes.byteLength,
   );
+
   const aptDv = new DataView(aptBytes.buffer);
   aptDv.setBigUint64(
     pathBytes.byteLength + authorBytes.byteLength,
@@ -112,74 +113,6 @@ export function entryKeyBytes(
   tapBytes.set(pathBytes, 8 + authorBytes.byteLength);
 
   return { apt: aptBytes, pta: ptaBytes, tap: tapBytes };
-}
-
-export function entryAptBytes(entry: Entry): Uint8Array {
-  const bytes = new Uint8Array(
-    entry.identifier.author.byteLength + entry.identifier.path.byteLength + 8,
-  );
-
-  bytes.set(new Uint8Array(entry.identifier.author), 0);
-  bytes.set(
-    new Uint8Array(entry.identifier.path),
-    entry.identifier.author.byteLength,
-  );
-
-  const timestampDv = new DataView(bytes);
-  timestampDv.setBigUint64(
-    entry.identifier.author.byteLength + entry.identifier.path.byteLength,
-    entry.record.timestamp,
-  );
-
-  return bytes;
-}
-
-export function entryPtaBytes(entry: Entry): Uint8Array {
-  const bytes = new Uint8Array(
-    entry.identifier.path.byteLength + 8 + entry.identifier.author.byteLength,
-  );
-
-  bytes.set(
-    new Uint8Array(entry.identifier.path),
-    0,
-  );
-
-  const timestampDv = new DataView(bytes);
-  timestampDv.setBigUint64(
-    entry.identifier.path.byteLength,
-    entry.record.timestamp,
-  );
-
-  bytes.set(
-    new Uint8Array(entry.identifier.author),
-    entry.identifier.path.byteLength + 8,
-  );
-
-  return bytes;
-}
-
-export function entryTapBytes(entry: Entry): Uint8Array {
-  const bytes = new Uint8Array(
-    8 + entry.identifier.author.byteLength + entry.identifier.path.byteLength,
-  );
-
-  const timestampDv = new DataView(bytes);
-  timestampDv.setBigUint64(
-    0,
-    entry.record.timestamp,
-  );
-
-  bytes.set(
-    new Uint8Array(entry.identifier.author),
-    8,
-  );
-
-  bytes.set(
-    new Uint8Array(entry.identifier.path),
-    8 + entry.identifier.author.byteLength,
-  );
-
-  return bytes;
 }
 
 export function detailsFromBytes(
@@ -240,27 +173,39 @@ export function detailsFromBytes(
 }
 
 export function concatSummarisableStorageValue(
-  hash: ArrayBuffer,
-  namespaceSig: ArrayBuffer,
-  authorSig: ArrayBuffer,
+  { payloadHash, namespaceSignature, authorSignature, payloadLength }: {
+    payloadHash: ArrayBuffer;
+    namespaceSignature: ArrayBuffer;
+    authorSignature: ArrayBuffer;
+    payloadLength: bigint;
+  },
 ): Uint8Array {
   return bytesConcat(
-    new Uint8Array(hash),
-    new Uint8Array(namespaceSig),
-    new Uint8Array(authorSig),
+    new Uint8Array(payloadHash),
+    new Uint8Array(namespaceSignature),
+    new Uint8Array(authorSignature),
+    bigintToBytes(payloadLength),
   );
 }
 
 export function sliceSummarisableStorageValue<KeypairType>(
   bytes: Uint8Array,
-  format: WillowFormat<KeypairType>,
+  format: ProtocolParameters<KeypairType>,
 ) {
+  const dataView = new DataView(bytes.buffer);
+
   return {
-    hash: bytes.slice(0, format.hashLength),
+    payloadHash: bytes.slice(0, format.hashLength),
     namespaceSignature: bytes.slice(
       format.hashLength,
-      format.hashLength + format.pubkeyLength,
+      format.hashLength + format.signatureLength,
     ),
-    authorSignature: bytes.slice(format.hashLength + format.pubkeyLength),
+    authorSignature: bytes.slice(
+      format.hashLength + format.signatureLength,
+      format.hashLength + format.signatureLength + format.signatureLength,
+    ),
+    payloadLength: dataView.getBigUint64(
+      format.hashLength + format.signatureLength + format.signatureLength,
+    ),
   };
 }

@@ -1,4 +1,5 @@
 import { Replica } from "../src/replica/replica.ts";
+import { crypto } from "https://deno.land/std@0.188.0/crypto/crypto.ts";
 
 function makeKeypair() {
   return crypto.subtle.generateKey(
@@ -39,8 +40,9 @@ const replica = new Replica<CryptoKeyPair>({
   namespace: new Uint8Array(await exportKey(namespacePair.publicKey)),
   format: {
     // Ignore, not being used yet.
-    hashLength: 8,
+    hashLength: 32,
     pubkeyLength: 65,
+    signatureLength: 64,
     sign: (keypair, entryEncoded) => {
       return crypto.subtle.sign(
         {
@@ -50,6 +52,9 @@ const replica = new Replica<CryptoKeyPair>({
         keypair.privateKey,
         entryEncoded,
       );
+    },
+    hash: async (bytes: Uint8Array | ReadableStream<Uint8Array>) => {
+      return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
     },
     verify: async (
       publicKey,
@@ -80,30 +85,30 @@ const replica = new Replica<CryptoKeyPair>({
 // Both will be inserted!
 await replica.set(namespacePair, authorPair, {
   path: textEncoder.encode("pathA"),
-  payload: new Uint8Array(),
+  payload: textEncoder.encode("I'm here!"),
 });
 
 await replica.set(namespacePair, author2Pair, {
   path: textEncoder.encode("pathA"),
-  payload: new Uint8Array(),
+  payload: textEncoder.encode("Me too!"),
 });
 
 // Two entries at a different path, but by the same author.
 // Only the second one will remain!
 await replica.set(namespacePair, authorPair, {
   path: textEncoder.encode("pathB"),
-  payload: new Uint8Array(),
+  payload: textEncoder.encode("I want to win..."),
 });
 
 await replica.set(namespacePair, authorPair, {
   path: textEncoder.encode("pathB"),
-  payload: new Uint8Array(),
+  payload: textEncoder.encode("I win!"),
 });
 
 console.group("All entries");
 
 for await (
-  const [signed, _payload] of replica.query({
+  const [signed, payload] of replica.query({
     order: "path",
   })
 ) {
@@ -118,6 +123,11 @@ for await (
     `Namespace sig: ${signed.namespaceSignature.slice(0, 4)}... etc.`,
   );
   console.log(`Author sig: ${signed.authorSignature.slice(0, 4)}... etc.`);
+  console.log(
+    `Payload: ${
+      payload ? textDecoder.decode(await payload.bytes()) : "Not in possession"
+    }`,
+  );
   console.groupEnd();
 }
 
