@@ -38,7 +38,7 @@ const author2Pair = await makeKeypair();
 
 const replica = new Replica<CryptoKeyPair>({
   namespace: new Uint8Array(await exportKey(namespacePair.publicKey)),
-  format: {
+  protocolParameters: {
     // Ignore, not being used yet.
     hashLength: 32,
     pubkeyLength: 65,
@@ -93,8 +93,18 @@ await replica.set(namespacePair, author2Pair, {
   payload: textEncoder.encode("Me too!"),
 });
 
-// Two entries at a different path, but by the same author.
-// Only the second one will remain!
+await replica.set(namespacePair, author2Pair, {
+  path: textEncoder.encode("par"),
+  payload: textEncoder.encode("Me too!"),
+});
+
+await replica.set(namespacePair, author2Pair, {
+  path: textEncoder.encode("pat"),
+  payload: textEncoder.encode("Me too!"),
+});
+
+// Two entries at another path, but by the same author.
+// Only the second one will remain, it being later!
 await replica.set(namespacePair, authorPair, {
   path: textEncoder.encode("pathB"),
   payload: textEncoder.encode("I want to win..."),
@@ -103,6 +113,17 @@ await replica.set(namespacePair, authorPair, {
 await replica.set(namespacePair, authorPair, {
   path: textEncoder.encode("pathB"),
   payload: textEncoder.encode("I win!"),
+});
+
+await replica.set(namespacePair, authorPair, {
+  path: textEncoder.encode("prefix"),
+  payload: textEncoder.encode("I am newest and the prefix"),
+  timestamp: BigInt((Date.now() + 3000) * 1000),
+});
+
+await replica.set(namespacePair, authorPair, {
+  path: textEncoder.encode("prefixed"),
+  payload: textEncoder.encode("I am not newest..."),
 });
 
 console.group("All entries");

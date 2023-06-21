@@ -5,7 +5,7 @@ import {
   SummarisableStorage,
 } from "./storage/types.ts";
 import { Entry, SignedEntry } from "../types.ts";
-import { bytesEquals, deferred } from "../../deps.ts";
+import { bytesConcat, bytesEquals, deferred } from "../../deps.ts";
 import { signEntry, verifyEntry } from "../sign_verify/sign_verify.ts";
 import {
   bigintToBytes,
@@ -15,6 +15,7 @@ import {
   entryAuthorPathBytes,
   entryKeyBytes,
   incrementLastByte,
+  isPrefixOf,
   sliceSummarisableStorageValue,
 } from "../util/bytes.ts";
 import {
@@ -44,11 +45,11 @@ export class Replica<KeypairType> {
 
   constructor(opts: ReplicaOpts<KeypairType>) {
     this.namespace = opts.namespace;
-    this.protocolParams = opts.format;
+    this.protocolParams = opts.protocolParameters;
 
     const entryDriver = opts.entryDriver || new EntryDriverMemory();
     const payloadDriver = opts.payloadDriver ||
-      new PayloadDriverMemory(opts.format);
+      new PayloadDriverMemory(opts.protocolParameters);
 
     this.entryDriver = entryDriver;
     this.payloadDriver = payloadDriver;
@@ -156,7 +157,7 @@ export class Replica<KeypairType> {
       path: input.path,
     };
 
-    let timestamp = BigInt(Date.now() * 1000);
+    let timestamp = input.timestamp || BigInt(Date.now() * 1000);
 
     if (!input.timestamp) {
       // Get the latest timestamp from the same path and plus one.
@@ -230,9 +231,12 @@ export class Replica<KeypairType> {
       };
     }
 
-    // TODO: Check if path is prefix of another using exciting radix tree.
+    const newerPrefixExists = await this.hasNewerPrefix(signedEntry.entry);
+
+    console.log({ newerPrefixExists });
 
     const entryAuthorPathKey = entryAuthorPathBytes(signedEntry.entry);
+
     const entryAuthorPathKeyUpper = incrementLastByte(entryAuthorPathKey);
 
     for await (
@@ -338,8 +342,6 @@ export class Replica<KeypairType> {
     ]);
 
     await this.entryDriver.writeAheadFlag.unflagInsertion();
-
-    // TODO: Store the path in a radix tree.
 
     return {
       kind: "success",
@@ -494,5 +496,70 @@ export class Replica<KeypairType> {
 
       yield [signedEntry, payload];
     }
+  }
+
+  private async hasNewerPrefix(
+    entry: Entry,
+    prefixSize = 1,
+  ): Promise<boolean> {
+    const decoder = new TextDecoder();
+
+    console.group(decoder.decode(entry.identifier.path));
+
+    console.log(decoder.decode(entry.identifier.path.slice(0, prefixSize)));
+
+    const b = entryAuthorPathBytes(entry);
+
+    for await (
+      const otherEntry of this.aptStorage.entries(
+        b.slice(0, prefixSize),
+        b,
+      )
+    ) {
+      const maybePrefixPath = otherEntry.key.slice(
+        this.protocolParams.pubkeyLength,
+        -8,
+      );
+
+      console.log("inspecting", decoder.decode(maybePrefixPath));
+
+      if (bytesEquals(maybePrefixPath, new Uint8Array(entry.identifier.path))) {
+        console.log("same thing");
+
+        console.groupEnd();
+
+        return false;
+      }
+
+      if (isPrefixOf(maybePrefixPath, new Uint8Array(entry.identifier.path))) {
+        console.log("is a prefix");
+
+        const entryView = new DataView(otherEntry.key.buffer);
+
+        const entryTimestamp = entryView.getBigUint64(
+          otherEntry.key.byteLength - 8,
+        );
+
+        if (entryTimestamp > entry.record.timestamp) {
+          console.log("and timestamp was newer");
+
+          console.groupEnd();
+
+          return true;
+        }
+
+        console.log("and timestamp was not newer...");
+      } else if (prefixSize < entry.identifier.path.byteLength) {
+        console.log("is not a prefix...");
+
+        console.groupEnd();
+
+        return this.hasNewerPrefix(entry, prefixSize + 1);
+      }
+    }
+
+    console.groupEnd();
+
+    return false;
   }
 }

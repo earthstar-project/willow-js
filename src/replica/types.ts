@@ -62,7 +62,7 @@ export type IngestEventFailure = {
 
 export type IngestEventNoOp = {
   kind: "no_op";
-  reason: "obsolete_from_same_author";
+  reason: "obsolete_from_same_author" | "newer_prefix_found";
 };
 
 export type IngestEventSuccess = {

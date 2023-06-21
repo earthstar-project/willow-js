@@ -21,6 +21,10 @@ export function compareBytes(a: Uint8Array, b: Uint8Array): number {
     }
   }
 
+  if (b.byteLength > a.byteLength) {
+    return -1;
+  }
+
   return 0;
 }
 
@@ -208,4 +212,18 @@ export function sliceSummarisableStorageValue<KeypairType>(
       format.hashLength + format.signatureLength + format.signatureLength,
     ),
   };
+}
+
+export function isPrefixOf(testing: Uint8Array, bytes: Uint8Array) {
+  if (testing.byteLength >= bytes.byteLength) {
+    return false;
+  }
+
+  for (let i = 0; i < testing.length; i++) {
+    if (testing[i] !== bytes[i]) {
+      return false;
+    }
+  }
+
+  return true;
 }
