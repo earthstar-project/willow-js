@@ -1,5 +1,5 @@
 import { bytesConcat, bytesEquals } from "../../../../deps.ts";
-import { incrementLastByte } from "../../../util/bytes.ts";
+import { compareBytes, incrementLastByte } from "../../../util/bytes.ts";
 import { KvBatch, KvDriver } from "../kv/types.ts";
 
 enum Phantomness {
@@ -8,21 +8,18 @@ enum Phantomness {
   RealWithPhantom,
 }
 
-export type GwilTreeNode<ValueType> = [Phantomness, Uint8Array, ValueType];
+export type KeyHopTreeNode<ValueType> = [Phantomness, Uint8Array, ValueType];
 
-const decoder = new TextDecoder();
-const d = (b: Uint8Array) => decoder.decode(b);
-
-export class GwilsPrefixTree<ValueType> {
+export class KeyHopTree<ValueType> {
   private kv: KvDriver;
 
   constructor(kv: KvDriver) {
     this.kv = kv;
   }
 
-  private async addBackingPhantom(
+  private addBackingPhantom(
     key: Uint8Array,
-    value: GwilTreeNode<ValueType>,
+    value: KeyHopTreeNode<ValueType>,
     batch: KvBatch,
   ) {
     if (value[0] === Phantomness.Real) {
@@ -38,13 +35,12 @@ export class GwilsPrefixTree<ValueType> {
     key: Uint8Array,
     value: ValueType,
     position = 1,
-    lastPassedNode?: { key: Uint8Array; value: GwilTreeNode<ValueType> },
+    lastPassedNode?: { key: Uint8Array; value: KeyHopTreeNode<ValueType> },
   ): Promise<void> {
     // Check if first element exists in
     const searchKey = key.slice(0, position);
-    const actualKey: [number, Uint8Array] = [position, searchKey];
 
-    const existingNode = await this.kv.get<GwilTreeNode<ValueType>>([
+    const existingNode = await this.kv.get<KeyHopTreeNode<ValueType>>([
       searchKey,
     ]);
 
@@ -52,7 +48,7 @@ export class GwilsPrefixTree<ValueType> {
     if (!existingNode) {
       const vector = key.slice(position);
 
-      const node: GwilTreeNode<ValueType> = [Phantomness.Real, vector, value];
+      const node: KeyHopTreeNode<ValueType> = [Phantomness.Real, vector, value];
 
       const batch = this.kv.batch();
 
@@ -75,6 +71,10 @@ export class GwilsPrefixTree<ValueType> {
 
     // 	If it is, we check from the next position. Buck passed.
     if (foundIsPrefix) {
+      if (completeValue.byteLength === key.byteLength) {
+        return;
+      }
+
       return this.insert(key, value, completeValue.byteLength + 1, {
         key: searchKey,
         value: existingNode,
@@ -165,12 +165,12 @@ export class GwilsPrefixTree<ValueType> {
   async remove(
     key: Uint8Array,
     position = 1,
-    phantomParent?: [Uint8Array, Uint8Array],
+    lastPassedNode?: [Uint8Array, KeyHopTreeNode<ValueType>],
   ): Promise<boolean> {
     // Try and find the value, and remove it.
     const searchKey = key.slice(0, position);
 
-    const existingNode = await this.kv.get<GwilTreeNode<ValueType>>([
+    const existingNode = await this.kv.get<KeyHopTreeNode<ValueType>>([
       searchKey,
     ]);
 
@@ -183,27 +183,84 @@ export class GwilsPrefixTree<ValueType> {
     const completeValue = bytesConcat(searchKey, existingNode[1]);
 
     if (bytesEquals(completeValue, key)) {
-      if (phantomParent) {
-        // Sibling is a phantom...
-
-        for await (
-          const entry of this.kv.list({
-            start: [completeValue],
-            end: [],
-          })
-        ) {
-        }
-      }
+      const batch = this.kv.batch();
 
       if (existingNode[0] === Phantomness.RealWithPhantom) {
-        await this.kv.set([searchKey], [
+        batch.set([searchKey], [
           Phantomness.Phantom,
           existingNode[1],
           null,
         ]);
       } else {
-        await this.kv.delete([searchKey]);
+        batch.delete([searchKey]);
       }
+
+      // Extremely expensive healing op.
+
+      if (lastPassedNode && lastPassedNode[1][0] === Phantomness.Phantom) {
+        // Sibling is a phantom...
+        const parentCompleteVal = bytesConcat(
+          lastPassedNode[0],
+          lastPassedNode[1][1],
+        );
+
+        // Time to do something expensive.
+
+        let soleSibling: [number, KeyHopTreeNode<ValueType>] | null = null;
+
+        for (let i = 0; i < 256; i++) {
+          const maybeSiblingKey = bytesConcat(
+            parentCompleteVal,
+            new Uint8Array([i]),
+          );
+
+          if (compareBytes(maybeSiblingKey, searchKey) === 0) {
+            continue;
+          }
+
+          const siblingNode = await this.kv.get<KeyHopTreeNode<ValueType>>([
+            maybeSiblingKey,
+          ]);
+
+          if (soleSibling && siblingNode) {
+            // If there is more than one sibling, we abort.
+            soleSibling = null;
+            break;
+          } else if (!soleSibling && siblingNode) {
+            soleSibling = [i, siblingNode];
+          } else if (!siblingNode) {
+            continue;
+          }
+        }
+
+        if (soleSibling) {
+          // Merge the sole sibling with the phantom parent.
+
+          // Delete the sole sibling
+
+          const soleSiblingKey = bytesConcat(
+            parentCompleteVal,
+            new Uint8Array([soleSibling[0]]),
+          );
+          batch.delete([soleSiblingKey]);
+
+          // Append the last bit of its key and its vector to the phantom parent
+          batch.set(
+            [lastPassedNode[0]],
+            [
+              soleSibling[1][0],
+              bytesConcat(
+                lastPassedNode[1][1],
+                new Uint8Array([soleSibling[0]]),
+                soleSibling[1][1],
+              ),
+              soleSibling[1][2],
+            ],
+          );
+        }
+      }
+
+      await batch.commit();
 
       return true;
     }
@@ -212,14 +269,10 @@ export class GwilsPrefixTree<ValueType> {
 
     // 	If it is, we check from the next position. Buck passed.
     if (foundIsPrefix) {
-      if (existingNode[0]) {
-        return this.remove(key, completeValue.byteLength + 1, [
-          searchKey,
-          existingNode[1],
-        ]);
-      }
-
-      return this.remove(key, completeValue.byteLength + 1);
+      return this.remove(key, completeValue.byteLength + 1, [
+        searchKey,
+        existingNode,
+      ]);
     }
 
     return false;
@@ -231,7 +284,7 @@ export class GwilsPrefixTree<ValueType> {
     while (true) {
       const searchKey = key.slice(0, searchLength);
 
-      const node = await this.kv.get<GwilTreeNode<ValueType>>([searchKey]);
+      const node = await this.kv.get<KeyHopTreeNode<ValueType>>([searchKey]);
 
       if (!node) {
         break;
@@ -259,7 +312,7 @@ export class GwilsPrefixTree<ValueType> {
     while (true) {
       const searchKey = key.slice(0, searchLength);
 
-      const node = await this.kv.get<GwilTreeNode<ValueType>>([searchKey]);
+      const node = await this.kv.get<KeyHopTreeNode<ValueType>>([searchKey]);
 
       if (!node) {
         break;
@@ -286,7 +339,7 @@ export class GwilsPrefixTree<ValueType> {
 
     // The easy bit
     for await (
-      const entry of this.kv.list<GwilTreeNode<ValueType>>({
+      const entry of this.kv.list<KeyHopTreeNode<ValueType>>({
         start: [key],
         end: [incrementLastByte(key)],
       })
@@ -310,7 +363,7 @@ export class GwilsPrefixTree<ValueType> {
 
   async print() {
     for await (
-      const { key, value } of this.kv.list<GwilTreeNode<ValueType>>({
+      const { key, value } of this.kv.list<KeyHopTreeNode<ValueType>>({
         start: [],
         end: [Number.MAX_SAFE_INTEGER],
       })
@@ -321,9 +374,7 @@ export class GwilsPrefixTree<ValueType> {
           : value[0] === Phantomness.Real
           ? "🔑"
           : "🗝",
-        `${decoder.decode(key[0] as unknown as Uint8Array)}(${
-          decoder.decode(value[1])
-        })`,
+        `${key[0]}(${value[1]}`,
         "-",
         value[2],
       );

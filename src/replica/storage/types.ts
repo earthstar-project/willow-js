@@ -1,26 +1,6 @@
 import { ValidationError } from "../../errors.ts";
 import { Payload } from "../types.ts";
-
-export interface SummarisableStorage<ValueType, LiftedType> {
-  get(key: ValueType): Promise<Uint8Array | undefined>;
-  insert(key: ValueType, value: Uint8Array): Promise<void>;
-  remove(key: ValueType): Promise<boolean>;
-
-  summarise(
-    start: ValueType,
-    end: ValueType,
-  ): Promise<{ fingerprint: LiftedType; size: number }>;
-
-  entries(
-    start: ValueType | undefined,
-    end: ValueType | undefined,
-    opts?: {
-      reverse?: boolean;
-      limit?: number;
-    },
-  ): AsyncIterable<{ key: ValueType; value: Uint8Array }>;
-  allEntries(): AsyncIterable<{ key: ValueType; value: Uint8Array }>;
-}
+import { SummarisableStorage } from "./summarisable_storage/types.ts";
 
 export interface WriteAheadFlag<ValueType, KeyType> {
   wasInserting: () => Promise<[KeyType, ValueType] | undefined>;

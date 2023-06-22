@@ -1,5 +1,5 @@
 import { compareBytes } from "../../../util/bytes.ts";
-import { RadixTree } from "./types.ts";
+import { PrefixIterator } from "./types.ts";
 
 type MemoryNode<ValueType> = {
   key: Uint8Array;
@@ -7,13 +7,7 @@ type MemoryNode<ValueType> = {
   children: Map<number, MemoryNode<ValueType>>;
 };
 
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-
-const k = (str: string) => encoder.encode(str);
-const d = (b: Uint8Array) => decoder.decode(b);
-
-export class RadixTreeMemory<ValueType> implements RadixTree<ValueType> {
+export class RadixishTree<ValueType> implements PrefixIterator<ValueType> {
   private root: MemoryNode<ValueType> = {
     key: new Uint8Array(),
     value: null,
@@ -22,10 +16,10 @@ export class RadixTreeMemory<ValueType> implements RadixTree<ValueType> {
 
   print() {
     const printNode = (node: MemoryNode<ValueType>) => {
-      console.group(d(node.key), node.value);
+      console.group(node.key, node.value);
 
       for (const [key, child] of node.children) {
-        console.log(d(new Uint8Array([key])), "->");
+        console.log(key, "->");
         printNode(child);
       }
 
@@ -43,8 +37,28 @@ export class RadixTreeMemory<ValueType> implements RadixTree<ValueType> {
     while (true) {
       const lcp = getLongestCommonPrefix(node.key, key);
 
-      // Is this thing a prefix of ours?
-      if (lcp.byteLength === key.byteLength) {
+      if (
+        lcp.byteLength === key.byteLength &&
+        key.byteLength === node.key.byteLength && node.value
+      ) {
+        break;
+      } else if (lcp.byteLength === key.byteLength && node.value === null) {
+        node.value = value;
+
+        break;
+      } else if (lcp.byteLength === key.byteLength && node.value) {
+        const splitNode = {
+          key: node.key,
+          value: node.value,
+          children: new Map(node.children),
+        };
+
+        node.key = key;
+        node.value = value;
+        node.children = new Map();
+
+        node.children.set(splitNode.key[lcp.byteLength], splitNode);
+
         break;
       } else if (
         node.key.byteLength === 0 ||
@@ -74,7 +88,7 @@ export class RadixTreeMemory<ValueType> implements RadixTree<ValueType> {
         const splitNode = {
           key: node.key,
           value: node.value,
-          children: node.children,
+          children: new Map(node.children),
         };
 
         const newNode = {
@@ -99,7 +113,7 @@ export class RadixTreeMemory<ValueType> implements RadixTree<ValueType> {
     return Promise.resolve();
   }
 
-  remove(key: Uint8Array): Promise<void> {
+  remove(key: Uint8Array): Promise<boolean> {
     let node = this.root;
 
     while (true) {
@@ -114,16 +128,28 @@ export class RadixTreeMemory<ValueType> implements RadixTree<ValueType> {
 
         if (childAtEdge && compareBytes(childAtEdge.key, key) === 0) {
           // We found it, noice...
-          node.children.delete(edge);
+          //  Absorb any children of the node to be deleted.
+          if (childAtEdge.children.size === 0) {
+            node.children.delete(edge);
 
-          if (node.children.size === 1 && node.value !== null) {
-            // Merge them.
-            const nodeToMerge = Array.from(node.children.values())[0];
+            if (node.children.size === 1 && node.value !== null) {
+              // Merge them.
+              const nodeToMerge = Array.from(node.children.values())[0];
 
-            node.key = nodeToMerge.key;
-            node.children = nodeToMerge.children;
-            node.value = nodeToMerge.value;
+              node.key = nodeToMerge.key;
+              node.children = nodeToMerge.children;
+              node.value = nodeToMerge.value;
+            }
+          } else if (childAtEdge.children.size === 1) {
+            node.children.set(
+              edge,
+              Array.from(childAtEdge.children.values())[0],
+            );
+          } else {
+            childAtEdge.value = null;
           }
+
+          return Promise.resolve(true);
         } else if (childAtEdge) {
           // Node is now that child.
           node = childAtEdge;
@@ -136,7 +162,7 @@ export class RadixTreeMemory<ValueType> implements RadixTree<ValueType> {
       }
     }
 
-    return Promise.resolve();
+    return Promise.resolve(false);
   }
 
   async *prefixesOf(key: Uint8Array): AsyncIterable<[Uint8Array, ValueType]> {
@@ -147,13 +173,12 @@ export class RadixTreeMemory<ValueType> implements RadixTree<ValueType> {
 
       // Is this thing a prefix of ours?
       if (lcp.byteLength === key.byteLength) {
-        // We reached our own key. Return.
         break;
       } else if (
         node.key.byteLength === 0 ||
         lcp.byteLength === node.key.byteLength
       ) {
-        if (node.value) {
+        if (node.value !== null) {
           yield [node.key, node.value];
         }
 
@@ -215,9 +240,16 @@ export class RadixTreeMemory<ValueType> implements RadixTree<ValueType> {
     }
 
     if (firstPrefixed) {
+      if (
+        firstPrefixed.value !== null &&
+        firstPrefixed.key.byteLength > key.byteLength
+      ) {
+        yield [firstPrefixed.key, firstPrefixed.value];
+      }
+
       // iterate through all children.
       for (const node of this.allNodesLnr(firstPrefixed)) {
-        if (node.value) {
+        if (node.value !== null) {
           yield [node.key, node.value];
         }
       }

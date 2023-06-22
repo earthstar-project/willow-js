@@ -20,28 +20,27 @@ const k = (str: string) => encoder.encode(str);
 const d = (b: Uint8Array) => decoder.decode(b);
 
 const wordList = [
-  "nib",
-  "nat",
+  "n",
+  "na",
+  "natty",
   "nature",
-  "natural",
-  "naturalist",
-  "naturalistic",
+  "natured",
 ];
 
 for (const word of wordList) {
   await gtree.insert(k(word), `<${word}>`);
   await stree.insert(k(word), `<${word}>`);
   await mtree.insert(k(word), `<${word}>`);
-
-  mtree.print();
-  console.log("---");
 }
+await gtree.print();
 
 await gtree.remove(k("natty"));
 await stree.remove(k("natty"));
 await mtree.remove(k("natty"));
 
 console.group("Tree contents");
+
+await gtree.print();
 
 console.groupEnd();
 

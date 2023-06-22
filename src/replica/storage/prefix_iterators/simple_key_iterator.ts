@@ -2,7 +2,7 @@ import { bytesEquals } from "../../../../deps.ts";
 import { compareBytes, incrementLastByte } from "../../../util/bytes.ts";
 import { Key, KvDriver } from "../kv/types.ts";
 
-export class KvRadixTree<ValueType> {
+export class SimpleKeyIterator<ValueType> {
   private kv: KvDriver;
 
   constructor(kv: KvDriver) {
@@ -13,8 +13,10 @@ export class KvRadixTree<ValueType> {
     return this.kv.set([key], value);
   }
 
-  remove(key: Uint8Array) {
-    return this.kv.delete([key]);
+  async remove(key: Uint8Array) {
+    await this.kv.delete([key]);
+
+    return true;
   }
 
   async *prefixesOf(
