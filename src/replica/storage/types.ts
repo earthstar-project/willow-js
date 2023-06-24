@@ -1,5 +1,6 @@
 import { ValidationError } from "../../errors.ts";
 import { Payload } from "../types.ts";
+import { PrefixIterator } from "./prefix_iterators/types.ts";
 import { SummarisableStorage } from "./summarisable_storage/types.ts";
 
 export interface WriteAheadFlag<ValueType, KeyType> {
@@ -16,6 +17,7 @@ export interface EntryDriver {
     id: string,
   ) => SummarisableStorage<Uint8Array, Uint8Array>;
   writeAheadFlag: WriteAheadFlag<Uint8Array, Uint8Array>;
+  prefixIterator: PrefixIterator<Uint8Array>;
 }
 export interface PayloadDriver {
   /** Returns an attachment for a given format and hash.*/

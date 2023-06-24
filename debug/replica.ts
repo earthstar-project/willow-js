@@ -39,7 +39,6 @@ const author2Pair = await makeKeypair();
 const replica = new Replica<CryptoKeyPair>({
   namespace: new Uint8Array(await exportKey(namespacePair.publicKey)),
   protocolParameters: {
-    // Ignore, not being used yet.
     hashLength: 32,
     pubkeyLength: 65,
     signatureLength: 64,
@@ -93,16 +92,6 @@ await replica.set(namespacePair, author2Pair, {
   payload: textEncoder.encode("Me too!"),
 });
 
-await replica.set(namespacePair, author2Pair, {
-  path: textEncoder.encode("par"),
-  payload: textEncoder.encode("Me too!"),
-});
-
-await replica.set(namespacePair, author2Pair, {
-  path: textEncoder.encode("pat"),
-  payload: textEncoder.encode("Me too!"),
-});
-
 // Two entries at another path, but by the same author.
 // Only the second one will remain, it being later!
 await replica.set(namespacePair, authorPair, {
@@ -115,15 +104,36 @@ await replica.set(namespacePair, authorPair, {
   payload: textEncoder.encode("I win!"),
 });
 
-await replica.set(namespacePair, authorPair, {
-  path: textEncoder.encode("prefix"),
-  payload: textEncoder.encode("I am newest and the prefix"),
-  timestamp: BigInt((Date.now() + 3000) * 1000),
-});
+// The first and second will be removed!
 
 await replica.set(namespacePair, authorPair, {
   path: textEncoder.encode("prefixed"),
   payload: textEncoder.encode("I am not newest..."),
+});
+
+await replica.set(namespacePair, authorPair, {
+  path: textEncoder.encode("prefixed2"),
+  payload: textEncoder.encode("I am not newest either..."),
+});
+
+await replica.set(namespacePair, authorPair, {
+  path: textEncoder.encode("prefix"),
+  payload: textEncoder.encode("I'm the newest, and a prefix of the others!"),
+});
+
+// The second one won't be inserted!
+
+await replica.set(namespacePair, authorPair, {
+  path: textEncoder.encode("willbe"),
+  payload: textEncoder.encode(
+    "I am still the newest prefix!",
+  ),
+  timestamp: BigInt((Date.now() + 10) * 1000),
+});
+
+await replica.set(namespacePair, authorPair, {
+  path: textEncoder.encode("willbeprefixed"),
+  payload: textEncoder.encode("I shouldn't be here..."),
 });
 
 console.group("All entries");

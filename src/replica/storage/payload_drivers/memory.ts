@@ -71,7 +71,7 @@ export class PayloadDriverMemory<KeypairType> implements PayloadDriver {
       ? payload
       : await streamToBytes(payload);
 
-    const hash = await this.protocolParameters.hash(bytes); // use hashing function
+    const hash = await this.protocolParameters.hash(bytes);
 
     const newPayload = new Blob([bytes]);
 

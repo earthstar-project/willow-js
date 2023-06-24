@@ -1,9 +1,5 @@
 import { EntryDriverMemory } from "./storage/memory_driver.ts";
-import {
-  EntryDriver,
-  PayloadDriver,
-  SummarisableStorage,
-} from "./storage/types.ts";
+import { EntryDriver, PayloadDriver } from "./storage/types.ts";
 import { Entry, SignedEntry } from "../types.ts";
 import { bytesConcat, bytesEquals, deferred } from "../../deps.ts";
 import { signEntry, verifyEntry } from "../sign_verify/sign_verify.ts";
@@ -15,7 +11,6 @@ import {
   entryAuthorPathBytes,
   entryKeyBytes,
   incrementLastByte,
-  isPrefixOf,
   sliceSummarisableStorageValue,
 } from "../util/bytes.ts";
 import {
@@ -28,6 +23,7 @@ import {
   ReplicaOpts,
 } from "./types.ts";
 import { PayloadDriverMemory } from "./storage/payload_drivers/memory.ts";
+import { SummarisableStorage } from "./storage/summarisable_storage/types.ts";
 
 export class Replica<KeypairType> {
   private namespace: Uint8Array;
@@ -44,6 +40,7 @@ export class Replica<KeypairType> {
   private checkedWriteAheadFlag = deferred();
 
   constructor(opts: ReplicaOpts<KeypairType>) {
+    // TODO: At least validate that the namespace length matches the protocol params.
     this.namespace = opts.namespace;
     this.protocolParams = opts.protocolParameters;
 
@@ -73,6 +70,7 @@ export class Replica<KeypairType> {
         "path",
         this.protocolParams.pubkeyLength,
       );
+
       const keys = entryKeyBytes(
         details.path,
         details.timestamp,
@@ -86,15 +84,20 @@ export class Replica<KeypairType> {
         this.aptStorage.remove(keys.apt),
       ]);
 
-      // Insert key for each storage.
-      await Promise.all([
-        this.ptaStorage.insert(keys.pta, existingInsert[1]),
-        this.tapStorage.insert(keys.tap, existingInsert[1]),
-        this.aptStorage.insert(keys.apt, existingInsert[1]),
-      ]);
+      const values = sliceSummarisableStorageValue(
+        existingInsert[1],
+        this.protocolParams,
+      );
 
-      // Unflag insert.
-      await this.entryDriver.writeAheadFlag.unflagInsertion();
+      await this.insertEntry({
+        namespaceSignature: values.namespaceSignature,
+        authorSignature: values.authorSignature,
+        path: details.path,
+        author: details.author,
+        hash: values.payloadHash,
+        length: values.payloadLength,
+        timestamp: details.timestamp,
+      });
     }
 
     if (existingRemove) {
@@ -157,22 +160,31 @@ export class Replica<KeypairType> {
       path: input.path,
     };
 
-    let timestamp = input.timestamp || BigInt(Date.now() * 1000);
+    let timestamp = input.timestamp !== undefined
+      ? input.timestamp
+      : BigInt(Date.now() * 1000);
 
     if (!input.timestamp) {
       // Get the latest timestamp from the same path and plus one.
+
       for await (
-        const [entry] of this.query({
+        const [signed] of this.query({
           order: "path",
           lowerBound: input.path,
           upperBound: incrementLastByte(input.path),
-          // Only interested in the first
-          limit: 1,
-          // Only interested in the path with the highest timestamp.
-          reverse: true,
         })
       ) {
-        timestamp = entry.entry.record.timestamp + BigInt(1);
+        //
+        if (
+          compareBytes(
+            new Uint8Array(signed.entry.identifier.path),
+            new Uint8Array(input.path),
+          ) !== 0
+        ) {
+          break;
+        }
+
+        timestamp = signed.entry.record.timestamp + BigInt(1);
       }
     }
 
@@ -181,7 +193,6 @@ export class Replica<KeypairType> {
 
     const record = {
       timestamp,
-      // TODO: Use real payload length.
       length: BigInt(stagedResult.length),
       hash: stagedResult.hash,
     };
@@ -204,14 +215,17 @@ export class Replica<KeypairType> {
   }
 
   async ingestEntry(
-    signedEntry: SignedEntry,
+    signed: SignedEntry,
   ): Promise<IngestEvent> {
     await this.checkedWriteAheadFlag;
 
+    // TODO: Add prefix lock.
+
+    // Check if the entry belongs to this namespace.
     if (
       !bytesEquals(
         this.namespace,
-        new Uint8Array(signedEntry.entry.identifier.namespace),
+        new Uint8Array(signed.entry.identifier.namespace),
       )
     ) {
       return {
@@ -222,7 +236,7 @@ export class Replica<KeypairType> {
       };
     }
 
-    if (await this.verify(signedEntry) === false) {
+    if (await this.verify(signed) === false) {
       return {
         kind: "failure",
         reason: "invalid_entry",
@@ -231,13 +245,25 @@ export class Replica<KeypairType> {
       };
     }
 
-    const newerPrefixExists = await this.hasNewerPrefix(signedEntry.entry);
-
-    console.log({ newerPrefixExists });
-
-    const entryAuthorPathKey = entryAuthorPathBytes(signedEntry.entry);
-
+    // Check for entries at the same path from the same author.
+    const entryAuthorPathKey = entryAuthorPathBytes(signed.entry);
     const entryAuthorPathKeyUpper = incrementLastByte(entryAuthorPathKey);
+
+    // Check if we have any newer entries with this prefix.
+    for await (
+      const [_path, timestampBytes] of this.entryDriver.prefixIterator
+        .prefixesOf(entryAuthorPathKey)
+    ) {
+      const view = new DataView(timestampBytes.buffer);
+      const prefixTimestamp = view.getBigUint64(0);
+
+      if (prefixTimestamp >= signed.entry.record.timestamp) {
+        return {
+          kind: "no_op",
+          reason: "newer_prefix_found",
+        };
+      }
+    }
 
     for await (
       const otherEntry of this.aptStorage.entries(
@@ -245,6 +271,8 @@ export class Replica<KeypairType> {
         entryAuthorPathKeyUpper,
       )
     ) {
+      // TODO: break if encountering a path that is greater than ours within this range!
+
       const otherEntryTimestampBytesView = new DataView(
         otherEntry.key.buffer,
       );
@@ -254,7 +282,7 @@ export class Replica<KeypairType> {
       );
 
       //  If there is something existing and the timestamp is greater than ours, we have a no-op.
-      if (otherEntryTimestamp > signedEntry.entry.record.timestamp) {
+      if (otherEntryTimestamp > signed.entry.record.timestamp) {
         return {
           kind: "no_op",
           reason: "obsolete_from_same_author",
@@ -262,12 +290,13 @@ export class Replica<KeypairType> {
       }
 
       const hashOrder = compareBytes(
-        new Uint8Array(signedEntry.entry.record.hash),
+        new Uint8Array(signed.entry.record.hash),
         otherEntry.value,
       );
 
+      // If the timestamps are the same, and our hash is less, we have a no-op.
       if (
-        otherEntryTimestamp === signedEntry.entry.record.timestamp &&
+        otherEntryTimestamp === signed.entry.record.timestamp &&
         hashOrder === -1
       ) {
         return {
@@ -276,12 +305,12 @@ export class Replica<KeypairType> {
         };
       }
 
-      // TODO: Get actual payload length from driver.
       const otherPayloadLengthIsGreater =
-        signedEntry.entry.record.length < otherEntryTimestamp;
+        signed.entry.record.length < otherEntryTimestamp;
 
+      // If the timestamps and hashes are the same, and the other payload's length is greater, we have a no-op.
       if (
-        otherEntryTimestamp === signedEntry.entry.record.timestamp &&
+        otherEntryTimestamp === signed.entry.record.timestamp &&
         hashOrder === 0 && otherPayloadLengthIsGreater
       ) {
         return {
@@ -290,8 +319,8 @@ export class Replica<KeypairType> {
         };
       }
 
-      // Remove the old one...
-      // Derive PTA and TAP keys.
+      // The new entry will overwrite the one we just found.
+      // Remove it.
       const otherDetails = detailsFromBytes(
         otherEntry.key,
         "author",
@@ -312,28 +341,67 @@ export class Replica<KeypairType> {
         this.aptStorage.remove(keys.apt),
       ]);
 
+      await this.entryDriver.prefixIterator.remove(
+        new Uint8Array(signed.entry.identifier.path),
+      );
+
       await this.entryDriver.writeAheadFlag.unflagRemoval();
     }
 
-    // We passed all the criteria!
-    // Store this entry.
+    await this.insertEntry({
+      namespaceSignature: new Uint8Array(signed.namespaceSignature),
+      authorSignature: new Uint8Array(signed.authorSignature),
+      path: new Uint8Array(signed.entry.identifier.path),
+      author: new Uint8Array(signed.entry.identifier.author),
+      hash: new Uint8Array(signed.entry.record.hash),
+      timestamp: signed.entry.record.timestamp,
+      length: signed.entry.record.length,
+    });
 
+    return {
+      kind: "success",
+      entry: signed,
+      sourceId: "TODO...",
+    };
+  }
+
+  private async insertEntry(
+    {
+      path,
+      timestamp,
+      author,
+      hash,
+      namespaceSignature,
+      authorSignature,
+      length,
+    }: {
+      namespaceSignature: Uint8Array;
+      authorSignature: Uint8Array;
+      path: Uint8Array;
+      author: Uint8Array;
+      timestamp: bigint;
+      hash: Uint8Array;
+      length: bigint;
+    },
+  ) {
     const keys = entryKeyBytes(
-      new Uint8Array(signedEntry.entry.identifier.path),
-      signedEntry.entry.record.timestamp,
-      new Uint8Array(signedEntry.entry.identifier.author),
+      path,
+      timestamp,
+      author,
     );
 
     const toStore = concatSummarisableStorageValue(
       {
-        payloadHash: signedEntry.entry.record.hash,
-        namespaceSignature: signedEntry.namespaceSignature,
-        authorSignature: signedEntry.authorSignature,
-        payloadLength: signedEntry.entry.record.length,
+        payloadHash: hash,
+        namespaceSignature: namespaceSignature,
+        authorSignature: authorSignature,
+        payloadLength: length,
       },
     );
 
     await this.entryDriver.writeAheadFlag.flagInsertion(keys.pta, toStore);
+
+    const entryAuthorPathKey = bytesConcat(author, path);
 
     await Promise.all([
       this.ptaStorage.insert(keys.pta, toStore),
@@ -341,13 +409,65 @@ export class Replica<KeypairType> {
       this.tapStorage.insert(keys.tap, toStore),
     ]);
 
-    await this.entryDriver.writeAheadFlag.unflagInsertion();
+    await this.entryDriver.prefixIterator.insert(
+      entryAuthorPathKey,
+      keys.apt.slice(keys.apt.byteLength - 8),
+    );
 
-    return {
-      kind: "success",
-      entry: signedEntry,
-      sourceId: "TODO...",
-    };
+    // And remove all prefixes with smaller timestamps.
+    for await (
+      const [prefixedByPath, prefixedByTimestamp] of this.entryDriver
+        .prefixIterator
+        .prefixedBy(
+          entryAuthorPathKey,
+        )
+    ) {
+      const view = new DataView(prefixedByTimestamp.buffer);
+      const prefixTimestamp = view.getBigUint64(0);
+
+      if (prefixTimestamp < timestamp) {
+        const author = prefixedByPath.slice(
+          0,
+          this.protocolParams.pubkeyLength,
+        );
+        const path = prefixedByPath.slice(this.protocolParams.pubkeyLength);
+
+        // Delete.
+        // Flag a deletion.
+        const toDeleteKeys = entryKeyBytes(
+          path,
+          prefixTimestamp,
+          author,
+        );
+
+        const toDeleteValue = await this.ptaStorage.get(toDeleteKeys.pta);
+
+        const storageStuff = toDeleteValue
+          ? sliceSummarisableStorageValue(
+            toDeleteValue,
+            this.protocolParams,
+          )
+          : undefined;
+
+        await this.entryDriver.writeAheadFlag.flagRemoval(toDeleteKeys.pta);
+
+        // Remove from all the summarisable storages...
+        await Promise.all([
+          this.ptaStorage.remove(toDeleteKeys.pta),
+          this.tapStorage.remove(toDeleteKeys.tap),
+          this.aptStorage.remove(toDeleteKeys.apt),
+          this.entryDriver.prefixIterator.remove(prefixedByPath),
+          // Don't fail if we couldn't get the value of the hash due to DB being in a wonky state.
+          storageStuff
+            ? this.payloadDriver.erase(storageStuff.payloadHash)
+            : () => {},
+        ]);
+
+        await this.entryDriver.writeAheadFlag.unflagRemoval();
+      }
+    }
+
+    await this.entryDriver.writeAheadFlag.unflagInsertion();
   }
 
   async ingestPayload(
@@ -402,7 +522,7 @@ export class Replica<KeypairType> {
       // Stage it with the driver
       const stagedResult = await this.payloadDriver.stage(payload);
 
-      if (!compareBytes(stagedResult.hash, payloadHash)) {
+      if (compareBytes(stagedResult.hash, payloadHash) !== 0) {
         await stagedResult.reject();
 
         return {
@@ -496,70 +616,5 @@ export class Replica<KeypairType> {
 
       yield [signedEntry, payload];
     }
-  }
-
-  private async hasNewerPrefix(
-    entry: Entry,
-    prefixSize = 1,
-  ): Promise<boolean> {
-    const decoder = new TextDecoder();
-
-    console.group(decoder.decode(entry.identifier.path));
-
-    console.log(decoder.decode(entry.identifier.path.slice(0, prefixSize)));
-
-    const b = entryAuthorPathBytes(entry);
-
-    for await (
-      const otherEntry of this.aptStorage.entries(
-        b.slice(0, prefixSize),
-        b,
-      )
-    ) {
-      const maybePrefixPath = otherEntry.key.slice(
-        this.protocolParams.pubkeyLength,
-        -8,
-      );
-
-      console.log("inspecting", decoder.decode(maybePrefixPath));
-
-      if (bytesEquals(maybePrefixPath, new Uint8Array(entry.identifier.path))) {
-        console.log("same thing");
-
-        console.groupEnd();
-
-        return false;
-      }
-
-      if (isPrefixOf(maybePrefixPath, new Uint8Array(entry.identifier.path))) {
-        console.log("is a prefix");
-
-        const entryView = new DataView(otherEntry.key.buffer);
-
-        const entryTimestamp = entryView.getBigUint64(
-          otherEntry.key.byteLength - 8,
-        );
-
-        if (entryTimestamp > entry.record.timestamp) {
-          console.log("and timestamp was newer");
-
-          console.groupEnd();
-
-          return true;
-        }
-
-        console.log("and timestamp was not newer...");
-      } else if (prefixSize < entry.identifier.path.byteLength) {
-        console.log("is not a prefix...");
-
-        console.groupEnd();
-
-        return this.hasNewerPrefix(entry, prefixSize + 1);
-      }
-    }
-
-    console.groupEnd();
-
-    return false;
   }
 }
