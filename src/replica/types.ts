@@ -1,5 +1,4 @@
-import { SignFn, VerifyFn } from "../sign_verify/types.ts";
-import { SignedEntry } from "../types.ts";
+import { SignedEntry, SignFn, VerifyFn } from "../entries/types.ts";
 import { EntryDriver, PayloadDriver } from "./storage/types.ts";
 
 export interface ProtocolParameters<KeypairType> {
@@ -67,7 +66,8 @@ export type IngestEventNoOp = {
 
 export type IngestEventSuccess = {
   kind: "success";
-  entry: SignedEntry;
+
+  signed: SignedEntry;
   /** An ID representing the source of this ingested entry. */
   sourceId: string;
 };

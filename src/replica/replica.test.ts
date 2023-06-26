@@ -91,8 +91,8 @@ class TestReplica extends Replica<
           encodedEntry,
         ) => {
           const bytes = bytesConcat(
-            new Uint8Array(publicKey),
-            new Uint8Array(encodedEntry),
+            publicKey,
+            encodedEntry,
           );
 
           const ours = new Uint8Array(
@@ -204,7 +204,7 @@ Deno.test("Replica.set", async (test) => {
     );
 
     assert(res.kind === "success");
-    assertEquals(res.entry.entry.record.timestamp, BigInt(0));
+    assertEquals(res.signed.entry.record.timestamp, BigInt(0));
   });
 
   await test.step("If no timestamp is set, and there is nothing else at the same path, use the current time.", async () => {
@@ -222,8 +222,8 @@ Deno.test("Replica.set", async (test) => {
     );
 
     assert(res.kind === "success");
-    assert(res.entry.entry.record.timestamp >= timestampBefore);
-    assert(res.entry.entry.record.timestamp < BigInt(Date.now() * 1000));
+    assert(res.signed.entry.record.timestamp >= timestampBefore);
+    assert(res.signed.entry.record.timestamp < BigInt(Date.now() * 1000));
   });
 
   await test.step("If no timestamp is set, and there is something else at the same path, the timestamp is that timestamp + 1", async () => {
@@ -253,8 +253,8 @@ Deno.test("Replica.set", async (test) => {
     assert(first.kind === "success");
     assert(second.kind === "success");
     assertEquals(
-      second.entry.entry.record.timestamp,
-      first.entry.entry.record.timestamp + BigInt(1),
+      second.signed.entry.record.timestamp,
+      first.signed.entry.record.timestamp + BigInt(1),
     );
   });
 
@@ -294,7 +294,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     assert(otherReplicaRes.kind === "success");
 
-    const ingestRes = await replica.ingestEntry(otherReplicaRes.entry);
+    const ingestRes = await replica.ingestEntry(otherReplicaRes.signed);
 
     assert(ingestRes.kind === "failure");
     assert(ingestRes.reason === "invalid_entry");
@@ -316,7 +316,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
     assert(otherReplicaRes.kind === "success");
 
     const entryBadAuthorSignature = {
-      ...otherReplicaRes.entry,
+      ...otherReplicaRes.signed,
       authorSignature: new Uint8Array(32),
     };
 
@@ -326,7 +326,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
     assert(badAuthorSigRes.reason === "invalid_entry");
 
     const entryBadNamespaceSignature = {
-      ...otherReplicaRes.entry,
+      ...otherReplicaRes.signed,
       namespaceSignature: new Uint8Array(32),
     };
 
@@ -552,22 +552,22 @@ Deno.test("Replica.ingestPayload", async (test) => {
 
     assert(res.kind === "success");
 
-    const res2 = await replica.ingestEntry(res.entry);
+    const res2 = await replica.ingestEntry(res.signed);
 
     assert(res2.kind === "success");
 
     const res3 = await replica.ingestPayload({
-      path: new Uint8Array(res.entry.entry.identifier.path),
-      author: new Uint8Array(res.entry.entry.identifier.author),
-      timestamp: res.entry.entry.record.timestamp,
+      path: new Uint8Array(res.signed.entry.identifier.path),
+      author: new Uint8Array(res.signed.entry.identifier.author),
+      timestamp: res.signed.entry.record.timestamp,
     }, payload);
 
     assert(res3.kind === "success");
 
     const res4 = await replica.ingestPayload({
-      path: new Uint8Array(res.entry.entry.identifier.path),
-      author: new Uint8Array(res.entry.entry.identifier.author),
-      timestamp: res.entry.entry.record.timestamp,
+      path: new Uint8Array(res.signed.entry.identifier.path),
+      author: new Uint8Array(res.signed.entry.identifier.author),
+      timestamp: res.signed.entry.record.timestamp,
     }, payload);
 
     assert(res4.kind === "no_op");
@@ -588,14 +588,14 @@ Deno.test("Replica.ingestPayload", async (test) => {
 
     assert(res.kind === "success");
 
-    const res2 = await replica.ingestEntry(res.entry);
+    const res2 = await replica.ingestEntry(res.signed);
 
     assert(res2.kind === "success");
 
     const res3 = await replica.ingestPayload({
-      path: new Uint8Array(res.entry.entry.identifier.path),
-      author: new Uint8Array(res.entry.entry.identifier.author),
-      timestamp: res.entry.entry.record.timestamp,
+      path: new Uint8Array(res.signed.entry.identifier.path),
+      author: new Uint8Array(res.signed.entry.identifier.author),
+      timestamp: res.signed.entry.record.timestamp,
     }, new Uint8Array(32));
 
     assert(res3.kind === "failure");
@@ -617,14 +617,14 @@ Deno.test("Replica.ingestPayload", async (test) => {
 
     assert(res.kind === "success");
 
-    const res2 = await replica.ingestEntry(res.entry);
+    const res2 = await replica.ingestEntry(res.signed);
 
     assert(res2.kind === "success");
 
     const res3 = await replica.ingestPayload({
-      path: new Uint8Array(res.entry.entry.identifier.path),
-      author: new Uint8Array(res.entry.entry.identifier.author),
-      timestamp: res.entry.entry.record.timestamp,
+      path: new Uint8Array(res.signed.entry.identifier.path),
+      author: new Uint8Array(res.signed.entry.identifier.author),
+      timestamp: res.signed.entry.record.timestamp,
     }, payload);
 
     assert(res3.kind === "success");
@@ -676,17 +676,17 @@ Deno.test("Write-ahead flags", async (test) => {
 
     // Create PTA flag.
     const keys = entryKeyBytes(
-      new Uint8Array(res.entry.entry.identifier.path),
-      res.entry.entry.record.timestamp,
-      new Uint8Array(res.entry.entry.identifier.author),
+      new Uint8Array(res.signed.entry.identifier.path),
+      res.signed.entry.record.timestamp,
+      new Uint8Array(res.signed.entry.identifier.author),
     );
 
     // Create storage value.
     const storageValue = concatSummarisableStorageValue({
-      payloadHash: res.entry.entry.record.hash,
-      payloadLength: res.entry.entry.record.length,
-      authorSignature: res.entry.authorSignature,
-      namespaceSignature: res.entry.namespaceSignature,
+      payloadHash: res.signed.entry.record.hash,
+      payloadLength: res.signed.entry.record.length,
+      authorSignature: res.signed.authorSignature,
+      namespaceSignature: res.signed.namespaceSignature,
     });
 
     // Insert
@@ -737,9 +737,9 @@ Deno.test("Write-ahead flags", async (test) => {
 
     // Create PTA flag.
     const keys = entryKeyBytes(
-      new Uint8Array(res.entry.entry.identifier.path),
-      res.entry.entry.record.timestamp,
-      new Uint8Array(res.entry.entry.identifier.author),
+      new Uint8Array(res.signed.entry.identifier.path),
+      res.signed.entry.record.timestamp,
+      new Uint8Array(res.signed.entry.identifier.author),
     );
 
     await replica.writeAheadFlag().flagRemoval(keys.pta);

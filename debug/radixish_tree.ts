@@ -1,4 +1,4 @@
-import { RadixishTree } from "./radixish_tree.ts";
+import { RadixishTree } from "../src/replica/storage/prefix_iterators/radixish_tree.ts";
 
 const rtree = new RadixishTree();
 

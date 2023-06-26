@@ -1,7 +1,7 @@
-import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
-import { KvRadixTree } from "./kv_radix_tree.ts";
-import { RadixTreeMemory } from "./mem_radix_tree.ts";
-import { GwilsPrefixTree } from "./my_big_idea.ts";
+import { KvDriverDeno } from "../src/replica/storage/kv/kv_driver_deno.ts";
+import { KeyHopTree } from "../src/replica/storage/prefix_iterators/key_hop_tree.ts";
+import { RadixishTree } from "../src/replica/storage/prefix_iterators/radixish_tree.ts";
+import { SimpleKeyIterator } from "../src/replica/storage/prefix_iterators/simple_key_iterator.ts";
 
 const driver = new KvDriverDeno(await Deno.openKv("gtree"));
 const driver2 = new KvDriverDeno(await Deno.openKv("straightforward"));
@@ -9,9 +9,9 @@ const driver2 = new KvDriverDeno(await Deno.openKv("straightforward"));
 await driver.clear();
 await driver2.clear();
 
-const gtree = new GwilsPrefixTree<string>(driver);
-const stree = new KvRadixTree<string>(driver2);
-const mtree = new RadixTreeMemory<string>();
+const gtree = new KeyHopTree<string>(driver);
+const stree = new SimpleKeyIterator<string>(driver2);
+const mtree = new RadixishTree<string>();
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

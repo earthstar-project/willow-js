@@ -1,6 +1,6 @@
 import { bytesConcat } from "../../deps.ts";
+import { Entry } from "../entries/types.ts";
 import { ProtocolParameters } from "../replica/types.ts";
-import { Entry } from "../types.ts";
 
 export function compareBytes(a: Uint8Array, b: Uint8Array): number {
   // They have the same length.
@@ -82,30 +82,27 @@ export function entryKeyBytes(
   const ptaBytes = new Uint8Array(keyLength);
   const tapBytes = new Uint8Array(keyLength);
 
-  const pathBytes = new Uint8Array(path);
-  const authorBytes = new Uint8Array(author);
-
   // Author, path, timestamp
-  aptBytes.set(authorBytes, 0);
+  aptBytes.set(author, 0);
   aptBytes.set(
-    pathBytes,
-    authorBytes.byteLength,
+    path,
+    author.byteLength,
   );
 
   const aptDv = new DataView(aptBytes.buffer);
   aptDv.setBigUint64(
-    pathBytes.byteLength + authorBytes.byteLength,
+    path.byteLength + author.byteLength,
     timestamp,
   );
 
   // Path, timestamp, author
-  ptaBytes.set(pathBytes, 0);
+  ptaBytes.set(path, 0);
   const ptaDv = new DataView(ptaBytes.buffer);
   ptaDv.setBigUint64(
-    pathBytes.byteLength,
+    path.byteLength,
     timestamp,
   );
-  ptaBytes.set(authorBytes, pathBytes.byteLength + 8);
+  ptaBytes.set(author, path.byteLength + 8);
 
   // Timestamp, author, path
   const tapDv = new DataView(tapBytes.buffer);
@@ -113,8 +110,8 @@ export function entryKeyBytes(
     0,
     timestamp,
   );
-  tapBytes.set(authorBytes, 8);
-  tapBytes.set(pathBytes, 8 + authorBytes.byteLength);
+  tapBytes.set(author, 8);
+  tapBytes.set(path, 8 + author.byteLength);
 
   return { apt: aptBytes, pta: ptaBytes, tap: tapBytes };
 }
@@ -178,16 +175,16 @@ export function detailsFromBytes(
 
 export function concatSummarisableStorageValue(
   { payloadHash, namespaceSignature, authorSignature, payloadLength }: {
-    payloadHash: ArrayBuffer;
-    namespaceSignature: ArrayBuffer;
-    authorSignature: ArrayBuffer;
+    payloadHash: Uint8Array;
+    namespaceSignature: Uint8Array;
+    authorSignature: Uint8Array;
     payloadLength: bigint;
   },
 ): Uint8Array {
   return bytesConcat(
-    new Uint8Array(payloadHash),
-    new Uint8Array(namespaceSignature),
-    new Uint8Array(authorSignature),
+    payloadHash,
+    namespaceSignature,
+    authorSignature,
     bigintToBytes(payloadLength),
   );
 }

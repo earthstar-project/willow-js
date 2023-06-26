@@ -1,9 +1,9 @@
 import { signEntry, verifyEntry } from "./sign_verify.ts";
-import { Entry, SignedEntry } from "../types.ts";
+import { Entry, SignedEntry } from "./types.ts";
 import {
   assert,
   assertEquals,
-} from "https://deno.land/std@0.177.0/testing/asserts.ts";
+} from "https://deno.land/std@0.188.0/testing/asserts.ts";
 
 Deno.test("Signs and verifies", async () => {
   const namespaceKeypair = await makeKeypair();
@@ -12,13 +12,13 @@ Deno.test("Signs and verifies", async () => {
   const namespacePubkeyBytes = await exportKey(namespaceKeypair.publicKey);
   const authorPubkeyBytes = await exportKey(authorKeypair.publicKey);
 
-  const pathBytes = new Uint8Array([3, 3, 3, 3]).buffer;
-  const hashBytes = new Uint8Array([4, 4, 4, 4]).buffer;
+  const pathBytes = new Uint8Array([3, 3, 3, 3]);
+  const hashBytes = new Uint8Array([4, 4, 4, 4]);
 
   const entry: Entry = {
     identifier: {
-      namespace: namespacePubkeyBytes,
-      author: authorPubkeyBytes,
+      namespace: new Uint8Array(namespacePubkeyBytes),
+      author: new Uint8Array(authorPubkeyBytes),
       path: pathBytes,
     },
     record: {
@@ -32,8 +32,8 @@ Deno.test("Signs and verifies", async () => {
     entry,
     namespaceKeypair: namespaceKeypair,
     authorKeypair: authorKeypair,
-    sign: (keypair, entryEncoded) => {
-      return crypto.subtle.sign(
+    sign: async (keypair, entryEncoded) => {
+      const res = await crypto.subtle.sign(
         {
           name: "ECDSA",
           hash: { name: "SHA-256" },
@@ -41,6 +41,8 @@ Deno.test("Signs and verifies", async () => {
         keypair.privateKey,
         entryEncoded,
       );
+
+      return new Uint8Array(res);
     },
   });
 
@@ -71,8 +73,8 @@ Deno.test("Signs and verifies", async () => {
 
   const badSigned: SignedEntry = {
     entry: signed.entry,
-    authorSignature: new Uint8Array([1, 2, 3, 4]).buffer,
-    namespaceSignature: new Uint8Array([5, 6, 7, 8]).buffer,
+    authorSignature: new Uint8Array([1, 2, 3, 4]),
+    namespaceSignature: new Uint8Array([5, 6, 7, 8]),
   };
 
   const failedVerification = await verifyEntry({

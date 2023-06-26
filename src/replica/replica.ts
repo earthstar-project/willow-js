@@ -1,8 +1,8 @@
 import { EntryDriverMemory } from "./storage/memory_driver.ts";
 import { EntryDriver, PayloadDriver } from "./storage/types.ts";
-import { Entry, SignedEntry } from "../types.ts";
+
 import { bytesConcat, bytesEquals, deferred } from "../../deps.ts";
-import { signEntry, verifyEntry } from "../sign_verify/sign_verify.ts";
+
 import {
   bigintToBytes,
   compareBytes,
@@ -24,6 +24,8 @@ import {
 } from "./types.ts";
 import { PayloadDriverMemory } from "./storage/payload_drivers/memory.ts";
 import { SummarisableStorage } from "./storage/summarisable_storage/types.ts";
+import { signEntry, verifyEntry } from "../entries/sign_verify.ts";
+import { Entry, SignedEntry } from "../entries/types.ts";
 
 export class Replica<KeypairType> {
   private namespace: Uint8Array;
@@ -40,7 +42,12 @@ export class Replica<KeypairType> {
   private checkedWriteAheadFlag = deferred();
 
   constructor(opts: ReplicaOpts<KeypairType>) {
-    // TODO: At least validate that the namespace length matches the protocol params.
+    if (opts.namespace.byteLength !== opts.protocolParameters.pubkeyLength) {
+      throw new Error(
+        `Tried to instantiate a replica for a namespace of length ${opts.namespace.byteLength}, but protocol parameters specify ${opts.protocolParameters.pubkeyLength} length.`,
+      );
+    }
+
     this.namespace = opts.namespace;
     this.protocolParams = opts.protocolParameters;
 
@@ -177,8 +184,8 @@ export class Replica<KeypairType> {
         //
         if (
           compareBytes(
-            new Uint8Array(signed.entry.identifier.path),
-            new Uint8Array(input.path),
+            signed.entry.identifier.path,
+            input.path,
           ) !== 0
         ) {
           break;
@@ -225,7 +232,7 @@ export class Replica<KeypairType> {
     if (
       !bytesEquals(
         this.namespace,
-        new Uint8Array(signed.entry.identifier.namespace),
+        signed.entry.identifier.namespace,
       )
     ) {
       return {
@@ -271,7 +278,22 @@ export class Replica<KeypairType> {
         entryAuthorPathKeyUpper,
       )
     ) {
-      // TODO: break if encountering a path that is greater than ours within this range!
+      // The new entry will overwrite the one we just found.
+      // Remove it.
+      const otherDetails = detailsFromBytes(
+        otherEntry.key,
+        "author",
+        this.protocolParams.pubkeyLength,
+      );
+
+      if (
+        compareBytes(
+          otherDetails.path,
+          signed.entry.identifier.path,
+        ) !== 0
+      ) {
+        break;
+      }
 
       const otherEntryTimestampBytesView = new DataView(
         otherEntry.key.buffer,
@@ -290,7 +312,7 @@ export class Replica<KeypairType> {
       }
 
       const hashOrder = compareBytes(
-        new Uint8Array(signed.entry.record.hash),
+        signed.entry.record.hash,
         otherEntry.value,
       );
 
@@ -319,21 +341,11 @@ export class Replica<KeypairType> {
         };
       }
 
-      // The new entry will overwrite the one we just found.
-      // Remove it.
-      const otherDetails = detailsFromBytes(
-        otherEntry.key,
-        "author",
-        this.protocolParams.pubkeyLength,
-      );
       const keys = entryKeyBytes(
         otherDetails.path,
         otherDetails.timestamp,
         otherDetails.author,
       );
-
-      // TODO: This does only recovers the removal, not the entry we mean to ingest...
-      await this.entryDriver.writeAheadFlag.flagRemoval(keys.pta);
 
       Promise.all([
         this.ptaStorage.remove(keys.pta),
@@ -344,23 +356,21 @@ export class Replica<KeypairType> {
       await this.entryDriver.prefixIterator.remove(
         new Uint8Array(signed.entry.identifier.path),
       );
-
-      await this.entryDriver.writeAheadFlag.unflagRemoval();
     }
 
     await this.insertEntry({
-      namespaceSignature: new Uint8Array(signed.namespaceSignature),
-      authorSignature: new Uint8Array(signed.authorSignature),
-      path: new Uint8Array(signed.entry.identifier.path),
-      author: new Uint8Array(signed.entry.identifier.author),
-      hash: new Uint8Array(signed.entry.record.hash),
+      namespaceSignature: signed.namespaceSignature,
+      authorSignature: signed.authorSignature,
+      path: signed.entry.identifier.path,
+      author: signed.entry.identifier.author,
+      hash: signed.entry.record.hash,
       timestamp: signed.entry.record.timestamp,
       length: signed.entry.record.length,
     });
 
     return {
       kind: "success",
-      entry: signed,
+      signed: signed,
       sourceId: "TODO...",
     };
   }

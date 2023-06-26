@@ -135,7 +135,7 @@ export class KeyHopTree<ValueType> {
     // And this node is a phantom!!! Whooooo
     batch.set([searchKey], [
       Phantomness.Phantom,
-      new Uint8Array(newVectorFoundNodeBytes),
+      newVectorFoundNodeBytes,
       null as ValueType,
     ]);
 

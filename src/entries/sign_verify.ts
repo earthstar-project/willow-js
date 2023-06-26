@@ -1,6 +1,5 @@
-import { encodeEntry } from "../encode_decode.ts";
-import { Entry, SignedEntry } from "../types.ts";
-import { SignFn, VerifyFn } from "./types.ts";
+import { encodeEntry } from "./encode_decode.ts";
+import { Entry, SignedEntry, SignFn, VerifyFn } from "./types.ts";
 
 export async function signEntry<KeypairType>(
   opts: {

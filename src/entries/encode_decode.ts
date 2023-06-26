@@ -2,7 +2,7 @@ import { Entry } from "./types.ts";
 
 export function encodeEntry(
   entry: Entry,
-): ArrayBuffer {
+): Uint8Array {
   if (entry.identifier.path.byteLength > 256) {
     throw new Error("Record identifier path is longer than 2048 bits");
   }
@@ -24,20 +24,18 @@ export function encodeEntry(
   // Record identifier
 
   // Namespace pubkey
-  const namespaceUi8 = new Uint8Array(entry.identifier.namespace);
-  ui8.set(namespaceUi8, currentPosition);
+  ui8.set(entry.identifier.namespace, currentPosition);
 
   currentPosition += entry.identifier.namespace.byteLength;
 
   // Author pubkey
-  const authorUi8 = new Uint8Array(entry.identifier.author);
-  ui8.set(authorUi8, currentPosition);
+
+  ui8.set(entry.identifier.author, currentPosition);
 
   currentPosition += entry.identifier.author.byteLength;
 
   // Path
-  const pathUi8 = new Uint8Array(entry.identifier.path);
-  ui8.set(pathUi8, currentPosition);
+  ui8.set(entry.identifier.path, currentPosition);
 
   currentPosition += entry.identifier.path.byteLength;
 
@@ -54,40 +52,36 @@ export function encodeEntry(
   currentPosition += 8;
 
   // Hash
-  const hashUi8 = new Uint8Array(entry.record.hash);
-  ui8.set(hashUi8, currentPosition);
+  ui8.set(entry.record.hash, currentPosition);
 
-  return ui8.buffer;
+  return ui8;
 }
 
 export function decodeEntry(
-  encodedEntry: ArrayBuffer,
+  encodedEntry: Uint8Array,
   opts: {
     pubKeyLength: number;
     digestLength: number;
   },
 ): Entry {
-  const encodedUi8 = new Uint8Array(encodedEntry);
-  const dataView = new DataView(encodedEntry);
+  const dataView = new DataView(encodedEntry.buffer);
 
   const pathLength = encodedEntry.byteLength - (8 + opts.digestLength) -
     (opts.pubKeyLength * 2 + 8);
 
   return {
     identifier: {
-      namespace: encodedUi8.subarray(0, opts.pubKeyLength).buffer,
-      author:
-        encodedUi8.subarray(opts.pubKeyLength, opts.pubKeyLength * 2).buffer,
-      path: encodedUi8.subarray(
+      namespace: encodedEntry.subarray(0, opts.pubKeyLength),
+      author: encodedEntry.subarray(opts.pubKeyLength, opts.pubKeyLength * 2),
+      path: encodedEntry.subarray(
         opts.pubKeyLength * 2,
         opts.pubKeyLength * 2 + pathLength,
-      ).buffer,
+      ),
     },
     record: {
       timestamp: dataView.getBigUint64(opts.pubKeyLength * 2 + pathLength),
       length: dataView.getBigUint64(opts.pubKeyLength * 2 + pathLength + 8),
-      hash:
-        encodedUi8.subarray(opts.pubKeyLength * 2 + 8 + pathLength + 8).buffer,
+      hash: encodedEntry.subarray(opts.pubKeyLength * 2 + 8 + pathLength + 8),
     },
   };
 }

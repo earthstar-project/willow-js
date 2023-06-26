@@ -1,6 +1,6 @@
 import { KvDriverDeno } from "../src/replica/storage/kv/kv_driver_deno.ts";
-import { concatMonoid } from "../src/replica/storage/lifting_monoid.ts";
-import { Skiplist } from "../src/replica/storage/monoid_skiplist/monoid_skiplist.ts";
+import { concatMonoid } from "../src/replica/storage/summarisable_storage/lifting_monoid.ts";
+import { Skiplist } from "../src/replica/storage/summarisable_storage/monoid_skiplist/monoid_skiplist.ts";
 
 const compare = (a: string, b: string) => {
   if (a > b) {

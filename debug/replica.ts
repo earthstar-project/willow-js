@@ -42,8 +42,8 @@ const replica = new Replica<CryptoKeyPair>({
     hashLength: 32,
     pubkeyLength: 65,
     signatureLength: 64,
-    sign: (keypair, entryEncoded) => {
-      return crypto.subtle.sign(
+    sign: async (keypair, entryEncoded) => {
+      const res = await crypto.subtle.sign(
         {
           name: "ECDSA",
           hash: { name: "SHA-256" },
@@ -51,6 +51,8 @@ const replica = new Replica<CryptoKeyPair>({
         keypair.privateKey,
         entryEncoded,
       );
+
+      return new Uint8Array(res);
     },
     hash: async (bytes: Uint8Array | ReadableStream<Uint8Array>) => {
       return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));

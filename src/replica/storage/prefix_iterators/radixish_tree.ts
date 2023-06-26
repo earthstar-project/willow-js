@@ -76,7 +76,6 @@ export class RadixishTree<ValueType> implements PrefixIterator<ValueType> {
           // Insert child at that edge
 
           node.children.set(edge, {
-            // TODO: Only store part of key, pass a position with insert.
             key,
             value,
             children: new Map(),

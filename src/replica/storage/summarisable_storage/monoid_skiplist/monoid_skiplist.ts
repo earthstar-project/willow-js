@@ -1,4 +1,4 @@
-import { Key, KeyPart, KvDriver } from "../kv/types.ts";
+import { Key, KeyPart, KvDriver } from "../../kv/types.ts";
 import { SummarisableStorage } from "../types.ts";
 import { combineMonoid, LiftingMonoid, sizeMonoid } from "../lifting_monoid.ts";
 import { deferred } from "https://deno.land/std@0.188.0/async/deferred.ts";
@@ -27,9 +27,6 @@ type SkiplistValue<LiftedType> = [
   Uint8Array,
 ];
 
-// TODO: Add size + items monoid.
-// TODO: Raise the limit
-// TODO: Add remove method
 export class Skiplist<
   ValueType extends KeyPart,
   LiftedType,
