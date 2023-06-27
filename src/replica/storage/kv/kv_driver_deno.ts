@@ -1,8 +1,6 @@
 import { Key, KvBatch, KvDriver } from "./types.ts";
 
 export class KvDriverDeno implements KvDriver {
-  prefixLevel = 0;
-
   private kv: Deno.Kv;
 
   constructor(kv: Deno.Kv) {

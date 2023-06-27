@@ -1,0 +1,5 @@
+{
+  "tasks": {
+    "bundle": "deno run --allow-all scripts/build_web_bundle.ts"
+  }
+}

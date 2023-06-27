@@ -12,7 +12,7 @@ import { Replica } from "./replica.ts";
 import { crypto } from "https://deno.land/std@0.188.0/crypto/crypto.ts";
 import { RadixishTree } from "./storage/prefix_iterators/radixish_tree.ts";
 import { sha256XorMonoid } from "./storage/summarisable_storage/lifting_monoid.ts";
-import { MonoidRbTree } from "./storage/summarisable_storage/monoid_rbtree/monoid_rbtree.ts";
+import { MonoidRbTree } from "./storage/summarisable_storage/monoid_rbtree.ts";
 import { SummarisableStorage } from "./storage/summarisable_storage/types.ts";
 import { EntryDriver } from "./storage/types.ts";
 
