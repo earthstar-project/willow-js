@@ -13,7 +13,6 @@ export type KvBatch = {
 };
 
 export interface KvDriver {
-  prefixLevel: number;
   get<ValueType>(key: Key): Promise<ValueType | undefined>;
   set(key: Key, value: unknown): Promise<void>;
   delete(key: Key): Promise<void>;

@@ -12,7 +12,6 @@ Deno.test("Encodes and decodes", () => {
     identifier: {
       namespace: namespaceBytes,
       author: authorBytes,
-
       path: pathBytes,
     },
     record: {

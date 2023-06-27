@@ -4,12 +4,9 @@ export class PrefixedDriver implements KvDriver {
   private parentDriver: KvDriver;
   private prefix: Key;
 
-  prefixLevel: number;
-
   constructor(prefix: Key, driver: KvDriver) {
     this.parentDriver = driver;
     this.prefix = prefix;
-    this.prefixLevel = driver.prefixLevel + 1;
   }
 
   get<ValueType>(key: Key): Promise<ValueType | undefined> {
@@ -24,7 +21,7 @@ export class PrefixedDriver implements KvDriver {
     return this.parentDriver.delete([...this.prefix, ...key]);
   }
 
-  list<ValueType>(
+  async *list<ValueType>(
     range: { start: Key; end: Key },
     opts?: {
       prefix?: Key;
@@ -34,18 +31,37 @@ export class PrefixedDriver implements KvDriver {
     },
   ): AsyncIterable<{ key: Key; value: ValueType }> {
     if (opts) {
-      return this.parentDriver.list(
-        range,
-        {
-          prefix: opts.prefix ? [...this.prefix, ...opts.prefix] : undefined,
-          ...opts,
-        },
-      );
+      for await (
+        const entry of this.parentDriver.list<ValueType>(
+          range,
+          {
+            prefix: opts.prefix
+              ? [...this.prefix, ...opts.prefix]
+              : opts.prefix,
+            ...opts,
+          },
+        )
+      ) {
+        yield {
+          key: entry.key.slice(this.prefix.length),
+          value: entry.value,
+        };
+      }
     }
 
-    return this.parentDriver.list(
-      range,
-    );
+    for await (
+      const entry of this.parentDriver.list<ValueType>(
+        range,
+        {
+          prefix: this.prefix,
+        },
+      )
+    ) {
+      yield {
+        key: entry.key.slice(this.prefix.length),
+        value: entry.value,
+      };
+    }
   }
 
   clear(

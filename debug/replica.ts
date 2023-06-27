@@ -1,5 +1,7 @@
 import { Replica } from "../src/replica/replica.ts";
 import { crypto } from "https://deno.land/std@0.188.0/crypto/crypto.ts";
+import { ProtocolParameters } from "../src/replica/types.ts";
+import { getPersistedDrivers } from "../src/replica/util.ts";
 
 function makeKeypair() {
   return crypto.subtle.generateKey(
@@ -36,50 +38,58 @@ const namespacePair = await makeKeypair();
 const authorPair = await makeKeypair();
 const author2Pair = await makeKeypair();
 
-const replica = new Replica<CryptoKeyPair>({
-  namespace: new Uint8Array(await exportKey(namespacePair.publicKey)),
-  protocolParameters: {
-    hashLength: 32,
-    pubkeyLength: 65,
-    signatureLength: 64,
-    sign: async (keypair, entryEncoded) => {
-      const res = await crypto.subtle.sign(
-        {
-          name: "ECDSA",
-          hash: { name: "SHA-256" },
-        },
-        keypair.privateKey,
-        entryEncoded,
-      );
+const protocolParameters: ProtocolParameters<CryptoKeyPair> = {
+  hashLength: 32,
+  pubkeyLength: 65,
+  signatureLength: 64,
+  sign: async (keypair, entryEncoded) => {
+    const res = await crypto.subtle.sign(
+      {
+        name: "ECDSA",
+        hash: { name: "SHA-256" },
+      },
+      keypair.privateKey,
+      entryEncoded,
+    );
 
-      return new Uint8Array(res);
-    },
-    hash: async (bytes: Uint8Array | ReadableStream<Uint8Array>) => {
-      return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-    },
-    verify: async (
-      publicKey,
+    return new Uint8Array(res);
+  },
+  hash: async (bytes: Uint8Array | ReadableStream<Uint8Array>) => {
+    return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  },
+  verify: async (
+    publicKey,
+    signature,
+    encodedEntry,
+  ) => {
+    const cryptoKey = await importPublicKey(publicKey);
+
+    return crypto.subtle.verify(
+      {
+        name: "ECDSA",
+        hash: { name: "SHA-256" },
+      },
+      cryptoKey,
       signature,
       encodedEntry,
-    ) => {
-      const cryptoKey = await importPublicKey(publicKey);
-
-      return crypto.subtle.verify(
-        {
-          name: "ECDSA",
-          hash: { name: "SHA-256" },
-        },
-        cryptoKey,
-        signature,
-        encodedEntry,
-      );
-    },
-    async pubkeyBytesFromPair(pair) {
-      const arrayBuffer = await exportKey(pair.publicKey);
-
-      return new Uint8Array(arrayBuffer);
-    },
+    );
   },
+  async pubkeyBytesFromPair(pair) {
+    const arrayBuffer = await exportKey(pair.publicKey);
+
+    return new Uint8Array(arrayBuffer);
+  },
+};
+
+const drivers = await getPersistedDrivers(
+  "./debug/replica_test",
+  protocolParameters,
+);
+
+const replica = new Replica<CryptoKeyPair>({
+  namespace: new Uint8Array(await exportKey(namespacePair.publicKey)),
+  protocolParameters,
+  ...drivers,
 });
 
 // Two entries at the same path by different authors

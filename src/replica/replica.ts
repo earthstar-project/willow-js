@@ -1,4 +1,4 @@
-import { EntryDriverMemory } from "./storage/memory_driver.ts";
+import { EntryDriverMemory } from "./storage/entry_drivers/memory.ts";
 import { EntryDriver, PayloadDriver } from "./storage/types.ts";
 
 import { bytesConcat, bytesEquals, deferred } from "../../deps.ts";

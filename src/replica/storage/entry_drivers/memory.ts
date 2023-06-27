@@ -1,9 +1,9 @@
-import { compareBytes } from "../../util/bytes.ts";
-import { RadixishTree } from "./prefix_iterators/radixish_tree.ts";
-import { sha256XorMonoid } from "./summarisable_storage/lifting_monoid.ts";
-import { MonoidRbTree } from "./summarisable_storage/monoid_rbtree/monoid_rbtree.ts";
-import { SummarisableStorage } from "./summarisable_storage/types.ts";
-import { EntryDriver } from "./types.ts";
+import { compareBytes } from "../../../util/bytes.ts";
+import { RadixishTree } from "../prefix_iterators/radixish_tree.ts";
+import { sha256XorMonoid } from "../summarisable_storage/lifting_monoid.ts";
+import { MonoidRbTree } from "../summarisable_storage/monoid_rbtree/monoid_rbtree.ts";
+import { SummarisableStorage } from "../summarisable_storage/types.ts";
+import { EntryDriver } from "../types.ts";
 
 export class EntryDriverMemory implements EntryDriver {
   createSummarisableStorage(): SummarisableStorage<Uint8Array, Uint8Array> {

@@ -82,7 +82,6 @@ export class PayloadDriverMemory<KeypairType> implements PayloadDriver {
     return Promise.resolve({
       hash,
       length: newPayload.size,
-      size: bytes.byteLength,
       commit: () => {
         this.payloadMap.set(key, newPayload);
         this.stagingMap.delete(key);

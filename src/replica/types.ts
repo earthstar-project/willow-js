@@ -1,6 +1,12 @@
 import { SignedEntry, SignFn, VerifyFn } from "../entries/types.ts";
 import { EntryDriver, PayloadDriver } from "./storage/types.ts";
 
+export interface PayloadHashSizeTransformer
+  extends TransformStream<Uint8Array, Uint8Array> {
+  size: Promise<number>;
+  hash: Promise<Uint8Array>;
+}
+
 export interface ProtocolParameters<KeypairType> {
   sign: SignFn<KeypairType>;
   verify: VerifyFn;

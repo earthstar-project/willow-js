@@ -37,14 +37,11 @@ export class Skiplist<
   private isSetup = deferred();
   private monoid: LiftingMonoid<ValueType, [LiftedType, number]>;
 
-  private layerKeyIndex: number;
-  private valueKeyIndex: number;
+  private layerKeyIndex = 0;
+  private valueKeyIndex = 1;
 
   constructor(opts: SkiplistOpts<ValueType, LiftedType>) {
     this.kv = opts.kv;
-
-    this.layerKeyIndex = this.kv.prefixLevel + 0;
-    this.valueKeyIndex = this.kv.prefixLevel + 1;
 
     this.compare = opts.compare;
     this.monoid = combineMonoid(opts.monoid, sizeMonoid);
@@ -662,6 +659,7 @@ export class Skiplist<
     if (argOrder === 0) {
       for await (const result of this.allEntries(opts?.reverse)) {
         yield result;
+
         if (hitLimit()) break;
       }
     } else if (argOrder < 0) {
