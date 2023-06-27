@@ -1,4 +1,4 @@
-/** Generic top-level error class that other Earthstar errors inherit from. */
+/** Generic top-level error class that other Willow errors inherit from. */
 export class WillowError extends Error {
   constructor(message?: string) {
     super(message || "");
@@ -6,7 +6,7 @@ export class WillowError extends Error {
   }
 }
 
-/** Validation failed on a document, share address, author address, etc. */
+/** Validation failed on an entry, keypair, etc. */
 export class ValidationError extends WillowError {
   constructor(message?: string) {
     super(message || "Validation error");
@@ -14,12 +14,12 @@ export class ValidationError extends WillowError {
   }
 }
 
-/** Check if any value is a subclass of EarthstarError (return true) or not (return false) */
+/** Check if any value is a subclass of WillowError (return true) or not (return false) */
 export function isErr<T>(x: T | Error): x is WillowError {
   return x instanceof WillowError;
 }
 
-/** Check if any value is a subclass of EarthstarError (return false) or not (return true) */
+/** Check if any value is a subclass of WillowError (return false) or not (return true) */
 export function notErr<T>(x: T | Error): x is T {
   return !(x instanceof WillowError);
 }

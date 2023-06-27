@@ -3,6 +3,7 @@ import { ValidationError } from "../../../errors.ts";
 import { Payload, ProtocolParameters } from "../../types.ts";
 import { PayloadDriver } from "../types.ts";
 
+/** Store and retrieve payloads in memory. */
 export class PayloadDriverMemory<KeypairType> implements PayloadDriver {
   private stagingMap = new Map<string, Blob>();
   private payloadMap = new Map<string, Blob>();

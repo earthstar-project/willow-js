@@ -4,6 +4,7 @@ export type KeyPart =
   | number
   | bigint
   | boolean;
+
 export type Key = KeyPart[];
 
 export type KvBatch = {

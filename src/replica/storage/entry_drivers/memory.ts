@@ -5,6 +5,7 @@ import { MonoidRbTree } from "../summarisable_storage/monoid_rbtree/monoid_rbtre
 import { SummarisableStorage } from "../summarisable_storage/types.ts";
 import { EntryDriver } from "../types.ts";
 
+/** Store and retrieve entries in memory. */
 export class EntryDriverMemory implements EntryDriver {
   createSummarisableStorage(): SummarisableStorage<Uint8Array, Uint8Array> {
     return new MonoidRbTree({

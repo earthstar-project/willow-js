@@ -9,6 +9,7 @@ import { Skiplist } from "../summarisable_storage/monoid_skiplist/monoid_skiplis
 import { SummarisableStorage } from "../summarisable_storage/types.ts";
 import { EntryDriver } from "../types.ts";
 
+/** Store and retrieve entries in a key-value store. */
 export class EntryDriverKvStore implements EntryDriver {
   private kvDriver: KvDriver;
   prefixIterator: PrefixIterator<Uint8Array>;

@@ -27,6 +27,14 @@ import { SummarisableStorage } from "./storage/summarisable_storage/types.ts";
 import { signEntry, verifyEntry } from "../entries/sign_verify.ts";
 import { Entry, SignedEntry } from "../entries/types.ts";
 
+Deno.Kv;
+
+/** A local snapshot of a namespace to be written to, queried from, and synced with other replicas.
+ *
+ * Data is stored as many {@link SignedEntry} with a corresponding {@link Payload}, which the replica may or may not possess.
+ *
+ * Keeps data in memory unless persisted entry / payload drivers are specified.
+ */
 export class Replica<KeypairType> {
   private namespace: Uint8Array;
 
@@ -156,6 +164,7 @@ export class Replica<KeypairType> {
     });
   }
 
+  /** Create a new {@link SignedEntry} for some data and store both in the replica. */
   async set(
     namespaceKeypair: KeypairType,
     authorKeypair: KeypairType,
@@ -213,6 +222,8 @@ export class Replica<KeypairType> {
     const ingestResult = await this.ingestEntry(signed);
 
     if (ingestResult.kind !== "success") {
+      await stagedResult.reject();
+
       return ingestResult;
     }
 
@@ -221,6 +232,12 @@ export class Replica<KeypairType> {
     return ingestResult;
   }
 
+  /** Attempt to store a {@link SignedEntry} in the replica.
+   *
+   * An entry will not be ingested if it is found to have an invalid signature; if a newer entry with the same path and author are present; or if a newer entry with a path that is a prefix of the given entry exists.
+   *
+   * Additionally, if the entry's path is a prefix of already-held older entries, those entries will be removed from the replica.
+   */
   async ingestEntry(
     signed: SignedEntry,
   ): Promise<IngestEvent> {
@@ -480,6 +497,10 @@ export class Replica<KeypairType> {
     await this.entryDriver.writeAheadFlag.unflagInsertion();
   }
 
+  /** Attempt to store the corresponding payload for one of the replica's entries.
+   *
+   * A payload will not be ingested if the given entry is not stored in the replica; if the hash of the payload does not match the entry's; or if it is already held.
+   */
   async ingestPayload(
     entryDetails: {
       path: Uint8Array;
@@ -554,6 +575,7 @@ export class Replica<KeypairType> {
     };
   }
 
+  /** Retrieve a list of entry-payload pairs from the replica for a given {@link Query}. */
   async *query(
     query: Query,
   ): AsyncIterable<[SignedEntry, Payload | undefined]> {

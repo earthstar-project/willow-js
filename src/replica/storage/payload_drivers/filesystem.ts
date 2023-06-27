@@ -6,6 +6,7 @@ import { ensureDir } from "https://deno.land/std@0.188.0/fs/ensure_dir.ts";
 import { move } from "https://deno.land/std@0.188.0/fs/move.ts";
 import { encodeBase32 } from "../../../../deps.ts";
 
+/** Stores and retrieves payloads from the filesystem. */
 export class PayloadDriverFilesystem<KeypairType> implements PayloadDriver {
   constructor(
     readonly path: string,
