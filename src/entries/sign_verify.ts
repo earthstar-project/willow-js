@@ -1,15 +1,12 @@
 import { encodeEntry } from "./encode_decode.ts";
-import { Entry, SignedEntry } from "./types.ts";
+import { Entry, SignedEntry, SignFn, VerifyFn } from "./types.ts";
 
-export async function signEntry<KeyType>(
+export async function signEntry<KeypairType>(
   opts: {
     entry: Entry;
-    namespaceKeypair: KeyType;
-    authorKeypair: KeyType;
-    sign: (
-      key: KeyType,
-      encodedEntry: ArrayBuffer,
-    ) => Promise<ArrayBuffer>;
+    namespaceKeypair: KeypairType;
+    authorKeypair: KeypairType;
+    sign: SignFn<KeypairType>;
   },
 ): Promise<SignedEntry> {
   const encodedEntry = encodeEntry(opts.entry);
@@ -33,11 +30,7 @@ export async function signEntry<KeyType>(
 export async function verifyEntry(
   opts: {
     signedEntry: SignedEntry;
-    verify: (
-      publicKey: ArrayBuffer,
-      signature: ArrayBuffer,
-      signed: ArrayBuffer,
-    ) => Promise<boolean>;
+    verify: VerifyFn;
   },
 ): Promise<boolean> {
   const signedBytes = encodeEntry(opts.signedEntry.entry);
