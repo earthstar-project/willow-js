@@ -1,24 +1,24 @@
 name: Deno CI
 
 on:
-	push:
-		branches: [main]
-	pull_request:
-		branches: [main, github-action]
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, github-action]
 
 jobs:
-	build:
-		runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-latest
 
-		strategy:
-			matrix:
-				deno-version: ["1.36.0"]
+    strategy:
+      matrix:
+        deno-version: ["1.32.3"]
 
-		steps:
-			- uses: actions/checkout@v2
+    steps:
+      - uses: actions/checkout@v2
 
-			- uses: denoland/setup-deno@v1
-				with:
-					deno-version: ${{ matrix.deno-version}}
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: ${{ matrix.deno-version}}
 
-			- run: deno task test
+      - run: deno task test
