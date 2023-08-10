@@ -182,37 +182,9 @@ export class Replica<KeypairType> extends EventTarget {
       path: input.path,
     };
 
-    let timestamp = input.timestamp !== undefined
+    const timestamp = input.timestamp !== undefined
       ? input.timestamp
       : BigInt(Date.now() * 1000);
-
-    if (!input.timestamp) {
-      // Get the latest timestamp from the same path and plus one.
-
-      for await (
-        const [signed] of this.query({
-          order: "path",
-          lowerBound: input.path,
-          upperBound: incrementLastByte(input.path),
-        })
-      ) {
-        //
-        if (
-          compareBytes(
-            signed.entry.identifier.path,
-            input.path,
-          ) !== 0
-        ) {
-          break;
-        }
-
-        const proposedTimestamp = signed.entry.record.timestamp + BigInt(1);
-
-        if (proposedTimestamp > timestamp) {
-          timestamp = proposedTimestamp;
-        }
-      }
-    }
 
     // Stage it with the driver
     const stagedResult = await this.payloadDriver.stage(input.payload);

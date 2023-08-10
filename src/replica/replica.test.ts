@@ -223,40 +223,7 @@ Deno.test("Replica.set", async (test) => {
 
     assert(res.kind === "success");
     assert(res.signed.entry.record.timestamp >= timestampBefore);
-    assert(res.signed.entry.record.timestamp < BigInt(Date.now() * 1000));
-  });
-
-  await test.step("If no timestamp is set, and there is something else at the same path with a higher timestamp than now, then the timestamp is that timestamp + 1", async () => {
-    const replica = new TestReplica();
-
-    const first = await replica.set(
-      namespaceKeypair,
-      {
-        publicKey: new Uint8Array([7, 8, 9, 10]),
-        privateKey: new Uint8Array([7, 8, 9, 10]),
-      },
-      {
-        path: new Uint8Array([1, 2, 3, 4]),
-        payload: new Uint8Array([2, 2, 2, 2]),
-        timestamp: BigInt((Date.now() + 10) * 1000),
-      },
-    );
-
-    const second = await replica.set(
-      namespaceKeypair,
-      authorKeypair,
-      {
-        path: new Uint8Array([1, 2, 3, 4]),
-        payload: new Uint8Array([1, 1, 1, 1]),
-      },
-    );
-
-    assert(first.kind === "success");
-    assert(second.kind === "success");
-    assertEquals(
-      second.signed.entry.record.timestamp,
-      first.signed.entry.record.timestamp + BigInt(1),
-    );
+    assert(res.signed.entry.record.timestamp <= BigInt(Date.now() * 1000));
   });
 
   // if a timestamp is set,
@@ -439,6 +406,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
       {
         path: new Uint8Array([0, 0, 0, 0]),
         payload: new Uint8Array([0, 1, 2, 1]),
+        timestamp: BigInt(1000),
       },
     );
 
@@ -448,6 +416,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
       {
         path: new Uint8Array([0, 0, 0, 0]),
         payload: new Uint8Array([0, 1, 2, 3]),
+        timestamp: BigInt(2000),
       },
     );
 
