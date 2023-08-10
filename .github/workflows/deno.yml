@@ -1,10 +1,10 @@
-name: Deno CI
+name: Deno test
 
 on:
   push:
     branches: [main]
   pull_request:
-    branches: [main, github-action]
+    branches: [main]
 
 jobs:
   build:
