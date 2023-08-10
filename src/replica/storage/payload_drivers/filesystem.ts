@@ -82,7 +82,7 @@ export class PayloadDriverFilesystem<KeypairType> implements PayloadDriver {
     {
       hash: Uint8Array;
       length: number;
-      commit: () => Promise<void>;
+      commit: () => Promise<Payload>;
       reject: () => Promise<void>;
     }
   > {
@@ -104,9 +104,15 @@ export class PayloadDriverFilesystem<KeypairType> implements PayloadDriver {
         commit: async () => {
           await this.ensureDir();
           const base32Hash = encodeBase32(hash);
-          return move(stagingPath, join(this.path, base32Hash), {
+          const filePath = join(this.path, base32Hash);
+          await move(stagingPath, filePath, {
             overwrite: true,
           });
+
+          return {
+            bytes: () => Deno.readFile(filePath),
+            stream: new DenoFileReadable(filePath),
+          };
         },
         reject: () => {
           return Deno.remove(stagingPath);
@@ -152,12 +158,16 @@ export class PayloadDriverFilesystem<KeypairType> implements PayloadDriver {
       length,
       commit: async () => {
         await this.ensureDir();
-
         const base32Hash = encodeBase32(hash);
-
-        return move(stagingPath, join(this.path, base32Hash), {
+        const filePath = join(this.path, base32Hash);
+        await move(stagingPath, filePath, {
           overwrite: true,
         });
+
+        return {
+          bytes: () => Deno.readFile(filePath),
+          stream: new DenoFileReadable(filePath),
+        };
       },
       reject: async () => {
         try {

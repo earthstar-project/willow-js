@@ -12,7 +12,7 @@ import { Replica } from "./replica.ts";
 import { crypto } from "https://deno.land/std@0.188.0/crypto/crypto.ts";
 import { RadixishTree } from "./storage/prefix_iterators/radixish_tree.ts";
 import { sha256XorMonoid } from "./storage/summarisable_storage/lifting_monoid.ts";
-import { MonoidRbTree } from "./storage/summarisable_storage/monoid_rbtree/monoid_rbtree.ts";
+import { MonoidRbTree } from "./storage/summarisable_storage/monoid_rbtree.ts";
 import { SummarisableStorage } from "./storage/summarisable_storage/types.ts";
 import { EntryDriver } from "./storage/types.ts";
 
@@ -226,7 +226,7 @@ Deno.test("Replica.set", async (test) => {
     assert(res.signed.entry.record.timestamp < BigInt(Date.now() * 1000));
   });
 
-  await test.step("If no timestamp is set, and there is something else at the same path, the timestamp is that timestamp + 1", async () => {
+  await test.step("If no timestamp is set, and there is something else at the same path with a higher timestamp than now, then the timestamp is that timestamp + 1", async () => {
     const replica = new TestReplica();
 
     const first = await replica.set(
@@ -238,6 +238,7 @@ Deno.test("Replica.set", async (test) => {
       {
         path: new Uint8Array([1, 2, 3, 4]),
         payload: new Uint8Array([2, 2, 2, 2]),
+        timestamp: BigInt((Date.now() + 10) * 1000),
       },
     );
 
@@ -473,6 +474,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
       {
         path: new Uint8Array([0, 1]),
         payload: new Uint8Array([0, 1, 2, 1]),
+        timestamp: BigInt(0),
       },
     );
 
@@ -482,6 +484,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
       {
         path: new Uint8Array([0, 2]),
         payload: new Uint8Array([0, 1, 2, 1]),
+        timestamp: BigInt(0),
       },
     );
 
@@ -491,6 +494,55 @@ Deno.test("Replica.ingestEntry", async (test) => {
       {
         path: new Uint8Array([0]),
         payload: new Uint8Array([0, 1, 2, 3]),
+        timestamp: BigInt(1),
+      },
+    );
+
+    assert(prefixRes.kind === "success");
+
+    const entries = [];
+
+    for await (const entry of replica.query({ order: "path" })) {
+      entries.push(entry);
+    }
+
+    assertEquals(entries.length, 1);
+    assert(entries[0]);
+    assertEquals(entries[0][0].entry.identifier.path, new Uint8Array([0]));
+    assert(entries[0][1]);
+    assertEquals(await entries[0][1].bytes(), new Uint8Array([0, 1, 2, 3]));
+  });
+
+  await test.step("replaces older entries with paths prefixed by the new one, EVEN when that entry was edited", async () => {
+    const replica = new TestReplica();
+
+    await replica.set(
+      namespaceKeypair,
+      authorKeypair,
+      {
+        path: new Uint8Array([0, 1]),
+        payload: new Uint8Array([0, 1, 2, 1]),
+        timestamp: BigInt(0),
+      },
+    );
+
+    await replica.set(
+      namespaceKeypair,
+      authorKeypair,
+      {
+        path: new Uint8Array([0, 1]),
+        payload: new Uint8Array([0, 1, 2, 3]),
+        timestamp: BigInt(1),
+      },
+    );
+
+    const prefixRes = await replica.set(
+      namespaceKeypair,
+      authorKeypair,
+      {
+        path: new Uint8Array([0]),
+        payload: new Uint8Array([0, 1, 2, 3]),
+        timestamp: BigInt(2),
       },
     );
 

@@ -5,7 +5,7 @@ import { KvDriver } from "../kv/types.ts";
 import { KeyHopTree } from "../prefix_iterators/key_hop_tree.ts";
 import { PrefixIterator } from "../prefix_iterators/types.ts";
 import { sha256XorMonoid } from "../summarisable_storage/lifting_monoid.ts";
-import { Skiplist } from "../summarisable_storage/monoid_skiplist/monoid_skiplist.ts";
+import { Skiplist } from "../summarisable_storage/monoid_skiplist.ts";
 import { SummarisableStorage } from "../summarisable_storage/types.ts";
 import { EntryDriver } from "../types.ts";
 

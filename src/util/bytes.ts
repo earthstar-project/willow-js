@@ -3,8 +3,9 @@ import { Entry } from "../entries/types.ts";
 import { ProtocolParameters } from "../replica/types.ts";
 
 export function compareBytes(a: Uint8Array, b: Uint8Array): number {
-  // They have the same length.
-  for (let i = 0; i < a.byteLength; i++) {
+  const shorter = a.byteLength < b.byteLength ? a : b;
+
+  for (let i = 0; i < shorter.byteLength; i++) {
     const aByte = a[i];
     const bByte = b[i];
 
@@ -21,8 +22,10 @@ export function compareBytes(a: Uint8Array, b: Uint8Array): number {
     }
   }
 
-  if (b.byteLength > a.byteLength) {
+  if (a.byteLength < b.byteLength) {
     return -1;
+  } else if (a.byteLength > b.byteLength) {
+    return 1;
   }
 
   return 0;
@@ -155,7 +158,7 @@ export function detailsFromBytes(
       break;
     }
     case "timestamp": {
-      const dataView = new DataView(bytes);
+      const dataView = new DataView(bytes.buffer);
       timestamp = dataView.getBigUint64(
         0,
       );

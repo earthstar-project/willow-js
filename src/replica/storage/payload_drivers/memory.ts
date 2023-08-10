@@ -64,7 +64,7 @@ export class PayloadDriverMemory<KeypairType> implements PayloadDriver {
     {
       hash: Uint8Array;
       length: number;
-      commit: () => Promise<void>;
+      commit: () => Promise<Payload>;
       reject: () => Promise<void>;
     }
   > {
@@ -87,7 +87,11 @@ export class PayloadDriverMemory<KeypairType> implements PayloadDriver {
         this.payloadMap.set(key, newPayload);
         this.stagingMap.delete(key);
 
-        return Promise.resolve();
+        return Promise.resolve({
+          bytes: async () => new Uint8Array(await newPayload.arrayBuffer()),
+          stream: // Need to do this for Node's sake.
+            newPayload.stream() as unknown as ReadableStream<Uint8Array>,
+        });
       },
       reject: () => {
         this.stagingMap.delete(key);

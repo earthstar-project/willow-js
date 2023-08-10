@@ -26,8 +26,12 @@ import { PayloadDriverMemory } from "./storage/payload_drivers/memory.ts";
 import { SummarisableStorage } from "./storage/summarisable_storage/types.ts";
 import { signEntry, verifyEntry } from "../entries/sign_verify.ts";
 import { Entry, SignedEntry } from "../entries/types.ts";
-
-Deno.Kv;
+import {
+  EntryIngestEvent,
+  EntryPayloadSetEvent,
+  EntryRemoveEvent,
+  PayloadIngestEvent,
+} from "./events.ts";
 
 /** A local snapshot of a namespace to be written to, queried from, and synced with other replicas.
  *
@@ -35,8 +39,8 @@ Deno.Kv;
  *
  * Keeps data in memory unless persisted entry / payload drivers are specified.
  */
-export class Replica<KeypairType> {
-  private namespace: Uint8Array;
+export class Replica<KeypairType> extends EventTarget {
+  namespace: Uint8Array;
 
   private protocolParams: ProtocolParameters<KeypairType>;
 
@@ -50,6 +54,8 @@ export class Replica<KeypairType> {
   private checkedWriteAheadFlag = deferred();
 
   constructor(opts: ReplicaOpts<KeypairType>) {
+    super();
+
     if (opts.namespace.byteLength !== opts.protocolParameters.pubkeyLength) {
       throw new Error(
         `Tried to instantiate a replica for a namespace of length ${opts.namespace.byteLength}, but protocol parameters specify ${opts.protocolParameters.pubkeyLength} length.`,
@@ -200,7 +206,11 @@ export class Replica<KeypairType> {
           break;
         }
 
-        timestamp = signed.entry.record.timestamp + BigInt(1);
+        const proposedTimestamp = signed.entry.record.timestamp + BigInt(1);
+
+        if (proposedTimestamp > timestamp) {
+          timestamp = proposedTimestamp;
+        }
       }
     }
 
@@ -227,7 +237,9 @@ export class Replica<KeypairType> {
       return ingestResult;
     }
 
-    await stagedResult.commit();
+    const payload = await stagedResult.commit();
+
+    this.dispatchEvent(new EntryPayloadSetEvent(signed, payload));
 
     return ingestResult;
   }
@@ -240,6 +252,7 @@ export class Replica<KeypairType> {
    */
   async ingestEntry(
     signed: SignedEntry,
+    externalSourceId?: string,
   ): Promise<IngestEvent> {
     await this.checkedWriteAheadFlag;
 
@@ -305,8 +318,8 @@ export class Replica<KeypairType> {
 
       if (
         compareBytes(
-          otherDetails.path,
           signed.entry.identifier.path,
+          otherDetails.path,
         ) !== 0
       ) {
         break;
@@ -328,9 +341,14 @@ export class Replica<KeypairType> {
         };
       }
 
+      const { payloadHash: otherPayloadHash } = sliceSummarisableStorageValue(
+        otherEntry.value,
+        this.protocolParams,
+      );
+
       const hashOrder = compareBytes(
         signed.entry.record.hash,
-        otherEntry.value,
+        otherPayloadHash,
       );
 
       // If the timestamps are the same, and our hash is less, we have a no-op.
@@ -364,14 +382,14 @@ export class Replica<KeypairType> {
         otherDetails.author,
       );
 
-      Promise.all([
+      await Promise.all([
         this.ptaStorage.remove(keys.pta),
         this.tapStorage.remove(keys.tap),
         this.aptStorage.remove(keys.apt),
       ]);
 
       await this.entryDriver.prefixIterator.remove(
-        new Uint8Array(signed.entry.identifier.path),
+        keys.apt.slice(0, -8),
       );
     }
 
@@ -385,10 +403,16 @@ export class Replica<KeypairType> {
       length: signed.entry.record.length,
     });
 
+    // Indicates that this ingestion is not being triggered by a local set,
+    // so the payload will arrive separately.
+    if (externalSourceId) {
+      this.dispatchEvent(new EntryIngestEvent(signed));
+    }
+
     return {
       kind: "success",
       signed: signed,
-      sourceId: "TODO...",
+      externalSourceId: externalSourceId,
     };
   }
 
@@ -457,12 +481,14 @@ export class Replica<KeypairType> {
           0,
           this.protocolParams.pubkeyLength,
         );
-        const path = prefixedByPath.slice(this.protocolParams.pubkeyLength);
+        const prefixedPath = prefixedByPath.slice(
+          this.protocolParams.pubkeyLength,
+        );
 
         // Delete.
         // Flag a deletion.
         const toDeleteKeys = entryKeyBytes(
-          path,
+          prefixedPath,
           prefixTimestamp,
           author,
         );
@@ -489,6 +515,27 @@ export class Replica<KeypairType> {
             ? this.payloadDriver.erase(storageStuff.payloadHash)
             : () => {},
         ]);
+
+        if (storageStuff) {
+          this.dispatchEvent(
+            new EntryRemoveEvent({
+              namespaceSignature: storageStuff.namespaceSignature,
+              authorSignature: storageStuff.authorSignature,
+              entry: {
+                identifier: {
+                  path: prefixedPath,
+                  author,
+                  namespace: this.namespace,
+                },
+                record: {
+                  hash: storageStuff.payloadHash,
+                  length: storageStuff.payloadLength,
+                  timestamp: prefixTimestamp,
+                },
+              },
+            }),
+          );
+        }
 
         await this.entryDriver.writeAheadFlag.unflagRemoval();
       }
@@ -536,7 +583,12 @@ export class Replica<KeypairType> {
       }
 
       // Check if we already have it.
-      const { payloadHash } = sliceSummarisableStorageValue(
+      const {
+        payloadHash,
+        authorSignature,
+        namespaceSignature,
+        payloadLength,
+      } = sliceSummarisableStorageValue(
         entry.value,
         this.protocolParams,
       );
@@ -562,7 +614,32 @@ export class Replica<KeypairType> {
         };
       }
 
-      await stagedResult.commit();
+      const committedPayload = await stagedResult.commit();
+
+      const { author, path, timestamp } = detailsFromBytes(
+        entry.key,
+        "path",
+        this.protocolParams.pubkeyLength,
+      );
+
+      const signedEntry: SignedEntry = {
+        authorSignature: authorSignature,
+        namespaceSignature: namespaceSignature,
+        entry: {
+          identifier: {
+            author,
+            namespace: this.namespace,
+            path,
+          },
+          record: {
+            hash: payloadHash,
+            length: payloadLength,
+            timestamp,
+          },
+        },
+      };
+
+      this.dispatchEvent(new PayloadIngestEvent(signedEntry, committedPayload));
 
       return {
         kind: "success",

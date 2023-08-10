@@ -90,7 +90,7 @@ export type IngestEventSuccess = {
   /** The successfully ingested signed entry. */
   signed: SignedEntry;
   /** An ID representing the source of this ingested entry. */
-  sourceId: string;
+  externalSourceId?: string;
 };
 
 export type IngestEvent =

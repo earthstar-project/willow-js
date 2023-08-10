@@ -1,7 +1,7 @@
-import { Key, KeyPart, KvDriver } from "../../kv/types.ts";
-import { SummarisableStorage } from "../types.ts";
-import { combineMonoid, LiftingMonoid, sizeMonoid } from "../lifting_monoid.ts";
 import { deferred } from "https://deno.land/std@0.188.0/async/deferred.ts";
+import { Key, KeyPart, KvDriver } from "../kv/types.ts";
+import { combineMonoid, LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
+import { SummarisableStorage } from "./types.ts";
 
 const LAYER_INSERT_PROBABILITY = 0.5;
 const LAYER_LEVEL_LIMIT = 64;

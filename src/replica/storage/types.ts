@@ -42,7 +42,7 @@ export interface PayloadDriver {
       hash: Uint8Array;
       length: number;
       /** Commit the staged attachment to storage. */
-      commit: () => Promise<void>;
+      commit: () => Promise<Payload>;
       /** Reject the staged attachment, erasing it. */
       reject: () => Promise<void>;
     }
