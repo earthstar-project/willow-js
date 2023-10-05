@@ -1,4 +1,5 @@
-import { EncodingScheme, Entry } from "./types.ts";
+import { EncodingScheme } from "../replica/types.ts";
+import { Entry } from "./types.ts";
 
 export function encodeEntry<
   NamespacePublicKey,

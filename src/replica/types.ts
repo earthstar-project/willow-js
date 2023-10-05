@@ -1,42 +1,80 @@
-import { SignedEntry, SignFn, VerifyFn } from "../entries/types.ts";
+import { Entry } from "../entries/types.ts";
 import { EntryDriver, PayloadDriver } from "./storage/types.ts";
 
 /** Concrete parameters peculiar to a specific usage of Willow. */
-export interface ProtocolParameters<KeypairType> {
-  /** The function used to sign entries. */
-  sign: SignFn<KeypairType>;
-  /** The function use to verify entries. */
-  verify: VerifyFn;
-  /** The function used to create hashes for blobs or streams of data. */
-  hash: (bytes: Uint8Array | ReadableStream<Uint8Array>) => Promise<Uint8Array>;
-  /** The byte-length of keypair public keys. */
-  pubkeyLength: number;
-  /** The byte-length of hashes. */
-  hashLength: number;
-  /** The byte-length of signatures. */
-  signatureLength: number;
-  /** A function to extract a public key from a keypair as bytes. */
-  pubkeyBytesFromPair: (pair: KeypairType) => Promise<Uint8Array>;
+export interface ProtocolParameters<
+  NamespacePublicKey,
+  SubspacePublicKey,
+  PayloadDigest,
+  AuthorisationOpts,
+  AuthorisationToken,
+> {
+  // The path encoding scheme.
+  /** The encoding scheme used for paths.
+   *
+   * An encoded path **must** be the concatenation of a big-endian k-bit integer (where k is the number of bits needed to represent all numbers from 0 to your max path length, inclusive) and the bytes of the paths themselves.
+   */
+  pathEncoding: EncodingScheme<Uint8Array>;
+
+  // Namespace encoding scheme
+  namespaceScheme: EncodingScheme<NamespacePublicKey> & {
+    isEqual: EqualityFn<NamespacePublicKey>;
+  };
+
+  // Learn what
+  subspaceScheme: EncodingScheme<SubspacePublicKey> & {
+    isEqual: EqualityFn<SubspacePublicKey>;
+  };
+
+  // Learn about payloads and producing them from bytes
+  payloadScheme: EncodingScheme<PayloadDigest> & {
+    fromBytes: (bytes: Uint8Array | ReadableStream) => Promise<PayloadDigest>;
+    order: (a: PayloadDigest, b: PayloadDigest) => -1 | 0 | 1;
+  };
+
+  authorisationScheme: {
+    authorise(
+      entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
+      opts: AuthorisationOpts,
+    ): Promise<AuthorisationToken>;
+    isAuthorised: (
+      entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
+      token: AuthorisationToken,
+    ) => Promise<boolean>;
+    tokenEncoding: EncodingScheme<AuthorisationToken>;
+  };
 }
 
-export type ReplicaOpts<KeypairType> = {
+export type ReplicaOpts<
+  NamespacePublicKey,
+  SubspacePublicKey,
+  PayloadDigest,
+  AuthorisationOpts,
+  AuthorisationToken,
+> = {
   /** The public key of the namespace this replica is a snapshot of. */
-  namespace: Uint8Array;
+  namespace: NamespacePublicKey;
   /** The protocol parameters this replica should use. */
-  protocolParameters: ProtocolParameters<KeypairType>;
+  protocolParameters: ProtocolParameters<
+    NamespacePublicKey,
+    SubspacePublicKey,
+    PayloadDigest,
+    AuthorisationOpts,
+    AuthorisationToken
+  >;
   /** An optional driver used to store and retrieve a replica's entries. */
   entryDriver?: EntryDriver;
   /** An option driver used to store and retrieve a replica's payloads.  */
-  payloadDriver?: PayloadDriver;
+  payloadDriver?: PayloadDriver<PayloadDigest>;
 };
 
 export type QueryOrder =
-  /** By path, then timestamp, then author */
+  /** By path, then timestamp, then subspace */
   | "path"
-  /** By timestamp, then author, then path */
+  /** By timestamp, then subspace, then path */
   | "timestamp"
-  /** By author, then path, then timestamp */
-  | "author";
+  /** By subspace, then path, then timestamp */
+  | "subspace";
 
 export interface QueryBase {
   /** The order to return results in. */
@@ -55,12 +93,12 @@ export interface PathQuery extends QueryBase {
   upperBound?: Uint8Array;
 }
 
-export interface AuthorQuery extends QueryBase {
-  order: "author";
-  /** The author public key to start returning results from, inclusive. Starts from the first entry in the replica if left undefined. */
-  lowerBound?: Uint8Array;
-  /** The author public key to stop returning results at, exclusive. Stops after the last entry in the replica if  undefined. */
-  upperBound?: Uint8Array;
+export interface SubspaceQuery<SubspacePublicKey> extends QueryBase {
+  order: "subspace";
+  /** The subspace public key to start returning results from, inclusive. Starts from the first entry in the replica if left undefined. */
+  lowerBound?: SubspacePublicKey;
+  /** The subspace public key to stop returning results at, exclusive. Stops after the last entry in the replica if  undefined. */
+  upperBound?: SubspacePublicKey;
 }
 
 export interface TimestampQuery extends QueryBase {
@@ -71,7 +109,45 @@ export interface TimestampQuery extends QueryBase {
   upperBound?: bigint;
 }
 
-export type Query = PathQuery | AuthorQuery | TimestampQuery;
+export type Query<SubspacePublicKey> =
+  | PathQuery
+  | SubspaceQuery<SubspacePublicKey>
+  | TimestampQuery;
+
+export type EncodingScheme<ValueType> = {
+  /** A function to encode a given `ValueType`. */
+  encode(value: ValueType): Uint8Array;
+  /** A function to decode a given `ValueType` */
+  decode(encoded: Uint8Array): ValueType;
+  /** A function which returns the bytelength for a given `ValueType` when encoded. */
+  encodedLength(value: ValueType): number;
+};
+
+export type KeypairEncodingScheme<PublicKey, Signature> = {
+  /** The encoding scheme for a key pair's public key type. */
+  publicKey: EncodingScheme<PublicKey>;
+  /** The encoding scheme for a key pair's signature type. */
+  signature: EncodingScheme<Signature>;
+};
+
+/** A scheme for signing and verifying data using key pairs. */
+export type SignatureScheme<PublicKey, SecretKey, Signature> = {
+  sign: (secretKey: SecretKey, bytestring: Uint8Array) => Promise<Signature>;
+  verify: (
+    publicKey: PublicKey,
+    signature: Signature,
+    bytestring: Uint8Array,
+  ) => Promise<boolean>;
+};
+
+export type KeypairScheme<PublicKey, SecretKey, Signature> = {
+  signatureScheme: SignatureScheme<PublicKey, SecretKey, Signature>;
+  encodingScheme: KeypairEncodingScheme<PublicKey, Signature>;
+};
+
+export type EqualityFn<ValueType> = (a: ValueType, b: ValueType) => boolean;
+
+// Events
 
 export type IngestEventFailure = {
   kind: "failure";
@@ -82,21 +158,33 @@ export type IngestEventFailure = {
 
 export type IngestEventNoOp = {
   kind: "no_op";
-  reason: "obsolete_from_same_author" | "newer_prefix_found";
+  reason: "obsolete_from_same_subspace" | "newer_prefix_found";
 };
 
-export type IngestEventSuccess = {
+export type IngestEventSuccess<
+  NamespacePublicKey,
+  SubspacePublicKey,
+  PayloadDigest,
+> = {
   kind: "success";
   /** The successfully ingested signed entry. */
-  signed: SignedEntry;
+  entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>;
   /** An ID representing the source of this ingested entry. */
   externalSourceId?: string;
 };
 
-export type IngestEvent =
+export type IngestEvent<
+  NamespacePublicKey,
+  SubspacePublicKey,
+  PayloadDigest,
+> =
   | IngestEventFailure
   | IngestEventNoOp
-  | IngestEventSuccess;
+  | IngestEventSuccess<
+    NamespacePublicKey,
+    SubspacePublicKey,
+    PayloadDigest
+  >;
 
 /** The data associated with a {@link SignedEntry}. */
 export type Payload = {
@@ -106,8 +194,9 @@ export type Payload = {
   stream: ReadableStream<Uint8Array>;
 };
 
-export type EntryInput = {
+export type EntryInput<SubspacePublicKey> = {
   path: Uint8Array;
+  subspace: SubspacePublicKey;
   payload: Uint8Array | ReadableStream<Uint8Array>;
   /** The desired timestamp for the new entry. If left undefined, uses the current time, OR if another entry exists at the same path will be that entry's timestamp + 1. */
   timestamp?: bigint;

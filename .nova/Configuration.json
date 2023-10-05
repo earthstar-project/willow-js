@@ -1,0 +1,12 @@
+{
+  "co.gwil.deno.config.enabledPaths" : [
+    "\/Users\/gwil\/Projects\/willow-js\/src",
+    "\/Users\/gwil\/Projects\/willow-js\/scripts",
+    "\/Users\/gwil\/Projects\/willow-js\/debug"
+  ],
+  "co.gwil.deno.config.enableLinting" : "true",
+  "co.gwil.deno.config.enableUnstable" : "true",
+  "deno.disablePaths" : [
+    "dist"
+  ]
+}

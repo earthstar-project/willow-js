@@ -1,5 +1,5 @@
 import { MonoidRbTree } from "./monoid_rbtree.ts";
-import { assertEquals } from "https://deno.land/std@0.158.0/testing/asserts.ts";
+import { assertEquals } from "$std/testing/asserts.ts";
 import { Skiplist } from "./monoid_skiplist.ts";
 import { concatMonoid } from "./lifting_monoid.ts";
 import { KvDriverDeno } from "../kv/kv_driver_deno.ts";

@@ -1,6 +1,7 @@
 import { concat } from "$std/bytes/concat.ts";
+import { EncodingScheme } from "../replica/types.ts";
 import { decodeEntry, encodeEntry } from "./encode_decode.ts";
-import { EncodingScheme, Entry } from "./types.ts";
+import { Entry } from "./types.ts";
 import { assertEquals } from "https://deno.land/std@0.188.0/testing/asserts.ts";
 
 Deno.test("Encodes and decodes", () => {

@@ -1,6 +1,6 @@
 {
   "imports": {
-    "$std/": "https://deno.land/std@0.198.0/",
+    "$std/": "https://deno.land/std@0.203.0/",
     "$meadowcap/": "../meadowcap/"
   },
   "tasks": {

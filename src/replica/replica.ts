@@ -1,17 +1,9 @@
 import { EntryDriverMemory } from "./storage/entry_drivers/memory.ts";
 import { EntryDriver, PayloadDriver } from "./storage/types.ts";
-
-import { bytesConcat, bytesEquals, deferred } from "../../deps.ts";
-
 import {
   bigintToBytes,
   compareBytes,
-  concatSummarisableStorageValue,
-  detailsFromBytes,
-  entryAuthorPathBytes,
-  entryKeyBytes,
   incrementLastByte,
-  sliceSummarisableStorageValue,
 } from "../util/bytes.ts";
 import {
   EntryInput,
@@ -24,14 +16,22 @@ import {
 } from "./types.ts";
 import { PayloadDriverMemory } from "./storage/payload_drivers/memory.ts";
 import { SummarisableStorage } from "./storage/summarisable_storage/types.ts";
-import { signEntry, verifyEntry } from "../entries/sign_verify.ts";
-import { Entry, SignedEntry } from "../entries/types.ts";
+import { Entry } from "../entries/types.ts";
 import {
   EntryIngestEvent,
   EntryPayloadSetEvent,
   EntryRemoveEvent,
   PayloadIngestEvent,
 } from "./events.ts";
+import { deferred } from "$std/async/deferred.ts";
+import { concat } from "$std/bytes/concat.ts";
+import { equals as equalsBytes } from "$std/bytes/equals.ts";
+import {
+  decodeEntryKey,
+  decodeSummarisableStorageValue,
+  encodeEntryKeys,
+  encodeSummarisableStorageValue,
+} from "./util.ts";
 
 /** A local snapshot of a namespace to be written to, queried from, and synced with other replicas.
  *
@@ -39,42 +39,56 @@ import {
  *
  * Keeps data in memory unless persisted entry / payload drivers are specified.
  */
-export class Replica<KeypairType> extends EventTarget {
-  namespace: Uint8Array;
+export class Replica<
+  NamespacePublicKey,
+  SubspacePublicKey,
+  PayloadDigest,
+  AuthorisationOpts,
+  AuthorisationToken,
+> extends EventTarget {
+  namespace: NamespacePublicKey;
 
-  private protocolParams: ProtocolParameters<KeypairType>;
+  private protocolParams: ProtocolParameters<
+    NamespacePublicKey,
+    SubspacePublicKey,
+    PayloadDigest,
+    AuthorisationOpts,
+    AuthorisationToken
+  >;
 
-  private ptaStorage: SummarisableStorage<Uint8Array, Uint8Array>;
-  private aptStorage: SummarisableStorage<Uint8Array, Uint8Array>;
-  private tapStorage: SummarisableStorage<Uint8Array, Uint8Array>;
+  private ptsStorage: SummarisableStorage<Uint8Array, Uint8Array>;
+  private sptStorage: SummarisableStorage<Uint8Array, Uint8Array>;
+  private tspStorage: SummarisableStorage<Uint8Array, Uint8Array>;
 
   private entryDriver: EntryDriver;
-  private payloadDriver: PayloadDriver;
+  private payloadDriver: PayloadDriver<PayloadDigest>;
 
   private checkedWriteAheadFlag = deferred();
 
-  constructor(opts: ReplicaOpts<KeypairType>) {
+  constructor(
+    opts: ReplicaOpts<
+      NamespacePublicKey,
+      SubspacePublicKey,
+      PayloadDigest,
+      AuthorisationOpts,
+      AuthorisationToken
+    >,
+  ) {
     super();
-
-    if (opts.namespace.byteLength !== opts.protocolParameters.pubkeyLength) {
-      throw new Error(
-        `Tried to instantiate a replica for a namespace of length ${opts.namespace.byteLength}, but protocol parameters specify ${opts.protocolParameters.pubkeyLength} length.`,
-      );
-    }
 
     this.namespace = opts.namespace;
     this.protocolParams = opts.protocolParameters;
 
     const entryDriver = opts.entryDriver || new EntryDriverMemory();
     const payloadDriver = opts.payloadDriver ||
-      new PayloadDriverMemory(opts.protocolParameters);
+      new PayloadDriverMemory(opts.protocolParameters.payloadScheme);
 
     this.entryDriver = entryDriver;
     this.payloadDriver = payloadDriver;
 
-    this.ptaStorage = entryDriver.createSummarisableStorage("pta");
-    this.aptStorage = entryDriver.createSummarisableStorage("apt");
-    this.tapStorage = entryDriver.createSummarisableStorage("tap");
+    this.ptsStorage = entryDriver.createSummarisableStorage("pts");
+    this.sptStorage = entryDriver.createSummarisableStorage("spt");
+    this.tspStorage = entryDriver.createSummarisableStorage("tsp");
 
     this.checkWriteAheadFlag();
   }
@@ -84,63 +98,82 @@ export class Replica<KeypairType> extends EventTarget {
     const existingRemove = await this.entryDriver.writeAheadFlag.wasRemoving();
 
     if (existingInsert) {
-      const ptaKey = existingInsert[0];
+      const ptsKey = existingInsert[0];
 
-      const details = detailsFromBytes(
-        ptaKey,
+      const details = decodeEntryKey(
+        ptsKey,
         "path",
-        this.protocolParams.pubkeyLength,
+        this.protocolParams.subspaceScheme,
+        this.protocolParams.pathEncoding,
       );
 
-      const keys = entryKeyBytes(
-        details.path,
-        details.timestamp,
-        details.author,
+      const keys = encodeEntryKeys(
+        {
+          path: details.path,
+          timestamp: details.timestamp,
+          subspace: details.subspace,
+          pathEncoding: this.protocolParams.pathEncoding,
+          subspaceEncoding: this.protocolParams.subspaceScheme,
+        },
       );
 
       // Remove key for each storage.
       await Promise.all([
-        this.ptaStorage.remove(keys.pta),
-        this.tapStorage.remove(keys.tap),
-        this.aptStorage.remove(keys.apt),
+        this.ptsStorage.remove(keys.pts),
+        this.tspStorage.remove(keys.tsp),
+        this.sptStorage.remove(keys.spt),
       ]);
 
-      const values = sliceSummarisableStorageValue(
+      const values = decodeSummarisableStorageValue(
         existingInsert[1],
-        this.protocolParams,
+        this.protocolParams.payloadScheme,
       );
 
-      await this.insertEntry({
-        namespaceSignature: values.namespaceSignature,
-        authorSignature: values.authorSignature,
-        path: details.path,
-        author: details.author,
-        hash: values.payloadHash,
-        length: values.payloadLength,
-        timestamp: details.timestamp,
-      });
+      // TODO(AUTH): Get the encoded authtoken out of payload driver.
+      const encodedAuthToken = await this.payloadDriver.get(
+        values.authTokenHash,
+      );
+
+      if (encodedAuthToken) {
+        const decodedToken = this.protocolParams.authorisationScheme
+          .tokenEncoding.decode(await encodedAuthToken?.bytes());
+
+        await this.insertEntry({
+          path: details.path,
+          subspace: details.subspace,
+          hash: values.payloadHash,
+          length: values.payloadLength,
+          timestamp: details.timestamp,
+          authToken: decodedToken,
+        });
+      }
     }
 
     if (existingRemove) {
       // Derive TAP, APT keys from PTA.
-      const ptaKey = existingRemove;
+      const ptsKey = existingRemove;
 
-      const details = detailsFromBytes(
-        ptaKey,
+      const details = decodeEntryKey(
+        ptsKey,
         "path",
-        this.protocolParams.pubkeyLength,
+        this.protocolParams.subspaceScheme,
+        this.protocolParams.pathEncoding,
       );
-      const keys = entryKeyBytes(
-        details.path,
-        details.timestamp,
-        details.author,
+      const keys = encodeEntryKeys(
+        {
+          path: details.path,
+          timestamp: details.timestamp,
+          subspace: details.subspace,
+          pathEncoding: this.protocolParams.pathEncoding,
+          subspaceEncoding: this.protocolParams.subspaceScheme,
+        },
       );
 
       // Remove key for each storage.
       await Promise.all([
-        this.ptaStorage.remove(keys.pta),
-        this.tapStorage.remove(keys.tap),
-        this.aptStorage.remove(keys.apt),
+        this.ptsStorage.remove(keys.pts),
+        this.tspStorage.remove(keys.tsp),
+        this.sptStorage.remove(keys.spt),
       ]);
 
       // Unflag remove
@@ -150,35 +183,15 @@ export class Replica<KeypairType> extends EventTarget {
     this.checkedWriteAheadFlag.resolve();
   }
 
-  private verify(signedEntry: SignedEntry) {
-    return verifyEntry({
-      signedEntry,
-      verify: this.protocolParams.verify,
-    });
-  }
-
-  private sign(
-    entry: Entry,
-    namespaceKeypair: KeypairType,
-    authorKeypair: KeypairType,
-  ) {
-    return signEntry({
-      entry,
-      namespaceKeypair,
-      authorKeypair,
-      sign: this.protocolParams.sign,
-    });
-  }
-
   /** Create a new {@link SignedEntry} for some data and store both in the replica. */
   async set(
-    namespaceKeypair: KeypairType,
-    authorKeypair: KeypairType,
-    input: EntryInput,
+    //
+    input: EntryInput<SubspacePublicKey>,
+    authorisation: AuthorisationOpts,
   ) {
     const identifier = {
       namespace: this.namespace,
-      author: await this.protocolParams.pubkeyBytesFromPair(authorKeypair),
+      subspace: input.subspace,
       path: input.path,
     };
 
@@ -195,13 +208,14 @@ export class Replica<KeypairType> extends EventTarget {
       hash: stagedResult.hash,
     };
 
-    const signed = await this.sign(
-      { identifier, record },
-      namespaceKeypair,
-      authorKeypair,
+    const entry = { identifier, record };
+
+    const authToken = await this.protocolParams.authorisationScheme.authorise(
+      entry,
+      authorisation,
     );
 
-    const ingestResult = await this.ingestEntry(signed);
+    const ingestResult = await this.ingestEntry(entry, authToken);
 
     if (ingestResult.kind !== "success") {
       await stagedResult.reject();
@@ -211,7 +225,7 @@ export class Replica<KeypairType> extends EventTarget {
 
     const payload = await stagedResult.commit();
 
-    this.dispatchEvent(new EntryPayloadSetEvent(signed, payload));
+    this.dispatchEvent(new EntryPayloadSetEvent(entry, authToken, payload));
 
     return ingestResult;
   }
@@ -223,18 +237,22 @@ export class Replica<KeypairType> extends EventTarget {
    * Additionally, if the entry's path is a prefix of already-held older entries, those entries will be removed from the replica.
    */
   async ingestEntry(
-    signed: SignedEntry,
+    entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
+    authorisation: AuthorisationToken,
     externalSourceId?: string,
-  ): Promise<IngestEvent> {
+  ): Promise<
+    IngestEvent<NamespacePublicKey, SubspacePublicKey, PayloadDigest>
+  > {
     await this.checkedWriteAheadFlag;
 
     // TODO: Add prefix lock.
+    // The idea: a lock for items with a common prefix.
 
     // Check if the entry belongs to this namespace.
     if (
-      !bytesEquals(
+      !this.protocolParams.namespaceScheme.isEqual(
         this.namespace,
-        signed.entry.identifier.namespace,
+        entry.identifier.namespace,
       )
     ) {
       return {
@@ -245,7 +263,12 @@ export class Replica<KeypairType> extends EventTarget {
       };
     }
 
-    if (await this.verify(signed) === false) {
+    if (
+      await this.protocolParams.authorisationScheme.isAuthorised(
+        entry,
+        authorisation,
+      ) === false
+    ) {
       return {
         kind: "failure",
         reason: "invalid_entry",
@@ -255,18 +278,26 @@ export class Replica<KeypairType> extends EventTarget {
     }
 
     // Check for entries at the same path from the same author.
-    const entryAuthorPathKey = entryAuthorPathBytes(signed.entry);
+    const entryAuthorPathKey = concat(
+      this.protocolParams.subspaceScheme.encode(entry.identifier.subspace),
+      this.protocolParams.pathEncoding.encode(entry.identifier.path),
+    );
     const entryAuthorPathKeyUpper = incrementLastByte(entryAuthorPathKey);
+
+    const prefixKey = concat(
+      this.protocolParams.subspaceScheme.encode(entry.identifier.subspace),
+      entry.identifier.path,
+    );
 
     // Check if we have any newer entries with this prefix.
     for await (
       const [_path, timestampBytes] of this.entryDriver.prefixIterator
-        .prefixesOf(entryAuthorPathKey)
+        .prefixesOf(prefixKey)
     ) {
       const view = new DataView(timestampBytes.buffer);
       const prefixTimestamp = view.getBigUint64(0);
 
-      if (prefixTimestamp >= signed.entry.record.timestamp) {
+      if (prefixTimestamp >= entry.record.timestamp) {
         return {
           kind: "no_op",
           reason: "newer_prefix_found",
@@ -275,22 +306,23 @@ export class Replica<KeypairType> extends EventTarget {
     }
 
     for await (
-      const otherEntry of this.aptStorage.entries(
+      const otherEntry of this.sptStorage.entries(
         entryAuthorPathKey,
         entryAuthorPathKeyUpper,
       )
     ) {
       // The new entry will overwrite the one we just found.
       // Remove it.
-      const otherDetails = detailsFromBytes(
+      const otherDetails = decodeEntryKey(
         otherEntry.key,
-        "author",
-        this.protocolParams.pubkeyLength,
+        "subspace",
+        this.protocolParams.subspaceScheme,
+        this.protocolParams.pathEncoding,
       );
 
       if (
         compareBytes(
-          signed.entry.identifier.path,
+          entry.identifier.path,
           otherDetails.path,
         ) !== 0
       ) {
@@ -306,84 +338,92 @@ export class Replica<KeypairType> extends EventTarget {
       );
 
       //  If there is something existing and the timestamp is greater than ours, we have a no-op.
-      if (otherEntryTimestamp > signed.entry.record.timestamp) {
+      if (otherEntryTimestamp > entry.record.timestamp) {
         return {
           kind: "no_op",
-          reason: "obsolete_from_same_author",
+          reason: "obsolete_from_same_subspace",
         };
       }
 
-      const { payloadHash: otherPayloadHash } = sliceSummarisableStorageValue(
+      const { payloadHash: otherPayloadHash } = decodeSummarisableStorageValue(
         otherEntry.value,
-        this.protocolParams,
+        this.protocolParams.payloadScheme,
       );
 
-      const hashOrder = compareBytes(
-        signed.entry.record.hash,
+      const payloadDigestOrder = this.protocolParams.payloadScheme.order(
+        entry.record.hash,
         otherPayloadHash,
       );
 
       // If the timestamps are the same, and our hash is less, we have a no-op.
       if (
-        otherEntryTimestamp === signed.entry.record.timestamp &&
-        hashOrder === -1
+        otherEntryTimestamp === entry.record.timestamp &&
+        payloadDigestOrder === -1
       ) {
         return {
           kind: "no_op",
-          reason: "obsolete_from_same_author",
+          reason: "obsolete_from_same_subspace",
         };
       }
 
       const otherPayloadLengthIsGreater =
-        signed.entry.record.length < otherEntryTimestamp;
+        entry.record.length < otherEntryTimestamp;
 
       // If the timestamps and hashes are the same, and the other payload's length is greater, we have a no-op.
       if (
-        otherEntryTimestamp === signed.entry.record.timestamp &&
-        hashOrder === 0 && otherPayloadLengthIsGreater
+        otherEntryTimestamp === entry.record.timestamp &&
+        payloadDigestOrder === 0 && otherPayloadLengthIsGreater
       ) {
         return {
           kind: "no_op",
-          reason: "obsolete_from_same_author",
+          reason: "obsolete_from_same_subspace",
         };
       }
 
-      const keys = entryKeyBytes(
-        otherDetails.path,
-        otherDetails.timestamp,
-        otherDetails.author,
+      const otherKeys = encodeEntryKeys(
+        {
+          path: otherDetails.path,
+          timestamp: otherDetails.timestamp,
+          subspace: otherDetails.subspace,
+          pathEncoding: this.protocolParams.pathEncoding,
+          subspaceEncoding: this.protocolParams.subspaceScheme,
+        },
       );
 
       await Promise.all([
-        this.ptaStorage.remove(keys.pta),
-        this.tapStorage.remove(keys.tap),
-        this.aptStorage.remove(keys.apt),
+        this.ptsStorage.remove(otherKeys.pts),
+        this.tspStorage.remove(otherKeys.tsp),
+        this.sptStorage.remove(otherKeys.spt),
       ]);
 
+      const toRemovePrefixKey = concat(
+        this.protocolParams.subspaceScheme.encode(otherDetails.subspace),
+        otherDetails.path,
+      );
+
       await this.entryDriver.prefixIterator.remove(
-        keys.apt.slice(0, -8),
+        toRemovePrefixKey,
       );
     }
 
     await this.insertEntry({
-      namespaceSignature: signed.namespaceSignature,
-      authorSignature: signed.authorSignature,
-      path: signed.entry.identifier.path,
-      author: signed.entry.identifier.author,
-      hash: signed.entry.record.hash,
-      timestamp: signed.entry.record.timestamp,
-      length: signed.entry.record.length,
+      path: entry.identifier.path,
+      subspace: entry.identifier.subspace,
+      hash: entry.record.hash,
+      timestamp: entry.record.timestamp,
+      length: entry.record.length,
+      authToken: authorisation,
     });
 
     // Indicates that this ingestion is not being triggered by a local set,
     // so the payload will arrive separately.
     if (externalSourceId) {
-      this.dispatchEvent(new EntryIngestEvent(signed));
+      this.dispatchEvent(new EntryIngestEvent(entry, authorisation));
     }
 
     return {
       kind: "success",
-      signed: signed,
+      entry: entry,
       externalSourceId: externalSourceId,
     };
   }
@@ -391,50 +431,61 @@ export class Replica<KeypairType> extends EventTarget {
   private async insertEntry(
     {
       path,
+      subspace,
       timestamp,
-      author,
       hash,
-      namespaceSignature,
-      authorSignature,
       length,
+      authToken,
     }: {
-      namespaceSignature: Uint8Array;
-      authorSignature: Uint8Array;
       path: Uint8Array;
-      author: Uint8Array;
+      subspace: SubspacePublicKey;
       timestamp: bigint;
-      hash: Uint8Array;
+      hash: PayloadDigest;
       length: bigint;
+      authToken: AuthorisationToken;
     },
   ) {
-    const keys = entryKeyBytes(
-      path,
-      timestamp,
-      author,
-    );
-
-    const toStore = concatSummarisableStorageValue(
+    const keys = encodeEntryKeys(
       {
-        payloadHash: hash,
-        namespaceSignature: namespaceSignature,
-        authorSignature: authorSignature,
-        payloadLength: length,
+        path,
+        timestamp,
+        subspace,
+        subspaceEncoding: this.protocolParams.subspaceScheme,
+        pathEncoding: this.protocolParams.pathEncoding,
       },
     );
 
-    await this.entryDriver.writeAheadFlag.flagInsertion(keys.pta, toStore);
+    const encodedToken = this.protocolParams.authorisationScheme
+      .tokenEncoding.encode(authToken);
 
-    const entryAuthorPathKey = bytesConcat(author, path);
+    const stagingResult = await this.payloadDriver.stage(encodedToken);
+
+    const toStore = encodeSummarisableStorageValue(
+      {
+        payloadHash: hash,
+        payloadLength: length,
+        authTokenHash: stagingResult.hash,
+        payloadEncoding: this.protocolParams.payloadScheme,
+      },
+    );
+
+    await this.entryDriver.writeAheadFlag.flagInsertion(keys.pts, toStore);
+
+    const prefixKey = concat(
+      this.protocolParams.subspaceScheme.encode(subspace),
+      path,
+    );
 
     await Promise.all([
-      this.ptaStorage.insert(keys.pta, toStore),
-      this.aptStorage.insert(keys.apt, toStore),
-      this.tapStorage.insert(keys.tap, toStore),
+      this.ptsStorage.insert(keys.pts, toStore),
+      this.sptStorage.insert(keys.spt, toStore),
+      this.tspStorage.insert(keys.tsp, toStore),
+      stagingResult.commit(),
     ]);
 
     await this.entryDriver.prefixIterator.insert(
-      entryAuthorPathKey,
-      keys.apt.slice(keys.apt.byteLength - 8),
+      prefixKey,
+      keys.spt.subarray(keys.spt.byteLength - 8),
     );
 
     // And remove all prefixes with smaller timestamps.
@@ -442,45 +493,52 @@ export class Replica<KeypairType> extends EventTarget {
       const [prefixedByPath, prefixedByTimestamp] of this.entryDriver
         .prefixIterator
         .prefixedBy(
-          entryAuthorPathKey,
+          prefixKey,
         )
     ) {
       const view = new DataView(prefixedByTimestamp.buffer);
-      const prefixTimestamp = view.getBigUint64(0);
+      const prefixTimestamp = view.getBigUint64(prefixedByTimestamp.byteOffset);
 
       if (prefixTimestamp < timestamp) {
-        const author = prefixedByPath.slice(
-          0,
-          this.protocolParams.pubkeyLength,
+        const subspace = this.protocolParams.subspaceScheme.decode(
+          prefixedByPath,
         );
-        const prefixedPath = prefixedByPath.slice(
-          this.protocolParams.pubkeyLength,
+
+        const encodedSubspaceLength = this.protocolParams.subspaceScheme
+          .encodedLength(subspace);
+
+        const prefixedPath = prefixedByPath.subarray(
+          encodedSubspaceLength,
         );
 
         // Delete.
         // Flag a deletion.
-        const toDeleteKeys = entryKeyBytes(
-          prefixedPath,
-          prefixTimestamp,
-          author,
+        const toDeleteKeys = encodeEntryKeys(
+          {
+            path: prefixedPath,
+            timestamp: prefixTimestamp,
+            subspace: subspace,
+            pathEncoding: this.protocolParams.pathEncoding,
+            subspaceEncoding: this.protocolParams.subspaceScheme,
+          },
         );
 
-        const toDeleteValue = await this.ptaStorage.get(toDeleteKeys.pta);
+        const toDeleteValue = await this.ptsStorage.get(toDeleteKeys.pts);
 
         const storageStuff = toDeleteValue
-          ? sliceSummarisableStorageValue(
+          ? decodeSummarisableStorageValue(
             toDeleteValue,
-            this.protocolParams,
+            this.protocolParams.payloadScheme,
           )
           : undefined;
 
-        await this.entryDriver.writeAheadFlag.flagRemoval(toDeleteKeys.pta);
+        await this.entryDriver.writeAheadFlag.flagRemoval(toDeleteKeys.pts);
 
         // Remove from all the summarisable storages...
         await Promise.all([
-          this.ptaStorage.remove(toDeleteKeys.pta),
-          this.tapStorage.remove(toDeleteKeys.tap),
-          this.aptStorage.remove(toDeleteKeys.apt),
+          this.ptsStorage.remove(toDeleteKeys.pts),
+          this.tspStorage.remove(toDeleteKeys.tsp),
+          this.sptStorage.remove(toDeleteKeys.spt),
           this.entryDriver.prefixIterator.remove(prefixedByPath),
           // Don't fail if we couldn't get the value of the hash due to DB being in a wonky state.
           storageStuff
@@ -491,19 +549,15 @@ export class Replica<KeypairType> extends EventTarget {
         if (storageStuff) {
           this.dispatchEvent(
             new EntryRemoveEvent({
-              namespaceSignature: storageStuff.namespaceSignature,
-              authorSignature: storageStuff.authorSignature,
-              entry: {
-                identifier: {
-                  path: prefixedPath,
-                  author,
-                  namespace: this.namespace,
-                },
-                record: {
-                  hash: storageStuff.payloadHash,
-                  length: storageStuff.payloadLength,
-                  timestamp: prefixTimestamp,
-                },
+              identifier: {
+                path: prefixedPath,
+                subspace,
+                namespace: this.namespace,
+              },
+              record: {
+                hash: storageStuff.payloadHash,
+                length: storageStuff.payloadLength,
+                timestamp: prefixTimestamp,
               },
             }),
           );
@@ -524,45 +578,50 @@ export class Replica<KeypairType> extends EventTarget {
     entryDetails: {
       path: Uint8Array;
       timestamp: bigint;
-      author: Uint8Array;
+      subspace: SubspacePublicKey;
     },
     payload: Uint8Array | ReadableStream<Uint8Array>,
   ): Promise<IngestPayloadEvent> {
     // Check that there is an entry for this, and get the payload hash!
-    const keyLength = 8 + entryDetails.author.byteLength +
-      entryDetails.path.byteLength;
-    const ptaBytes = new Uint8Array(keyLength);
+    const encodedSubspace = this.protocolParams.subspaceScheme.encode(
+      entryDetails.subspace,
+    );
+    const encodedPath = this.protocolParams.pathEncoding.encode(
+      entryDetails.path,
+    );
 
-    ptaBytes.set(entryDetails.path, 0);
-    const ptaDv = new DataView(ptaBytes.buffer);
+    const keyLength = 8 + encodedSubspace.byteLength +
+      encodedPath.byteLength;
+    const ptsBytes = new Uint8Array(keyLength);
+
+    ptsBytes.set(entryDetails.path, 0);
+    const ptaDv = new DataView(ptsBytes.buffer);
     ptaDv.setBigUint64(
-      entryDetails.path.byteLength,
+      encodedPath.byteLength,
       entryDetails.timestamp,
     );
-    ptaBytes.set(entryDetails.author, entryDetails.path.byteLength + 8);
+    ptsBytes.set(encodedSubspace, encodedPath.byteLength + 8);
 
     for await (
-      const entry of this.ptaStorage.entries(
-        ptaBytes,
-        incrementLastByte(ptaBytes),
+      const kvEntry of this.ptsStorage.entries(
+        ptsBytes,
+        incrementLastByte(ptsBytes),
         {
           limit: 1,
         },
       )
     ) {
-      if (!bytesEquals(entry.key, ptaBytes)) {
+      if (!equalsBytes(kvEntry.key, ptsBytes)) {
         break;
       }
 
       // Check if we already have it.
       const {
         payloadHash,
-        authorSignature,
-        namespaceSignature,
         payloadLength,
-      } = sliceSummarisableStorageValue(
-        entry.value,
-        this.protocolParams,
+      } = decodeSummarisableStorageValue(
+        kvEntry.value,
+        this.protocolParams.payloadScheme,
       );
 
       const existingPayload = await this.payloadDriver.get(payloadHash);
@@ -574,10 +633,14 @@ export class Replica<KeypairType> extends EventTarget {
         };
       }
 
-      // Stage it with the driver
       const stagedResult = await this.payloadDriver.stage(payload);
 
-      if (compareBytes(stagedResult.hash, payloadHash) !== 0) {
+      if (
+        this.protocolParams.payloadScheme.order(
+          stagedResult.hash,
+          payloadHash,
+        ) !== 0
+      ) {
         await stagedResult.reject();
 
         return {
@@ -588,30 +651,33 @@ export class Replica<KeypairType> extends EventTarget {
 
       const committedPayload = await stagedResult.commit();
 
-      const { author, path, timestamp } = detailsFromBytes(
-        entry.key,
+      const { subspace, path, timestamp } = decodeEntryKey(
+        kvEntry.key,
         "path",
-        this.protocolParams.pubkeyLength,
+        this.protocolParams.subspaceScheme,
+        this.protocolParams.pathEncoding,
       );
 
-      const signedEntry: SignedEntry = {
-        authorSignature: authorSignature,
-        namespaceSignature: namespaceSignature,
-        entry: {
-          identifier: {
-            author,
-            namespace: this.namespace,
-            path,
-          },
-          record: {
-            hash: payloadHash,
-            length: payloadLength,
-            timestamp,
-          },
+      const entry: Entry<
+        NamespacePublicKey,
+        SubspacePublicKey,
+        PayloadDigest
+      > = {
+        identifier: {
+          subspace,
+          namespace: this.namespace,
+          path,
+        },
+        record: {
+          hash: payloadHash,
+          length: payloadLength,
+          timestamp,
         },
       };
 
-      this.dispatchEvent(new PayloadIngestEvent(signedEntry, committedPayload));
+      this.dispatchEvent(
+        new PayloadIngestEvent(entry, committedPayload),
+      );
 
       return {
         kind: "success",
@@ -626,8 +692,14 @@ export class Replica<KeypairType> extends EventTarget {
 
   /** Retrieve a list of entry-payload pairs from the replica for a given {@link Query}. */
   async *query(
-    query: Query,
-  ): AsyncIterable<[SignedEntry, Payload | undefined]> {
+    query: Query<SubspacePublicKey>,
+  ): AsyncIterable<
+    [
+      Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
+      Payload | undefined,
+      AuthorisationToken,
+    ]
+  > {
     let listToUse: SummarisableStorage<Uint8Array, Uint8Array>;
     let lowerBound: Uint8Array | undefined;
     let upperBound: Uint8Array | undefined;
@@ -636,12 +708,16 @@ export class Replica<KeypairType> extends EventTarget {
       case "path":
         lowerBound = query.lowerBound;
         upperBound = query.upperBound;
-        listToUse = this.ptaStorage;
+        listToUse = this.ptsStorage;
         break;
-      case "author":
-        lowerBound = query.lowerBound;
-        upperBound = query.upperBound;
-        listToUse = this.aptStorage;
+      case "subspace":
+        lowerBound = query.lowerBound
+          ? this.protocolParams.subspaceScheme.encode(query.lowerBound)
+          : undefined;
+        upperBound = query.upperBound
+          ? this.protocolParams.subspaceScheme.encode(query.upperBound)
+          : undefined;
+        listToUse = this.sptStorage;
         break;
       case "timestamp": {
         if (query.lowerBound) {
@@ -652,7 +728,7 @@ export class Replica<KeypairType> extends EventTarget {
           upperBound = bigintToBytes(query.upperBound);
         }
 
-        listToUse = this.tapStorage;
+        listToUse = this.tspStorage;
         break;
       }
     }
@@ -662,26 +738,27 @@ export class Replica<KeypairType> extends EventTarget {
       limit: query.limit,
     });
 
-    for await (const entry of iterator) {
-      const { author, path, timestamp } = detailsFromBytes(
-        entry.key,
+    for await (const kvEntry of iterator) {
+      const { subspace, path, timestamp } = decodeEntryKey(
+        kvEntry.key,
         query.order,
-        this.protocolParams.pubkeyLength,
+        this.protocolParams.subspaceScheme,
+        this.protocolParams.pathEncoding,
       );
 
       const {
+        authTokenHash,
         payloadHash,
-        namespaceSignature,
-        authorSignature,
         payloadLength,
-      } = sliceSummarisableStorageValue(entry.value, this.protocolParams);
+      } = decodeSummarisableStorageValue(
+        kvEntry.value,
+        this.protocolParams.payloadScheme,
+      );
 
-      const signedEntry: SignedEntry = {
-        authorSignature: authorSignature,
-        namespaceSignature: namespaceSignature,
-        entry: {
+      const entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest> =
+        {
           identifier: {
-            author,
+            subspace,
             namespace: this.namespace,
             path,
           },
@@ -690,12 +767,20 @@ export class Replica<KeypairType> extends EventTarget {
             length: payloadLength,
             timestamp,
           },
-        },
-      };
+        };
 
       const payload = await this.payloadDriver.get(payloadHash);
 
-      yield [signedEntry, payload];
+      const authTokenPayload = await this.payloadDriver.get(authTokenHash);
+
+      if (!authTokenPayload) {
+        continue;
+      }
+      const authTokenEncoded = await authTokenPayload.bytes();
+      const authToken = this.protocolParams.authorisationScheme.tokenEncoding
+        .decode(authTokenEncoded);
+
+      yield [entry, payload, authToken];
     }
   }
 }

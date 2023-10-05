@@ -1,26 +1,33 @@
+import { encodeBase32 } from "$std/encoding/base32.ts";
 import { ValidationError, WillowError } from "../../../errors.ts";
-import { Payload, ProtocolParameters } from "../../types.ts";
+import { EncodingScheme, Payload } from "../../types.ts";
 import { PayloadDriver } from "../types.ts";
 import { join } from "https://deno.land/std@0.188.0/path/mod.ts";
 import { ensureDir } from "https://deno.land/std@0.188.0/fs/ensure_dir.ts";
 import { move } from "https://deno.land/std@0.188.0/fs/move.ts";
-import { encodeBase32 } from "../../../../deps.ts";
 
 /** Stores and retrieves payloads from the filesystem. */
-export class PayloadDriverFilesystem<KeypairType> implements PayloadDriver {
+export class PayloadDriverFilesystem<PayloadDigest>
+  implements PayloadDriver<PayloadDigest> {
   constructor(
     readonly path: string,
-    readonly protocolParameters: ProtocolParameters<KeypairType>,
+    readonly payloadScheme: EncodingScheme<PayloadDigest> & {
+      fromBytes: (bytes: Uint8Array | ReadableStream) => Promise<PayloadDigest>;
+      order: (a: PayloadDigest, b: PayloadDigest) => -1 | 0 | 1;
+    },
   ) {
   }
 
+  private getKey(hash: PayloadDigest): string {
+    const encoded = this.payloadScheme.encode(hash);
+    return encodeBase32(encoded);
+  }
+
   async get(
-    payloadHash: Uint8Array,
+    payloadHash: PayloadDigest,
     opts?: { startOffset?: number | undefined } | undefined,
   ): Promise<Payload | undefined> {
-    const base32Hash = encodeBase32(payloadHash);
-
-    const filePath = join(this.path, base32Hash);
+    const filePath = join(this.path, this.getKey(payloadHash));
 
     try {
       await Deno.lstat(filePath);
@@ -62,9 +69,8 @@ export class PayloadDriverFilesystem<KeypairType> implements PayloadDriver {
     };
   }
 
-  async erase(payloadHash: Uint8Array): Promise<true | ValidationError> {
-    const base32Hash = encodeBase32(payloadHash);
-    const filePath = join(this.path, base32Hash);
+  async erase(payloadHash: PayloadDigest): Promise<true | ValidationError> {
+    const filePath = join(this.path, this.getKey(payloadHash));
 
     try {
       await Deno.remove(filePath);
@@ -80,7 +86,7 @@ export class PayloadDriverFilesystem<KeypairType> implements PayloadDriver {
     payload: Uint8Array | ReadableStream<Uint8Array>,
   ): Promise<
     {
-      hash: Uint8Array;
+      hash: PayloadDigest;
       length: number;
       commit: () => Promise<Payload>;
       reject: () => Promise<void>;
@@ -96,15 +102,15 @@ export class PayloadDriverFilesystem<KeypairType> implements PayloadDriver {
 
     if (payload instanceof Uint8Array) {
       await Deno.writeFile(stagingPath, payload, { create: true });
-      const hash = await this.protocolParameters.hash(payload);
+      const hash = await this.payloadScheme.fromBytes(payload);
 
       return {
         hash,
         length: payload.byteLength,
         commit: async () => {
           await this.ensureDir();
-          const base32Hash = encodeBase32(hash);
-          const filePath = join(this.path, base32Hash);
+
+          const filePath = join(this.path, this.getKey(hash));
           await move(stagingPath, filePath, {
             overwrite: true,
           });
@@ -126,7 +132,7 @@ export class PayloadDriverFilesystem<KeypairType> implements PayloadDriver {
       // It's fine.
     }
 
-    let hash = new Uint8Array();
+    let hash = await this.payloadScheme.fromBytes(new Uint8Array());
     let length = 0;
 
     try {
@@ -141,7 +147,7 @@ export class PayloadDriverFilesystem<KeypairType> implements PayloadDriver {
         [
           forStorage.pipeTo(file.writable),
           async () => {
-            hash = await this.protocolParameters.hash(forHash);
+            hash = await this.payloadScheme.fromBytes(forHash);
           },
         ],
       );
@@ -158,8 +164,8 @@ export class PayloadDriverFilesystem<KeypairType> implements PayloadDriver {
       length,
       commit: async () => {
         await this.ensureDir();
-        const base32Hash = encodeBase32(hash);
-        const filePath = join(this.path, base32Hash);
+
+        const filePath = join(this.path, this.getKey(hash));
         await move(stagingPath, filePath, {
           overwrite: true,
         });
@@ -204,6 +210,14 @@ class DenoFileReadable implements ReadableStream<Uint8Array> {
     }
 
     this.stream = file.readable;
+  }
+
+  get values() {
+    if (!this.stream) {
+      this.initiateStream();
+    }
+
+    return this.stream!.values;
   }
 
   get locked() {
