@@ -75,7 +75,7 @@ export class KvDriverDeno implements KvDriver {
   }
 
   batch(): KvBatch {
-    const OPS_LIMIT = 10;
+    const OPS_LIMIT = 1000;
 
     let currentAtomicOperation = this.kv.atomic();
     let currentOps = 0;

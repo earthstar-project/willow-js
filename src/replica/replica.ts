@@ -241,7 +241,12 @@ export class Replica<
     authorisation: AuthorisationToken,
     externalSourceId?: string,
   ): Promise<
-    IngestEvent<NamespacePublicKey, SubspacePublicKey, PayloadDigest>
+    IngestEvent<
+      NamespacePublicKey,
+      SubspacePublicKey,
+      PayloadDigest,
+      AuthorisationToken
+    >
   > {
     await this.checkedWriteAheadFlag;
 
@@ -424,6 +429,7 @@ export class Replica<
     return {
       kind: "success",
       entry: entry,
+      authToken: authorisation,
       externalSourceId: externalSourceId,
     };
   }
@@ -594,9 +600,9 @@ export class Replica<
       encodedPath.byteLength;
     const ptsBytes = new Uint8Array(keyLength);
 
-    ptsBytes.set(entryDetails.path, 0);
-    const ptaDv = new DataView(ptsBytes.buffer);
-    ptaDv.setBigUint64(
+    ptsBytes.set(encodedPath, 0);
+    const ptsDv = new DataView(ptsBytes.buffer);
+    ptsDv.setBigUint64(
       encodedPath.byteLength,
       entryDetails.timestamp,
     );

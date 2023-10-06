@@ -223,7 +223,7 @@ const replica = new Replica<
 >({
   namespace: new Uint8Array(new Uint8Array([137])),
   protocolParameters,
-  ...drivers,
+  //...drivers,
 });
 
 // Won't be inserted

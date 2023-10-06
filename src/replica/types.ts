@@ -165,10 +165,13 @@ export type IngestEventSuccess<
   NamespacePublicKey,
   SubspacePublicKey,
   PayloadDigest,
+  AuthorisationToken,
 > = {
   kind: "success";
   /** The successfully ingested signed entry. */
   entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>;
+  authToken: AuthorisationToken;
+
   /** An ID representing the source of this ingested entry. */
   externalSourceId?: string;
 };
@@ -177,13 +180,15 @@ export type IngestEvent<
   NamespacePublicKey,
   SubspacePublicKey,
   PayloadDigest,
+  AuthorisationToken,
 > =
   | IngestEventFailure
   | IngestEventNoOp
   | IngestEventSuccess<
     NamespacePublicKey,
     SubspacePublicKey,
-    PayloadDigest
+    PayloadDigest,
+    AuthorisationToken
   >;
 
 /** The data associated with a {@link SignedEntry}. */
