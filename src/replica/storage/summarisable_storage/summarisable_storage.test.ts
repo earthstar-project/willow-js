@@ -242,7 +242,7 @@ function makeRandomItemsQuery(set: string[]) {
   };
 }
 
-Deno.test("Summarise and compare (random 10k)", async (test) => {
+Deno.test("Summarise and compare (random 100 sets x 100 ranges)", async (test) => {
   for (const [aScenario, bScenario] of scenarioPairings) {
     await test.step({
       name: `${aScenario.name} + ${bScenario.name}`,

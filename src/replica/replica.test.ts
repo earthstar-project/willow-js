@@ -106,20 +106,15 @@ class TestReplica extends Replica<
           encodedLength: () => 65,
           isEqual: bytesEquals,
         },
-        pathEncoding: {
-          encode(path) {
-            const bytes = new Uint8Array(1 + path.byteLength);
-            bytes[0] = path.byteLength;
-
-            bytes.set(path, 1);
-            return bytes;
+        pathLengthEncoding: {
+          encode(length) {
+            return new Uint8Array([length]);
           },
           decode(bytes) {
-            const length = bytes[0];
-            return bytes.subarray(1, 1 + length);
+            return bytes[0];
           },
-          encodedLength(path) {
-            return 1 + path.byteLength;
+          encodedLength() {
+            return 1;
           },
         },
         payloadScheme: {
@@ -805,22 +800,7 @@ Deno.test("Write-ahead flags", async (test) => {
         path: new Uint8Array(res.entry.identifier.path),
         timestamp: res.entry.record.timestamp,
         subspace: new Uint8Array(res.entry.identifier.subspace),
-        pathEncoding: {
-          encode(path) {
-            const bytes = new Uint8Array(1 + path.byteLength);
-            bytes[0] = path.byteLength;
 
-            bytes.set(path, 1);
-            return bytes;
-          },
-          decode(bytes) {
-            const length = bytes[0];
-            return bytes.subarray(1, 1 + length);
-          },
-          encodedLength(path) {
-            return 1 + path.byteLength;
-          },
-        },
         subspaceEncoding: {
           encode: (v) => v,
           decode: (v) => v.subarray(0, 65),
@@ -845,6 +825,18 @@ Deno.test("Write-ahead flags", async (test) => {
         },
         encodedLength() {
           return 32;
+        },
+      },
+      pathLength: res.entry.identifier.path.byteLength,
+      pathLengthEncoding: {
+        encode(length) {
+          return new Uint8Array([length]);
+        },
+        decode(bytes) {
+          return bytes[0];
+        },
+        encodedLength() {
+          return 1;
         },
       },
     });
@@ -902,22 +894,6 @@ Deno.test("Write-ahead flags", async (test) => {
         path: new Uint8Array(res.entry.identifier.path),
         timestamp: res.entry.record.timestamp,
         subspace: new Uint8Array(res.entry.identifier.subspace),
-        pathEncoding: {
-          encode(path) {
-            const bytes = new Uint8Array(1 + path.byteLength);
-            bytes[0] = path.byteLength;
-
-            bytes.set(path, 1);
-            return bytes;
-          },
-          decode(bytes) {
-            const length = bytes[0];
-            return bytes.subarray(1, 1 + length);
-          },
-          encodedLength(path) {
-            return 1 + path.byteLength;
-          },
-        },
         subspaceEncoding: {
           encode: (v) => v,
           decode: (v) => v.subarray(0, 65),

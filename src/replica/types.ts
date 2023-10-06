@@ -14,7 +14,7 @@ export interface ProtocolParameters<
    *
    * An encoded path **must** be the concatenation of a big-endian k-bit integer (where k is the number of bits needed to represent all numbers from 0 to your max path length, inclusive) and the bytes of the paths themselves.
    */
-  pathEncoding: EncodingScheme<Uint8Array>;
+  pathLengthEncoding: EncodingScheme<number>;
 
   // Namespace encoding scheme
   namespaceScheme: EncodingScheme<NamespacePublicKey> & {

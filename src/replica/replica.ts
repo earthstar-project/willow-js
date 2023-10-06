@@ -100,11 +100,17 @@ export class Replica<
     if (existingInsert) {
       const ptsKey = existingInsert[0];
 
+      const values = decodeSummarisableStorageValue(
+        existingInsert[1],
+        this.protocolParams.payloadScheme,
+        this.protocolParams.pathLengthEncoding,
+      );
+
       const details = decodeEntryKey(
         ptsKey,
         "path",
         this.protocolParams.subspaceScheme,
-        this.protocolParams.pathEncoding,
+        values.pathLength,
       );
 
       const keys = encodeEntryKeys(
@@ -112,7 +118,6 @@ export class Replica<
           path: details.path,
           timestamp: details.timestamp,
           subspace: details.subspace,
-          pathEncoding: this.protocolParams.pathEncoding,
           subspaceEncoding: this.protocolParams.subspaceScheme,
         },
       );
@@ -123,11 +128,6 @@ export class Replica<
         this.tspStorage.remove(keys.tsp),
         this.sptStorage.remove(keys.spt),
       ]);
-
-      const values = decodeSummarisableStorageValue(
-        existingInsert[1],
-        this.protocolParams.payloadScheme,
-      );
 
       // TODO(AUTH): Get the encoded authtoken out of payload driver.
       const encodedAuthToken = await this.payloadDriver.get(
@@ -150,6 +150,20 @@ export class Replica<
     }
 
     if (existingRemove) {
+      const entryValues = await this.ptsStorage.get(existingRemove);
+
+      if (!entryValues) {
+        await this.entryDriver.writeAheadFlag.unflagRemoval();
+
+        return;
+      }
+
+      const { pathLength } = decodeSummarisableStorageValue(
+        entryValues,
+        this.protocolParams.payloadScheme,
+        this.protocolParams.pathLengthEncoding,
+      );
+
       // Derive TAP, APT keys from PTA.
       const ptsKey = existingRemove;
 
@@ -157,14 +171,13 @@ export class Replica<
         ptsKey,
         "path",
         this.protocolParams.subspaceScheme,
-        this.protocolParams.pathEncoding,
+        pathLength,
       );
       const keys = encodeEntryKeys(
         {
           path: details.path,
           timestamp: details.timestamp,
           subspace: details.subspace,
-          pathEncoding: this.protocolParams.pathEncoding,
           subspaceEncoding: this.protocolParams.subspaceScheme,
         },
       );
@@ -285,7 +298,7 @@ export class Replica<
     // Check for entries at the same path from the same author.
     const entryAuthorPathKey = concat(
       this.protocolParams.subspaceScheme.encode(entry.identifier.subspace),
-      this.protocolParams.pathEncoding.encode(entry.identifier.path),
+      entry.identifier.path,
     );
     const entryAuthorPathKeyUpper = incrementLastByte(entryAuthorPathKey);
 
@@ -318,11 +331,18 @@ export class Replica<
     ) {
       // The new entry will overwrite the one we just found.
       // Remove it.
+      const { pathLength: otherPathLength, payloadHash: otherPayloadHash } =
+        decodeSummarisableStorageValue(
+          otherEntry.value,
+          this.protocolParams.payloadScheme,
+          this.protocolParams.pathLengthEncoding,
+        );
+
       const otherDetails = decodeEntryKey(
         otherEntry.key,
         "subspace",
         this.protocolParams.subspaceScheme,
-        this.protocolParams.pathEncoding,
+        otherPathLength,
       );
 
       if (
@@ -349,11 +369,6 @@ export class Replica<
           reason: "obsolete_from_same_subspace",
         };
       }
-
-      const { payloadHash: otherPayloadHash } = decodeSummarisableStorageValue(
-        otherEntry.value,
-        this.protocolParams.payloadScheme,
-      );
 
       const payloadDigestOrder = this.protocolParams.payloadScheme.order(
         entry.record.hash,
@@ -390,7 +405,6 @@ export class Replica<
           path: otherDetails.path,
           timestamp: otherDetails.timestamp,
           subspace: otherDetails.subspace,
-          pathEncoding: this.protocolParams.pathEncoding,
           subspaceEncoding: this.protocolParams.subspaceScheme,
         },
       );
@@ -457,7 +471,6 @@ export class Replica<
         timestamp,
         subspace,
         subspaceEncoding: this.protocolParams.subspaceScheme,
-        pathEncoding: this.protocolParams.pathEncoding,
       },
     );
 
@@ -472,6 +485,8 @@ export class Replica<
         payloadLength: length,
         authTokenHash: stagingResult.hash,
         payloadEncoding: this.protocolParams.payloadScheme,
+        pathLength: path.byteLength,
+        pathLengthEncoding: this.protocolParams.pathLengthEncoding,
       },
     );
 
@@ -524,7 +539,6 @@ export class Replica<
             path: prefixedPath,
             timestamp: prefixTimestamp,
             subspace: subspace,
-            pathEncoding: this.protocolParams.pathEncoding,
             subspaceEncoding: this.protocolParams.subspaceScheme,
           },
         );
@@ -535,6 +549,7 @@ export class Replica<
           ? decodeSummarisableStorageValue(
             toDeleteValue,
             this.protocolParams.payloadScheme,
+            this.protocolParams.pathLengthEncoding,
           )
           : undefined;
 
@@ -592,21 +607,18 @@ export class Replica<
     const encodedSubspace = this.protocolParams.subspaceScheme.encode(
       entryDetails.subspace,
     );
-    const encodedPath = this.protocolParams.pathEncoding.encode(
-      entryDetails.path,
-    );
 
     const keyLength = 8 + encodedSubspace.byteLength +
-      encodedPath.byteLength;
+      entryDetails.path.byteLength;
     const ptsBytes = new Uint8Array(keyLength);
 
-    ptsBytes.set(encodedPath, 0);
+    ptsBytes.set(entryDetails.path, 0);
     const ptsDv = new DataView(ptsBytes.buffer);
     ptsDv.setBigUint64(
-      encodedPath.byteLength,
+      entryDetails.path.byteLength,
       entryDetails.timestamp,
     );
-    ptsBytes.set(encodedSubspace, encodedPath.byteLength + 8);
+    ptsBytes.set(encodedSubspace, entryDetails.path.byteLength + 8);
 
     for await (
       const kvEntry of this.ptsStorage.entries(
@@ -625,9 +637,11 @@ export class Replica<
       const {
         payloadHash,
         payloadLength,
+        pathLength,
       } = decodeSummarisableStorageValue(
         kvEntry.value,
         this.protocolParams.payloadScheme,
+        this.protocolParams.pathLengthEncoding,
       );
 
       const existingPayload = await this.payloadDriver.get(payloadHash);
@@ -661,7 +675,7 @@ export class Replica<
         kvEntry.key,
         "path",
         this.protocolParams.subspaceScheme,
-        this.protocolParams.pathEncoding,
+        pathLength,
       );
 
       const entry: Entry<
@@ -745,20 +759,22 @@ export class Replica<
     });
 
     for await (const kvEntry of iterator) {
-      const { subspace, path, timestamp } = decodeEntryKey(
-        kvEntry.key,
-        query.order,
-        this.protocolParams.subspaceScheme,
-        this.protocolParams.pathEncoding,
-      );
-
       const {
         authTokenHash,
         payloadHash,
         payloadLength,
+        pathLength,
       } = decodeSummarisableStorageValue(
         kvEntry.value,
         this.protocolParams.payloadScheme,
+        this.protocolParams.pathLengthEncoding,
+      );
+
+      const { subspace, path, timestamp } = decodeEntryKey(
+        kvEntry.key,
+        query.order,
+        this.protocolParams.subspaceScheme,
+        pathLength,
       );
 
       const entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest> =

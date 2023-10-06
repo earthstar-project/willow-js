@@ -62,20 +62,15 @@ const protocolParameters: ProtocolParameters<
     encodedLength: () => 65,
     isEqual: bytesEquals,
   },
-  pathEncoding: {
-    encode(path) {
-      const bytes = new Uint8Array(1 + path.byteLength);
-      bytes[0] = path.byteLength;
-
-      bytes.set(path, 1);
-      return bytes;
+  pathLengthEncoding: {
+    encode(length) {
+      return new Uint8Array([length]);
     },
     decode(bytes) {
-      const length = bytes[0];
-      return bytes.subarray(1, 1 + length);
+      return bytes[0];
     },
-    encodedLength(path) {
-      return 1 + path.byteLength;
+    encodedLength() {
+      return 1;
     },
   },
   payloadScheme: {
