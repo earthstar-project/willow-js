@@ -1,25 +1,35 @@
-import { encodeBase64 } from "../../../../deps.ts";
+import { encodeBase64 } from "$std/encoding/base64.ts";
+import { toArrayBuffer } from "$std/streams/to_array_buffer.ts";
 import { ValidationError } from "../../../errors.ts";
-import { Payload, ProtocolParameters } from "../../types.ts";
+import { EncodingScheme, Payload } from "../../types.ts";
 import { PayloadDriver } from "../types.ts";
 
 /** Store and retrieve payloads in memory. */
-export class PayloadDriverMemory<KeypairType> implements PayloadDriver {
+export class PayloadDriverMemory<PayloadDigest>
+  implements PayloadDriver<PayloadDigest> {
   private stagingMap = new Map<string, Blob>();
   private payloadMap = new Map<string, Blob>();
 
-  private getKey(payloadHash: Uint8Array) {
-    return encodeBase64(payloadHash);
+  private getKey(payloadHash: PayloadDigest) {
+    const encoded = this.payloadScheme.encode(payloadHash);
+
+    return encodeBase64(encoded);
   }
 
-  constructor(readonly protocolParameters: ProtocolParameters<KeypairType>) {
+  constructor(
+    readonly payloadScheme: EncodingScheme<PayloadDigest> & {
+      fromBytes: (bytes: Uint8Array | ReadableStream) => Promise<PayloadDigest>;
+      order: (a: PayloadDigest, b: PayloadDigest) => -1 | 0 | 1;
+    },
+  ) {
   }
 
   get(
-    payloadHash: Uint8Array,
+    payloadHash: PayloadDigest,
     opts?: { startOffset?: number | undefined } | undefined,
   ): Promise<Payload | undefined> {
     const key = this.getKey(payloadHash);
+
     const payloadBlob = this.payloadMap.get(key);
 
     if (!payloadBlob) {
@@ -46,7 +56,7 @@ export class PayloadDriverMemory<KeypairType> implements PayloadDriver {
     });
   }
 
-  erase(payloadHash: Uint8Array): Promise<true | ValidationError> {
+  erase(payloadHash: PayloadDigest): Promise<true | ValidationError> {
     const key = this.getKey(payloadHash);
     if (this.payloadMap.has(key)) {
       this.payloadMap.delete(key);
@@ -62,7 +72,7 @@ export class PayloadDriverMemory<KeypairType> implements PayloadDriver {
     payload: Uint8Array | ReadableStream<Uint8Array>,
   ): Promise<
     {
-      hash: Uint8Array;
+      hash: PayloadDigest;
       length: number;
       commit: () => Promise<Payload>;
       reject: () => Promise<void>;
@@ -70,9 +80,9 @@ export class PayloadDriverMemory<KeypairType> implements PayloadDriver {
   > {
     const bytes = payload instanceof Uint8Array
       ? payload
-      : await streamToBytes(payload);
+      : new Uint8Array(await toArrayBuffer(payload));
 
-    const hash = await this.protocolParameters.hash(bytes);
+    const hash = await this.payloadScheme.fromBytes(bytes);
 
     const newPayload = new Blob([bytes]);
 
@@ -100,23 +110,4 @@ export class PayloadDriverMemory<KeypairType> implements PayloadDriver {
       },
     });
   }
-}
-
-export async function streamToBytes(
-  stream: ReadableStream<Uint8Array>,
-): Promise<Uint8Array> {
-  let bytes = new Uint8Array();
-
-  await stream.pipeTo(
-    new WritableStream({
-      write(chunk) {
-        const nextBytes = new Uint8Array(bytes.byteLength + chunk.byteLength);
-        nextBytes.set(bytes);
-        nextBytes.set(chunk, bytes.byteLength);
-        bytes = nextBytes;
-      },
-    }),
-  );
-
-  return bytes;
 }

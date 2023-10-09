@@ -1,4 +1,4 @@
-import { bytesEquals } from "../../../../deps.ts";
+import { equals as bytesEquals } from "$std/bytes/equals.ts";
 import { compareBytes, incrementLastByte } from "../../../util/bytes.ts";
 import { Key, KvDriver } from "../kv/types.ts";
 

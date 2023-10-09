@@ -25,10 +25,10 @@ export interface EntryDriver {
 }
 
 /**  */
-export interface PayloadDriver {
+export interface PayloadDriver<PayloadDigest> {
   /** Returns an payload for a given format and hash.*/
   get(
-    payloadHash: Uint8Array,
+    payloadHash: PayloadDigest,
     opts?: {
       startOffset?: number;
     },
@@ -39,7 +39,7 @@ export interface PayloadDriver {
     payload: Uint8Array | ReadableStream<Uint8Array>,
   ): Promise<
     {
-      hash: Uint8Array;
+      hash: PayloadDigest;
       length: number;
       /** Commit the staged attachment to storage. */
       commit: () => Promise<Payload>;
@@ -50,6 +50,6 @@ export interface PayloadDriver {
 
   /** Erases an payload for a given format and hash.*/
   erase(
-    payloadHash: Uint8Array,
+    hash: PayloadDigest,
   ): Promise<true | ValidationError>;
 }

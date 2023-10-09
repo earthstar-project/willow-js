@@ -3,7 +3,7 @@ import {
   Direction,
   RedBlackNode,
 } from "https://deno.land/std@0.188.0/collections/red_black_node.ts";
-import { deferred } from "https://deno.land/std@0.188.0/async/deferred.ts";
+import { deferred } from "$std/async/deferred.ts";
 import { combineMonoid, LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
 import { SummarisableStorage } from "./types.ts";
 

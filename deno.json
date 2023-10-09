@@ -1,4 +1,8 @@
 {
+  "imports": {
+    "$std/": "https://deno.land/std@0.203.0/",
+    "$meadowcap/": "../meadowcap/"
+  },
   "tasks": {
     "test": "deno test --unstable src",
     "bundle": "deno run --allow-all scripts/build_web_bundle.ts"

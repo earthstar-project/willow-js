@@ -1,4 +1,4 @@
-import { deferred } from "https://deno.land/std@0.188.0/async/deferred.ts";
+import { deferred } from "$std/async/deferred.ts";
 import { Key, KeyPart, KvDriver } from "../kv/types.ts";
 import { combineMonoid, LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
 import { SummarisableStorage } from "./types.ts";

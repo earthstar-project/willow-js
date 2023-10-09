@@ -1,4 +1,4 @@
-import { assertEquals } from "https://deno.land/std@0.177.0/testing/asserts.ts";
+import { assertEquals } from "$std/testing/asserts.ts";
 import { RadixishTree } from "./radixish_tree.ts";
 import { PrefixIterator } from "./types.ts";
 import { KeyHopTree } from "./key_hop_tree.ts";
@@ -9,7 +9,7 @@ const MAX_PATH_LENGTH = 100;
 const MAX_PATH_SETS = 64;
 
 function generateRandomPath() {
-  const pathLength = Math.floor(Math.random() * (MAX_PATH_LENGTH) + 1);
+  const pathLength = Math.floor(Math.random() * MAX_PATH_LENGTH + 1);
 
   const path = new Uint8Array(pathLength);
 

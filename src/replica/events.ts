@@ -1,46 +1,86 @@
-import { SignedEntry } from "../entries/types.ts";
+import { Entry } from "../entries/types.ts";
 import { Payload } from "./types.ts";
 
-export class EntryPayloadSetEvent extends CustomEvent<{
-  signed: SignedEntry,
-  payload: Payload
+export class EntryPayloadSetEvent<
+  NamespacePublicKey,
+  SubspacePublicKey,
+  PayloadDigest,
+  AuthorisationToken,
+> extends CustomEvent<{
+  entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>;
+  authToken: AuthorisationToken;
+  payload: Payload;
 }> {
-  constructor(signed: SignedEntry, payload: Payload) {
+  constructor(
+    entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
+    authToken: AuthorisationToken,
+    payload: Payload,
+  ) {
     super("entrypayloadset", {
       detail: {
-        signed,
+        entry,
+        authToken,
         payload,
       },
     });
   }
 }
 
-export class EntryIngestEvent extends CustomEvent<{signed: SignedEntry}> {
-  constructor(signed: SignedEntry) {
+export class EntryIngestEvent<
+  NamespacePublicKey,
+  SubspacePublicKey,
+  PayloadDigest,
+  AuthorisationToken,
+> extends CustomEvent<
+  {
+    entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>;
+    authToken: AuthorisationToken;
+  }
+> {
+  constructor(
+    entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
+    authToken: AuthorisationToken,
+  ) {
     super("entryingest", {
       detail: {
-        signed,
+        entry,
+        authToken,
       },
     });
   }
 }
 
-export class PayloadIngestEvent extends CustomEvent<{
-  signed: SignedEntry,
-  payload: Payload
+export class PayloadIngestEvent<
+  NamespacePublicKey,
+  SubspacePublicKey,
+  PayloadDigest,
+> extends CustomEvent<{
+  entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>;
+  payload: Payload;
 }> {
-  constructor(signed: SignedEntry, payload: Payload) {
+  constructor(
+    entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
+    payload: Payload,
+  ) {
     super("payloadingest", {
       detail: {
-        signed,
+        entry,
         payload,
       },
     });
   }
 }
 
-export class EntryRemoveEvent extends CustomEvent<{removed: SignedEntry}>  {
-  constructor(removed: SignedEntry) {
+export class EntryRemoveEvent<
+  NamespacePublicKey,
+  SubspacePublicKey,
+  PayloadDigest,
+> extends CustomEvent<
+  { removed: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest> }
+> {
+  constructor(
+    removed: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
+  ) {
     super("entryremove", {
       detail: {
         removed,

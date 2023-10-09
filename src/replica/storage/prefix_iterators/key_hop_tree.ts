@@ -1,4 +1,5 @@
-import { bytesConcat, bytesEquals } from "../../../../deps.ts";
+import { concat } from "$std/bytes/concat.ts";
+import { equals as bytesEquals } from "$std/bytes/equals.ts";
 import { compareBytes, incrementLastByte } from "../../../util/bytes.ts";
 import { KvBatch, KvDriver } from "../kv/types.ts";
 
@@ -66,7 +67,7 @@ export class KeyHopTree<ValueType> {
     // There is something here! Complexity begins.
 
     // First check if the key + vector is a prefix of ours.
-    const completeValue = bytesConcat(searchKey, existingNode[1]);
+    const completeValue = concat(searchKey, existingNode[1]);
     const foundIsPrefix = isPrefix(completeValue, key);
 
     // 	If it is, we check from the next position. Buck passed.
@@ -141,7 +142,7 @@ export class KeyHopTree<ValueType> {
 
     // Deal with the old (real) node that used to be here
 
-    const newValue = bytesConcat(searchKey, newVectorFoundNodeBytes);
+    const newValue = concat(searchKey, newVectorFoundNodeBytes);
 
     const foundNodeNewKey = completeValue.slice(0, newValue.byteLength + 1);
     const foundNodeNewVector = completeValue.slice(newValue.byteLength + 1);
@@ -180,7 +181,7 @@ export class KeyHopTree<ValueType> {
     }
 
     // First check if the key + vector is a prefix of ours.
-    const completeValue = bytesConcat(searchKey, existingNode[1]);
+    const completeValue = concat(searchKey, existingNode[1]);
 
     if (bytesEquals(completeValue, key)) {
       const batch = this.kv.batch();
@@ -199,7 +200,7 @@ export class KeyHopTree<ValueType> {
 
       if (lastPassedNode && lastPassedNode[1][0] === Phantomness.Phantom) {
         // Sibling is a phantom...
-        const parentCompleteVal = bytesConcat(
+        const parentCompleteVal = concat(
           lastPassedNode[0],
           lastPassedNode[1][1],
         );
@@ -209,7 +210,7 @@ export class KeyHopTree<ValueType> {
         let soleSibling: [number, KeyHopTreeNode<ValueType>] | null = null;
 
         for (let i = 0; i < 256; i++) {
-          const maybeSiblingKey = bytesConcat(
+          const maybeSiblingKey = concat(
             parentCompleteVal,
             new Uint8Array([i]),
           );
@@ -238,7 +239,7 @@ export class KeyHopTree<ValueType> {
 
           // Delete the sole sibling
 
-          const soleSiblingKey = bytesConcat(
+          const soleSiblingKey = concat(
             parentCompleteVal,
             new Uint8Array([soleSibling[0]]),
           );
@@ -249,7 +250,7 @@ export class KeyHopTree<ValueType> {
             [lastPassedNode[0]],
             [
               soleSibling[1][0],
-              bytesConcat(
+              concat(
                 lastPassedNode[1][1],
                 new Uint8Array([soleSibling[0]]),
                 soleSibling[1][1],
@@ -290,7 +291,7 @@ export class KeyHopTree<ValueType> {
         break;
       }
 
-      const completeVal = bytesConcat(searchKey, node[1]);
+      const completeVal = concat(searchKey, node[1]);
 
       if (completeVal.byteLength >= key.byteLength) {
         break;
@@ -318,7 +319,7 @@ export class KeyHopTree<ValueType> {
         break;
       }
 
-      const completeVal = bytesConcat(searchKey, node[1]);
+      const completeVal = concat(searchKey, node[1]);
 
       if (bytesEquals(completeVal, key)) {
         break;
@@ -348,7 +349,7 @@ export class KeyHopTree<ValueType> {
         continue;
       }
 
-      const completeVal = bytesConcat(
+      const completeVal = concat(
         entry.key[0] as Uint8Array,
         entry.value[1],
       );

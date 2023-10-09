@@ -1,5 +1,5 @@
 import { MonoidRbTree } from "./monoid_rbtree.ts";
-import { assertEquals } from "https://deno.land/std@0.158.0/testing/asserts.ts";
+import { assertEquals } from "$std/testing/asserts.ts";
 import { Skiplist } from "./monoid_skiplist.ts";
 import { concatMonoid } from "./lifting_monoid.ts";
 import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
@@ -242,7 +242,7 @@ function makeRandomItemsQuery(set: string[]) {
   };
 }
 
-Deno.test("Summarise and compare (random 10k)", async (test) => {
+Deno.test("Summarise and compare (random 100 sets x 100 ranges)", async (test) => {
   for (const [aScenario, bScenario] of scenarioPairings) {
     await test.step({
       name: `${aScenario.name} + ${bScenario.name}`,
