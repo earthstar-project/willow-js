@@ -1,6 +1,6 @@
 import { KvDriverDeno } from "../src/replica/storage/kv/kv_driver_deno.ts";
 import { concatMonoid } from "../src/replica/storage/summarisable_storage/lifting_monoid.ts";
-import { Skiplist } from "../src/replica/storage/summarisable_storage/monoid_skiplist/monoid_skiplist.ts";
+import { Skiplist } from "../src/replica/storage/summarisable_storage/monoid_skiplist.ts";
 
 const compare = (a: string, b: string) => {
   if (a > b) {
@@ -26,15 +26,8 @@ const skiplist = new Skiplist(
 );
 
 const set: [string, number][] = [
-  ["b", 1],
-  ["c", 1],
-  ["h", 2],
-  ["k", 1],
-  ["m", 5],
-  ["o", 1],
-  ["q", 1],
-  ["v", 1],
-  ["y", 1],
+  ["i", 0],
+  ["l", 0],
 ];
 
 for (const [letter, level] of set) {
@@ -51,9 +44,11 @@ for (const [letter, level] of set) {
 
 await skiplist.print();
 
-await skiplist.remove("b");
+await skiplist.remove("i");
 
-const res = await skiplist.summarise("o", "h");
+console.log("removed i");
+
+const res = await skiplist.summarise("i", "i");
 
 console.log(res);
 

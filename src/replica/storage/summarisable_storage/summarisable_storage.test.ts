@@ -291,8 +291,6 @@ Deno.test("Summarise and compare (random 100 sets x 100 ranges)", async (test) =
             await bStorage.insert(item, new Uint8Array());
           }
 
-          console.log("------");
-
           // Randomly delete an element.
 
           const toDelete = set[Math.floor(Math.random() * set.length)];
@@ -308,6 +306,8 @@ Deno.test("Summarise and compare (random 100 sets x 100 ranges)", async (test) =
             bItems.push(bValue.key);
           }
 
+          // console.log({ toDelete });
+
           await aStorage.remove(toDelete);
           await bStorage.remove(toDelete);
 
@@ -319,7 +319,7 @@ Deno.test("Summarise and compare (random 100 sets x 100 ranges)", async (test) =
             const aFingerprint = await aStorage.summarise(start, end);
             const bFingerprint = await bStorage.summarise(start, end);
 
-            console.log({ start, end });
+            // console.log({ start, end });
 
             assertEquals(
               aFingerprint,
