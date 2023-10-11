@@ -28,23 +28,26 @@ const compare = (a: number, b: number) => {
 
 // Insert (1st)
 
+const byte = new Uint8Array([37]);
+
+/*
 Deno.bench(
   "Insert 2nd (MonoidRbTree)",
   { group: "Insert (2nd)", baseline: true },
   async (bench) => {
     const tree = new MonoidRbTree({ monoid: xormonoid, compare });
 
-    await tree.insert(2, new Uint8Array());
+    await tree.insert(2, byte);
 
     bench.start();
 
-    await tree.insert(6, new Uint8Array());
+    await tree.insert(6, byte);
 
     bench.end();
   },
 );
 
-/*
+
 Deno.bench(
   "Insert 2nd (Dummy KV)",
   { group: "Insert (2nd)" },
@@ -82,11 +85,11 @@ Deno.bench(
       },
     );
 
-    await skiplist.insert(2, new Uint8Array());
+    await skiplist.insert(2, byte);
 
     bench.start();
 
-    await skiplist.insert(6, new Uint8Array());
+    await skiplist.insert(6, byte);
 
     bench.end();
 
@@ -96,6 +99,7 @@ Deno.bench(
 
 // Insert (100th)
 
+/*
 Deno.bench(
   "Insert 100th (MonoidRbTree)",
   { group: "Insert (100th)", baseline: true },
@@ -103,18 +107,18 @@ Deno.bench(
     const tree = new MonoidRbTree({ monoid: xormonoid, compare });
 
     for (let i = 0; i < 100; i++) {
-      await tree.insert(i, new Uint8Array());
+      await tree.insert(i, byte);
     }
 
     bench.start();
 
-    await tree.insert(1000, new Uint8Array());
+    await tree.insert(1000, byte);
 
     bench.end();
   },
 );
 
-/*
+
 Deno.bench(
   "Insert 100th (Dummy KV)",
   { group: "Insert (100th)" },
@@ -155,12 +159,12 @@ Deno.bench(
     );
 
     for (let i = 0; i < 100; i++) {
-      await skiplist.insert(i, new Uint8Array());
+      await skiplist.insert(i, byte);
     }
 
     bench.start();
 
-    await skiplist.insert(100, new Uint8Array());
+    await skiplist.insert(100, byte);
 
     bench.end();
 
@@ -170,6 +174,7 @@ Deno.bench(
 
 // Insert (1000th)
 
+/*
 Deno.bench(
   "Insert 1000th (MonoidRbTree)",
   { group: "Insert (1000th)", baseline: true },
@@ -177,18 +182,18 @@ Deno.bench(
     const tree = new MonoidRbTree({ monoid: xormonoid, compare });
 
     for (let i = 0; i < 1000; i++) {
-      await tree.insert(i, new Uint8Array());
+      await tree.insert(i, byte);
     }
 
     bench.start();
 
-    await tree.insert(1000, new Uint8Array());
+    await tree.insert(1000, byte);
 
     bench.end();
   },
 );
 
-/*
+
 Deno.bench(
   "Insert 1000th (Dummy KV)",
   { group: "Insert (1000th)" },
@@ -229,12 +234,12 @@ Deno.bench(
     );
 
     for (let i = 0; i < 1000; i++) {
-      await skiplist.insert(i, new Uint8Array());
+      await skiplist.insert(i, byte);
     }
 
     bench.start();
 
-    await skiplist.insert(1000, new Uint8Array());
+    await skiplist.insert(1000, byte);
 
     bench.end();
 
@@ -267,6 +272,7 @@ Deno.bench(
   },
 );
 
+/*
 Deno.bench(
   "Summarise 60 (MonoidRbTree)",
   { group: "Summarise 20 - 80" },
@@ -274,7 +280,7 @@ Deno.bench(
     const tree = new MonoidRbTree({ monoid: xormonoid, compare });
 
     for (let i = 0; i < 100; i++) {
-      await tree.insert(i, new Uint8Array());
+      await tree.insert(i, byte);
     }
 
     bench.start();
@@ -285,7 +291,7 @@ Deno.bench(
   },
 );
 
-/*
+
 Deno.bench(
   "Summarise 60 (Dummy KV)",
   { group: "Summarise 20 - 80" },
@@ -326,7 +332,7 @@ Deno.bench(
     );
 
     for (let i = 0; i < 100; i++) {
-      await skiplist.insert(i, new Uint8Array());
+      await skiplist.insert(i, byte);
     }
 
     bench.start();
@@ -364,6 +370,7 @@ Deno.bench(
   },
 );
 
+/*
 Deno.bench(
   "Summarise 160 (MonoidRbTree)",
   { group: "Summarise 20 - 180" },
@@ -371,7 +378,7 @@ Deno.bench(
     const tree = new MonoidRbTree({ monoid: xormonoid, compare });
 
     for (let i = 0; i < 200; i++) {
-      await tree.insert(i, new Uint8Array());
+      await tree.insert(i, byte);
     }
 
     bench.start();
@@ -382,7 +389,7 @@ Deno.bench(
   },
 );
 
-/*
+
 Deno.bench(
   "Summarise 160 (Dummy KV)",
   { group: "Summarise 20 - 180" },
@@ -423,7 +430,7 @@ Deno.bench(
     );
 
     for (let i = 0; i < 200; i++) {
-      await skiplist.insert(i, new Uint8Array());
+      await skiplist.insert(i, byte);
     }
 
     bench.start();
@@ -461,6 +468,7 @@ Deno.bench(
   },
 );
 
+/*
 Deno.bench(
   "Summarise 1960 (MonoidRbTree)",
   { group: "Summarise 20 - 1980" },
@@ -468,7 +476,7 @@ Deno.bench(
     const tree = new MonoidRbTree({ monoid: xormonoid, compare });
 
     for (let i = 0; i < 2000; i++) {
-      await tree.insert(i, new Uint8Array());
+      await tree.insert(i, byte);
     }
 
     bench.start();
@@ -479,7 +487,7 @@ Deno.bench(
   },
 );
 
-/*
+
 Deno.bench(
   "Summarise 1960 (Dummy KV)",
   { group: "Summarise 20 - 1980" },
@@ -520,7 +528,7 @@ Deno.bench(
     );
 
     for (let i = 0; i < 2000; i++) {
-      await skiplist.insert(i, new Uint8Array());
+      await skiplist.insert(i, byte);
     }
 
     bench.start();

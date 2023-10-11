@@ -26,15 +26,10 @@ const skiplist = new Skiplist(
 );
 
 const set: [string, number][] = [
-  ["b", 2],
-  ["d", 1],
-  ["f", 2],
-  ["k", 1],
-  ["p", 1],
-  ["t", 0],
-  ["u", 0],
-  ["w", 1],
-  ["y", 0],
+  ["n", 1],
+  ["p", 0],
+  ["q", 0],
+  ["w", 4],
 ];
 
 for (const [letter, level] of set) {
@@ -43,6 +38,6 @@ for (const [letter, level] of set) {
   });
 }
 
-console.log(await skiplist.summarise("t", "p"));
+console.log(await skiplist.summarise("w", "q"));
 
 await skiplist.print();
