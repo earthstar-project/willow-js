@@ -9,12 +9,9 @@ export interface ProtocolParameters<
   AuthorisationOpts,
   AuthorisationToken,
 > {
-  // The path encoding scheme.
-  /** The encoding scheme used for paths.
-   *
-   * An encoded path **must** be the concatenation of a big-endian k-bit integer (where k is the number of bits needed to represent all numbers from 0 to your max path length, inclusive) and the bytes of the paths themselves.
-   */
-  pathLengthEncoding: EncodingScheme<number>;
+  pathLengthEncoding: EncodingScheme<number> & {
+    maxLength: number;
+  };
 
   // Namespace encoding scheme
   namespaceScheme: EncodingScheme<NamespacePublicKey> & {
