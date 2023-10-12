@@ -31,6 +31,7 @@ import {
   decodeSummarisableStorageValue,
   encodeEntryKeys,
   encodeSummarisableStorageValue,
+  makeSuccessorPath,
 } from "./util.ts";
 
 /** A local snapshot of a namespace to be written to, queried from, and synced with other replicas.
@@ -63,6 +64,8 @@ export class Replica<
   private entryDriver: EntryDriver;
   private payloadDriver: PayloadDriver<PayloadDigest>;
 
+  private incrementPath: (path: Uint8Array) => Uint8Array;
+
   private checkedWriteAheadFlag = deferred();
 
   constructor(
@@ -89,6 +92,10 @@ export class Replica<
     this.ptsStorage = entryDriver.createSummarisableStorage("pts");
     this.sptStorage = entryDriver.createSummarisableStorage("spt");
     this.tspStorage = entryDriver.createSummarisableStorage("tsp");
+
+    this.incrementPath = makeSuccessorPath(
+      this.protocolParams.pathLengthEncoding.maxLength,
+    );
 
     this.checkWriteAheadFlag();
   }
@@ -300,7 +307,7 @@ export class Replica<
       this.protocolParams.subspaceScheme.encode(entry.identifier.subspace),
       entry.identifier.path,
     );
-    const entryAuthorPathKeyUpper = incrementLastByte(entryAuthorPathKey);
+    const entryAuthorPathKeyUpper = this.incrementPath(entryAuthorPathKey);
 
     const prefixKey = concat(
       this.protocolParams.subspaceScheme.encode(entry.identifier.subspace),

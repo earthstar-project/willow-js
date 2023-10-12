@@ -116,6 +116,7 @@ class TestReplica extends Replica<
           encodedLength() {
             return 1;
           },
+          maxLength: 8,
         },
         payloadScheme: {
           encode(hash) {
