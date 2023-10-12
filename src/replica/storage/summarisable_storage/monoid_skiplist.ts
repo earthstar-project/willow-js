@@ -4,7 +4,7 @@ import { combineMonoid, LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
 import { SummarisableStorage } from "./types.ts";
 
 const LAYER_INSERT_PROBABILITY = 0.5;
-const LAYER_LEVEL_LIMIT = 4;
+const LAYER_LEVEL_LIMIT = 64;
 
 type SkiplistOpts<
   ValueType extends
