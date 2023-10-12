@@ -4,6 +4,7 @@ import { Skiplist } from "./monoid_skiplist.ts";
 import { concatMonoid } from "./lifting_monoid.ts";
 import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
 import { SummarisableStorage } from "./types.ts";
+import { SimpleKv } from "./simple_kv.ts";
 
 // The range, the fingerprint, size, collected items.
 type RangeVector = [[string, string], string, number, string[]];
@@ -43,6 +44,29 @@ type SummarisableStorageScenario = {
   >;
 };
 
+const simpleKvScenario: SummarisableStorageScenario = {
+  name: "SimpleKV",
+  makeScenario: async () => {
+    const kv = await Deno.openKv();
+    const driver = new KvDriverDeno(kv);
+
+    await driver.clear();
+
+    const simpleKv = new SimpleKv(
+      {
+        monoid: concatMonoid,
+        compare,
+        kv: driver,
+      },
+    );
+
+    return {
+      storage: simpleKv,
+      dispose: () => Promise.resolve(kv.close()),
+    };
+  },
+};
+
 const skiplistScenario: SummarisableStorageScenario = {
   name: "Skiplist",
   makeScenario: async () => {
@@ -78,8 +102,11 @@ const rbtreeScenario: SummarisableStorageScenario = {
   },
 };
 
-const scenarios = [skiplistScenario, rbtreeScenario];
-const scenarioPairings = [[skiplistScenario, rbtreeScenario]];
+const scenarios = [simpleKvScenario, skiplistScenario, rbtreeScenario];
+const scenarioPairings = [
+  [simpleKvScenario, rbtreeScenario],
+  [skiplistScenario, rbtreeScenario],
+];
 
 Deno.test("Storage", async (test) => {
   for (const scenario of scenarios) {
@@ -279,6 +306,8 @@ Deno.test("Summarise and compare (random 100 sets x 100 ranges)", async (test) =
             bItems.push(bValue.key);
           }
 
+          // console.log({ toDelete });
+
           await aStorage.remove(toDelete);
           await bStorage.remove(toDelete);
 
@@ -290,9 +319,11 @@ Deno.test("Summarise and compare (random 100 sets x 100 ranges)", async (test) =
             const aFingerprint = await aStorage.summarise(start, end);
             const bFingerprint = await bStorage.summarise(start, end);
 
+            // console.log({ start, end });
+
             assertEquals(
-              bFingerprint,
               aFingerprint,
+              bFingerprint,
             );
 
             const aItems = [];
