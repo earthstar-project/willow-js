@@ -672,6 +672,146 @@ export class Skiplist<
     start: ValueType,
     end: ValueType,
   ): Promise<{ fingerprint: LiftedType; size: number }> {
+    // Get the first value.
+
+    // For each value you find, shoot up.
+
+    // Keep moving rightwards until you overshoot.
+
+    // Assemble the tail using start: key where things started to go wrong, end: end.
+
+    const accumulateUntilOvershoot = async (
+      start: ValueType | undefined,
+      end: ValueType | undefined,
+      layer: number,
+    ): Promise<
+      { label: [LiftedType, number]; overshootKey: ValueType | undefined }
+    > => {
+      const startUntilEnd = this.kv.list<SkiplistValue<LiftedType>>({
+        start: start ? [layer, start] : [layer],
+        end: end ? [layer, end] : [layer + 1],
+      });
+
+      let label = this.monoid.neutral;
+
+      let candidateLabel = this.monoid.neutral;
+      let overshootKey: ValueType | undefined;
+
+      for await (const entry of startUntilEnd) {
+        label = this.monoid.combine(label, candidateLabel);
+        candidateLabel = this.monoid.neutral;
+
+        const [entryHeight, entryLabel] = entry.value;
+
+        if (entryHeight <= layer) {
+          overshootKey = entry.key[this.valueKeyIndex] as ValueType;
+          candidateLabel = entryLabel;
+          continue;
+        }
+
+        const { label: aboveLabel, overshootKey: aboveOvershootKey } =
+          await accumulateUntilOvershoot(
+            start,
+            end,
+            entryHeight,
+          );
+
+        overshootKey = aboveOvershootKey;
+
+        label = this.monoid.combine(label, aboveLabel);
+
+        break;
+      }
+
+      // Now we must determine what to do with the leftover candidate.
+      const [, candidateSize] = candidateLabel;
+
+      if (candidateSize === 1 || end === undefined) {
+        label = this.monoid.combine(label, candidateLabel);
+        return { label, overshootKey: undefined };
+      }
+
+      return { label, overshootKey };
+    };
+
+    const getTail = async (
+      overshootLabel: ValueType,
+      end: ValueType | undefined,
+      layer: number,
+    ): Promise<[LiftedType, number]> => {
+      const endUntilOvershoot = this.kv.list<SkiplistValue<LiftedType>>({
+        start: [layer, overshootLabel],
+        end: end ? [layer, end] : [layer + 1],
+      }, {
+        reverse: true,
+      });
+
+      let label = this.monoid.neutral;
+
+      for await (const entry of endUntilOvershoot) {
+        const [entryHeight, entryLabel] = entry.value;
+
+        label = this.monoid.combine(entryLabel, label);
+
+        if (entryHeight <= layer) {
+          continue;
+        }
+
+        const entryValue = entry.key[this.valueKeyIndex] as ValueType;
+
+        const aboveLabel = await getTail(
+          overshootLabel,
+          entryValue,
+          entryHeight,
+        );
+
+        label = this.monoid.combine(aboveLabel, label);
+
+        break;
+      }
+
+      return label;
+    };
+
+    const accumulateLabel = async (
+      { start, end }: {
+        start?: ValueType;
+        end?: ValueType;
+      },
+    ) => {
+      const firstEntry = this.kv.list<SkiplistBaseValue<LiftedType>>({
+        start: start ? [0, start] : [0],
+        end: [1],
+      }, {
+        limit: 1,
+      });
+
+      for await (const first of firstEntry) {
+        const height = first.value[0];
+
+        const { label: headLabel, overshootKey } =
+          await accumulateUntilOvershoot(
+            start,
+            end,
+            height,
+          );
+
+        if (!overshootKey) {
+          // Very lucky.
+
+          return headLabel;
+        }
+
+        // Get the tail, return it.
+        const tailLabel = await getTail(overshootKey, end, 0);
+
+        return this.monoid.combine(headLabel, tailLabel);
+      }
+
+      return this.monoid.neutral;
+    };
+
+    /*
     const accumulateLabel = async (
       { layer, lowerBound, upperBound }: {
         layer: number;
@@ -813,35 +953,24 @@ export class Skiplist<
 
       return acc;
     };
+    */
 
     const argOrder = this.compare(start, end);
 
     if (argOrder < 0) {
-      const [fingerprint, size] = await accumulateLabel({
-        layer: await this.maxHeight(),
-        lowerBound: start,
-        upperBound: end,
-      });
+      const [fingerprint, size] = await accumulateLabel({ start, end });
 
       return { fingerprint, size };
     } else if (argOrder > 0) {
-      const firstHalf = await accumulateLabel({
-        layer: await this.maxHeight(),
-        upperBound: end,
-      });
+      const firstHalf = await accumulateLabel({ end });
 
-      const secondHalf = await accumulateLabel({
-        layer: await this.maxHeight(),
-        lowerBound: start,
-      });
+      const secondHalf = await accumulateLabel({ start });
 
       const [fingerprint, size] = this.monoid.combine(firstHalf, secondHalf);
 
       return { fingerprint, size };
     } else {
-      const [fingerprint, size] = await accumulateLabel({
-        layer: await this.maxHeight(),
-      });
+      const [fingerprint, size] = await accumulateLabel({});
 
       return { fingerprint, size };
     }
