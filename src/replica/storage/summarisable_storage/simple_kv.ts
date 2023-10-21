@@ -194,7 +194,7 @@ export class SimpleKv<ValueType extends KeyPart, LiftedType>
     let size = 0;
 
     for await (const entry of this.entries(start, end)) {
-      const lifted = await this.monoid.lift(entry.key);
+      const lifted = await this.monoid.lift(entry.key, entry.value);
 
       fingerprint = this.monoid.combine(fingerprint, lifted);
       size += 1;

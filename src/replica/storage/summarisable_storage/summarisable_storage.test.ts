@@ -1,27 +1,28 @@
 import { MonoidRbTree } from "./monoid_rbtree.ts";
-import { assertEquals } from "$std/testing/asserts.ts";
+import { assertEquals } from "https://deno.land/std@0.202.0/testing/asserts.ts";
 import { Skiplist } from "./monoid_skiplist.ts";
-import { concatMonoid } from "./lifting_monoid.ts";
+
 import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
 import { SummarisableStorage } from "./types.ts";
 import { SimpleKv } from "./simple_kv.ts";
+import { LiftingMonoid } from "./lifting_monoid.ts";
 
 // The range, the fingerprint, size, collected items.
 type RangeVector = [[string, string], string, number, string[]];
 
 const rangeVectors: RangeVector[] = [
-  [["a", "a"], "abcdefg", 7, ["a", "b", "c", "d", "e", "f", "g"]],
-  [["a", "d"], "abc", 3, ["a", "b", "c"]],
-  [["g", "a"], "g", 1, ["g"]],
-  [["c", "a"], "cdefg", 5, ["c", "d", "e", "f", "g"]],
-  [["c", "g"], "cdef", 4, ["c", "d", "e", "f"]],
-  [["e", "a"], "efg", 3, ["e", "f", "g"]],
-  [["b", "b"], "abcdefg", 7, ["a", "b", "c", "d", "e", "f", "g"]],
-  [["c", "b"], "acdefg", 6, ["a", "c", "d", "e", "f", "g"]],
-  [["e", "b"], "aefg", 4, ["a", "e", "f", "g"]],
-  [["m", "d"], "abc", 3, ["a", "b", "c"]],
+  [["a", "a"], "aAbBcCdDeEfFgG", 7, ["a", "b", "c", "d", "e", "f", "g"]],
+  [["a", "d"], "aAbBcC", 3, ["a", "b", "c"]],
+  [["g", "a"], "gG", 1, ["g"]],
+  [["c", "a"], "cCdDeEfFgG", 5, ["c", "d", "e", "f", "g"]],
+  [["c", "g"], "cCdDeEfF", 4, ["c", "d", "e", "f"]],
+  [["e", "a"], "eEfFgG", 3, ["e", "f", "g"]],
+  [["b", "b"], "aAbBcCdDeEfFgG", 7, ["a", "b", "c", "d", "e", "f", "g"]],
+  [["c", "b"], "aAcCdDeEfFgG", 6, ["a", "c", "d", "e", "f", "g"]],
+  [["e", "b"], "aAeEfFgG", 4, ["a", "e", "f", "g"]],
+  [["m", "d"], "aAbBcC", 3, ["a", "b", "c"]],
   [["m", "z"], "", 0, []],
-  [["f", "z"], "fg", 2, ["f", "g"]],
+  [["f", "z"], "fFgG", 2, ["f", "g"]],
 ];
 
 const compare = (a: string, b: string) => {
@@ -42,6 +43,16 @@ type SummarisableStorageScenario = {
       dispose: () => Promise<void>;
     }
   >;
+};
+
+/** A monoid which lifts the member as a string, and combines by concatenating together. */
+const concatMonoid: LiftingMonoid<string, string> = {
+  lift: (key: string, value: Uint8Array) =>
+    Promise.resolve(key + new TextDecoder().decode(value)),
+  combine: (a: string, b: string) => {
+    return a + b;
+  },
+  neutral: "",
 };
 
 const simpleKvScenario: SummarisableStorageScenario = {
@@ -122,7 +133,7 @@ Deno.test("Storage", async (test) => {
         const map = new Map();
 
         for (const letter of keys) {
-          map.set(letter, encoder.encode(letter));
+          map.set(letter, encoder.encode(letter.toUpperCase()));
         }
 
         for (const [key, value] of map) {
@@ -159,7 +170,10 @@ Deno.test("Summarise (basics)", async (test) => {
         const set = ["a", "b", "c", "d", "e", "f", "g"];
 
         for (const item of set) {
-          await storage.insert(item, new Uint8Array());
+          await storage.insert(
+            item,
+            new TextEncoder().encode(item.toUpperCase()),
+          );
         }
 
         for (const vector of rangeVectors) {

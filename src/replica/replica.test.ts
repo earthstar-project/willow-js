@@ -2,18 +2,19 @@ import {
   assert,
   assertEquals,
 } from "https://deno.land/std@0.177.0/testing/asserts.ts";
-
-import { equals as bytesEquals } from "$std/bytes/equals.ts";
 import { compareBytes } from "../util/bytes.ts";
 import { Replica } from "./replica.ts";
 import { crypto } from "https://deno.land/std@0.188.0/crypto/crypto.ts";
-import { RadixishTree } from "./storage/prefix_iterators/radixish_tree.ts";
-import { sha256XorMonoid } from "./storage/summarisable_storage/lifting_monoid.ts";
-import { MonoidRbTree } from "./storage/summarisable_storage/monoid_rbtree.ts";
-import { SummarisableStorage } from "./storage/summarisable_storage/types.ts";
-import { EntryDriver } from "./storage/types.ts";
 import { encodeEntry } from "../entries/encode_decode.ts";
 import { encodeEntryKeys, encodeSummarisableStorageValue } from "./util.ts";
+import { equalsBytes, Products } from "../../deps.ts";
+import {
+  FingerprintScheme,
+  NamespaceScheme,
+  PathLengthScheme,
+  PayloadScheme,
+  SubspaceScheme,
+} from "./types.ts";
 
 async function makeKeypair() {
   const { publicKey, privateKey } = await crypto.subtle.generateKey(
@@ -46,138 +47,108 @@ function importPublicKey(raw: ArrayBuffer) {
   );
 }
 
-export class EntryDriverTest implements EntryDriver {
-  private insertionFlag: [Uint8Array, Uint8Array] | undefined = undefined;
-  private removalFlag: Uint8Array | undefined = undefined;
+const testSchemeNamespace: NamespaceScheme<Uint8Array> = {
+  encode: (v) => v,
+  decode: (v) => v,
+  encodedLength: (v) => v.byteLength,
+  isEqual: equalsBytes,
+};
 
-  createSummarisableStorage(): SummarisableStorage<Uint8Array, Uint8Array> {
-    return new MonoidRbTree({
-      monoid: sha256XorMonoid,
-      compare: compareBytes,
+const testSchemeSubspace: SubspaceScheme<Uint8Array> = {
+  encode: (v) => v,
+  decode: (v) => v.subarray(0, 65),
+  encodedLength: () => 65,
+  isEqual: equalsBytes,
+  minimalSubspaceKey: new Uint8Array(65),
+  order: Products.orderPaths,
+  successor: Products.makeSuccessorPath(65),
+};
+
+const testSchemePathLength: PathLengthScheme = {
+  encode(length) {
+    return new Uint8Array([length]);
+  },
+  decode(bytes) {
+    return bytes[0];
+  },
+  encodedLength() {
+    return 1;
+  },
+  maxLength: 8,
+};
+
+const testSchemePayload: PayloadScheme<ArrayBuffer> = {
+  encode(hash) {
+    return new Uint8Array(hash);
+  },
+  decode(bytes) {
+    return bytes.subarray(0, 32);
+  },
+  encodedLength() {
+    return 32;
+  },
+  async fromBytes(bytes) {
+    return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  },
+  order(a, b) {
+    return compareBytes(new Uint8Array(a), new Uint8Array(b)) as
+      | 1
+      | 0
+      | -1;
+  },
+};
+
+const testSchemeFingerprint: FingerprintScheme<
+  Uint8Array,
+  Uint8Array,
+  Uint8Array,
+  Uint8Array
+> = {
+  neutral: new Uint8Array(32),
+  async fingerprintSingleton(entry) {
+    const encodedEntry = encodeEntry(entry, {
+      namespaceScheme: testSchemeNamespace,
+      subspaceScheme: testSchemeSubspace,
+      pathLengthScheme: testSchemePathLength,
+      payloadScheme: testSchemePayload,
     });
-  }
-  writeAheadFlag = {
-    wasInserting: () => Promise.resolve(this.insertionFlag),
-    wasRemoving: () => Promise.resolve(this.removalFlag),
-    flagInsertion: (key: Uint8Array, value: Uint8Array) => {
-      this.insertionFlag = [key, value];
 
-      return Promise.resolve();
-    },
-    flagRemoval: (key: Uint8Array) => {
-      this.removalFlag = key;
+    return new Uint8Array(await crypto.subtle.digest("SHA-256", encodedEntry));
+  },
+  fingerprintCombine(a, b) {
+    const bytes = new Uint8Array(32);
 
-      return Promise.resolve();
-    },
-    unflagInsertion: () => {
-      this.insertionFlag = undefined;
+    for (let i = 0; i < 32; i++) {
+      bytes.set([a[i] ^ b[i]], i);
+    }
 
-      return Promise.resolve();
-    },
-    unflagRemoval: () => {
-      this.removalFlag = undefined;
-
-      return Promise.resolve();
-    },
-  };
-  prefixIterator = new RadixishTree<Uint8Array>();
-}
+    return bytes;
+  },
+};
 
 class TestReplica extends Replica<
   Uint8Array,
   Uint8Array,
   ArrayBuffer,
   CryptoKey,
-  ArrayBuffer
+  ArrayBuffer,
+  Uint8Array
 > {
   constructor(namespace = new Uint8Array([1, 2, 3, 4])) {
     super({
       namespace,
       protocolParameters: {
-        namespaceScheme: {
-          encode: (v) => v,
-          decode: (v) => v,
-          encodedLength: (v) => v.byteLength,
-          isEqual: bytesEquals,
-        },
-        subspaceScheme: {
-          encode: (v) => v,
-          decode: (v) => v.subarray(0, 65),
-          encodedLength: () => 65,
-          isEqual: bytesEquals,
-        },
-        pathLengthEncoding: {
-          encode(length) {
-            return new Uint8Array([length]);
-          },
-          decode(bytes) {
-            return bytes[0];
-          },
-          encodedLength() {
-            return 1;
-          },
-          maxLength: 8,
-        },
-        payloadScheme: {
-          encode(hash) {
-            return new Uint8Array(hash);
-          },
-          decode(bytes) {
-            return bytes.subarray(0, 32);
-          },
-          encodedLength() {
-            return 32;
-          },
-          async fromBytes(bytes) {
-            return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-          },
-          order(a, b) {
-            return compareBytes(new Uint8Array(a), new Uint8Array(b)) as
-              | 1
-              | 0
-              | -1;
-          },
-        },
+        namespaceScheme: testSchemeNamespace,
+        subspaceScheme: testSchemeSubspace,
+        pathLengthScheme: testSchemePathLength,
+        payloadScheme: testSchemePayload,
         authorisationScheme: {
           async authorise(entry, secretKey) {
             const encodedEntry = encodeEntry(entry, {
-              namespacePublicKeyEncoding: {
-                encode: (v) => v,
-                decode: (v) => v,
-                encodedLength: (v) => v.byteLength,
-              },
-              subspacePublicKeyEncoding: {
-                encode: (v) => v,
-                decode: (v) => v,
-                encodedLength: (v) => v.byteLength,
-              },
-              pathEncoding: {
-                encode(path) {
-                  const bytes = new Uint8Array(1 + path.byteLength);
-                  bytes[0] = path.byteLength;
-
-                  bytes.set(path, 1);
-                  return bytes;
-                },
-                decode(bytes) {
-                  const length = bytes[0];
-                  return bytes.subarray(1, 1 + length);
-                },
-                encodedLength(path) {
-                  return 1 + path.byteLength;
-                },
-              },
-              payloadDigestEncoding: {
-                encode(hash) {
-                  return new Uint8Array(hash);
-                },
-                decode(bytes) {
-                  return bytes.buffer;
-                },
-                encodedLength(hash) {
-                  return hash.byteLength;
-                },
-              },
+              namespaceScheme: testSchemeNamespace,
+              subspaceScheme: testSchemeSubspace,
+              pathLengthScheme: testSchemePathLength,
+              payloadScheme: testSchemePayload,
             });
 
             const res = await crypto.subtle.sign(
@@ -195,43 +166,10 @@ class TestReplica extends Replica<
             const cryptoKey = await importPublicKey(entry.identifier.subspace);
 
             const encodedEntry = encodeEntry(entry, {
-              namespacePublicKeyEncoding: {
-                encode: (v) => v,
-                decode: (v) => v,
-                encodedLength: (v) => v.byteLength,
-              },
-              subspacePublicKeyEncoding: {
-                encode: (v) => v,
-                decode: (v) => v,
-                encodedLength: (v) => v.byteLength,
-              },
-              pathEncoding: {
-                encode(path) {
-                  const bytes = new Uint8Array(1 + path.byteLength);
-                  bytes[0] = path.byteLength;
-
-                  bytes.set(path, 1);
-                  return bytes;
-                },
-                decode(bytes) {
-                  const length = bytes[0];
-                  return bytes.subarray(1, 1 + length);
-                },
-                encodedLength(path) {
-                  return 1 + path.byteLength;
-                },
-              },
-              payloadDigestEncoding: {
-                encode(hash) {
-                  return new Uint8Array(hash);
-                },
-                decode(bytes) {
-                  return bytes.buffer;
-                },
-                encodedLength(hash) {
-                  return hash.byteLength;
-                },
-              },
+              namespaceScheme: testSchemeNamespace,
+              subspaceScheme: testSchemeSubspace,
+              pathLengthScheme: testSchemePathLength,
+              payloadScheme: testSchemePayload,
             });
 
             return crypto.subtle.verify(
@@ -250,8 +188,8 @@ class TestReplica extends Replica<
             encodedLength: (ab) => ab.byteLength,
           },
         },
+        fingerprintScheme: testSchemeFingerprint,
       },
-      entryDriver: new EntryDriverTest(),
     });
   }
 
@@ -817,17 +755,7 @@ Deno.test("Write-ahead flags", async (test) => {
       authTokenHash: new Uint8Array(
         await crypto.subtle.digest("SHA-256", res.authToken),
       ),
-      payloadEncoding: {
-        encode(hash) {
-          return new Uint8Array(hash);
-        },
-        decode(bytes) {
-          return bytes.subarray(0, 32);
-        },
-        encodedLength() {
-          return 32;
-        },
-      },
+      payloadScheme: testSchemePayload,
       pathLength: res.entry.identifier.path.byteLength,
       pathLengthEncoding: {
         encode(length) {
@@ -844,7 +772,7 @@ Deno.test("Write-ahead flags", async (test) => {
 
     // Insert
 
-    await replica.set(
+    const result = await replica.set(
       {
         path: new Uint8Array([0, 0, 0, 0, 1]),
         payload: new Uint8Array(32),
@@ -853,7 +781,13 @@ Deno.test("Write-ahead flags", async (test) => {
       },
       authorKeypair.privateKey,
     );
-    await replica.writeAheadFlag().flagInsertion(keys.pts, storageValue);
+
+    assert(result.kind === "success");
+
+    await replica.writeAheadFlag().flagInsertion(
+      result.entry,
+      result.authToken,
+    );
 
     await replica.triggerWriteAheadFlag();
 
@@ -889,21 +823,7 @@ Deno.test("Write-ahead flags", async (test) => {
 
     assert(res.kind === "success");
 
-    // Create PTA flag.
-    const keys = encodeEntryKeys(
-      {
-        path: new Uint8Array(res.entry.identifier.path),
-        timestamp: res.entry.record.timestamp,
-        subspace: new Uint8Array(res.entry.identifier.subspace),
-        subspaceEncoding: {
-          encode: (v) => v,
-          decode: (v) => v.subarray(0, 65),
-          encodedLength: () => 65,
-        },
-      },
-    );
-
-    await replica.writeAheadFlag().flagRemoval(keys.pts);
+    await replica.writeAheadFlag().flagRemoval(res.entry);
 
     await replica.triggerWriteAheadFlag();
 

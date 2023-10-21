@@ -1,25 +1,54 @@
+import { Entry } from "../../entries/types.ts";
 import { ValidationError } from "../../errors.ts";
 import { Payload } from "../types.ts";
-import { PrefixIterator } from "./prefix_iterators/types.ts";
-import { SummarisableStorage } from "./summarisable_storage/types.ts";
 
-export interface WriteAheadFlag<ValueType, KeyType> {
-  wasInserting: () => Promise<[KeyType, ValueType] | undefined>;
-  wasRemoving: () => Promise<KeyType | undefined>;
-  flagInsertion: (key: KeyType, value: ValueType) => Promise<void>;
+import { PrefixIterator } from "./prefix_iterators/types.ts";
+import { Storage3d } from "./storage_3d/types.ts";
+
+export interface WriteAheadFlag<
+  NamespaceKey,
+  SubspaceKey,
+  PayloadDigest,
+> {
+  wasInserting(): Promise<
+    {
+      entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>;
+      authTokenHash: PayloadDigest;
+    } | undefined
+  >;
+  wasRemoving(): Promise<
+    Entry<NamespaceKey, SubspaceKey, PayloadDigest> | undefined
+  >;
+  flagInsertion(
+    entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
+    authTokenHash: PayloadDigest,
+  ): Promise<void>;
   unflagInsertion: () => Promise<void>;
-  flagRemoval: (key: KeyType) => Promise<void>;
-  unflagRemoval: () => Promise<void>;
+  flagRemoval(
+    entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
+  ): Promise<void>;
+  unflagRemoval(): Promise<void>;
 }
 
 /** Provides methods for storing and retrieving entries for a {@link Replica}. */
-export interface EntryDriver {
-  /** Creates a {@link SummarisableStorage} with a given ID, used for storing entries and their data. */
-  createSummarisableStorage: (
-    id: string,
-  ) => SummarisableStorage<Uint8Array, Uint8Array>;
+export interface EntryDriver<
+  NamespaceKey,
+  SubspaceKey,
+  PayloadDigest,
+  Fingerprint,
+> {
+  makeStorage: (namespace: NamespaceKey) => Storage3d<
+    NamespaceKey,
+    SubspaceKey,
+    PayloadDigest,
+    Fingerprint
+  >;
   /** Helps a Replica recover from unexpected shutdowns mid-write. */
-  writeAheadFlag: WriteAheadFlag<Uint8Array, Uint8Array>;
+  writeAheadFlag: WriteAheadFlag<
+    NamespaceKey,
+    SubspaceKey,
+    PayloadDigest
+  >;
   /** Used to find paths that are prefixes of, or prefixed by, another path. */
   prefixIterator: PrefixIterator<Uint8Array>;
 }

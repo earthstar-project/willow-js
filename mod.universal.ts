@@ -1,6 +1,5 @@
 export * from "./src/entries/types.ts";
 export * from "./src/entries/encode_decode.ts";
-export * from "./src/entries/sign_verify.ts";
 
 export * from "./src/replica/types.ts";
 export * from "./src/replica/replica.ts";

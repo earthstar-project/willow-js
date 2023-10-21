@@ -1,4 +1,9 @@
-import { EncodingScheme } from "../replica/types.ts";
+import {
+  NamespaceScheme,
+  PathLengthScheme,
+  PayloadScheme,
+  SubspaceScheme,
+} from "../replica/types.ts";
 import { Entry } from "./types.ts";
 
 export function encodeEntry<
@@ -8,10 +13,10 @@ export function encodeEntry<
 >(
   entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
   opts: {
-    namespacePublicKeyEncoding: EncodingScheme<NamespacePublicKey>;
-    subspacePublicKeyEncoding: EncodingScheme<SubspacePublicKey>;
-    pathEncoding: EncodingScheme<Uint8Array>;
-    payloadDigestEncoding: EncodingScheme<PayloadDigest>;
+    namespaceScheme: NamespaceScheme<NamespacePublicKey>;
+    subspaceScheme: SubspaceScheme<SubspacePublicKey>;
+    pathLengthScheme: PathLengthScheme;
+    payloadScheme: PayloadScheme<PayloadDigest>;
   },
 ): Uint8Array {
   if (entry.identifier.path.byteLength > 256) {
@@ -19,21 +24,26 @@ export function encodeEntry<
   }
 
   // Namespace pubkey + Author pubkey + 64 bit uint + path bytelength
-  const encodedNamespace = opts.namespacePublicKeyEncoding.encode(
+  const encodedNamespace = opts.namespaceScheme.encode(
     entry.identifier.namespace,
   );
-  const encodedSubspace = opts.subspacePublicKeyEncoding.encode(
+  const encodedSubspace = opts.subspaceScheme.encode(
     entry.identifier.subspace,
   );
-  const encodedPath = opts.pathEncoding.encode(entry.identifier.path);
+  const encodedPathLength = opts.pathLengthScheme.encode(
+    entry.identifier.path.byteLength,
+  );
 
-  const encodedPayloadDigest = opts.payloadDigestEncoding.encode(
+  //const encodedPath = concat(encodedPathLength, entry.identifier.path);
+
+  const encodedPayloadDigest = opts.payloadScheme.encode(
     entry.record.hash,
   );
 
   const recordIdentifierLength = encodedNamespace.byteLength +
     encodedSubspace.byteLength +
-    encodedPath.byteLength;
+    +encodedPathLength.byteLength +
+    entry.identifier.path.byteLength;
 
   // time (uint64) + length (uint64) + digest
   const recordLength = 8 + 8 + encodedPayloadDigest.byteLength;
@@ -59,9 +69,13 @@ export function encodeEntry<
   currentPosition += encodedSubspace.byteLength;
 
   // Path
-  ui8.set(encodedPath, currentPosition);
+  ui8.set(encodedPathLength, currentPosition);
 
-  currentPosition += encodedPath.byteLength;
+  currentPosition += encodedPathLength.byteLength;
+
+  ui8.set(entry.identifier.path, currentPosition);
+
+  currentPosition += entry.identifier.path.byteLength;
 
   // Record
 
@@ -88,35 +102,45 @@ export function decodeEntry<
 >(
   encodedEntry: Uint8Array,
   opts: {
-    namespacePublicKeyEncoding: EncodingScheme<NamespacePublicKey>;
-    subspacePublicKeyEncoding: EncodingScheme<SubspacePublicKey>;
-    pathEncoding: EncodingScheme<Uint8Array>;
-    payloadDigestEncoding: EncodingScheme<PayloadDigest>;
+    namespaceScheme: NamespaceScheme<NamespacePublicKey>;
+    subspaceScheme: SubspaceScheme<SubspacePublicKey>;
+    pathLengthScheme: PathLengthScheme;
+    payloadScheme: PayloadScheme<PayloadDigest>;
   },
 ): Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest> {
   const dataView = new DataView(encodedEntry.buffer);
 
-  const namespaceKey = opts.namespacePublicKeyEncoding.decode(
+  const namespaceKey = opts.namespaceScheme.decode(
     encodedEntry.subarray(0),
   );
-  const encodedNamespaceLength = opts.namespacePublicKeyEncoding.encodedLength(
+  const encodedNamespaceLength = opts.namespaceScheme.encodedLength(
     namespaceKey,
   );
 
-  const subspaceKey = opts.subspacePublicKeyEncoding.decode(
+  const subspaceKey = opts.subspaceScheme.decode(
     encodedEntry.subarray(encodedNamespaceLength),
   );
-  const encodedSubspaceLength = opts.subspacePublicKeyEncoding.encodedLength(
+  const encodedSubspaceLength = opts.subspaceScheme.encodedLength(
     subspaceKey,
   );
 
-  const path = opts.pathEncoding.decode(
+  const pathLength = opts.pathLengthScheme.decode(
     encodedEntry.subarray(encodedNamespaceLength + encodedSubspaceLength),
   );
-  const encodedPathLength = opts.pathEncoding.encodedLength(path);
+
+  const encodedPathLengthLength = opts.pathLengthScheme.encodedLength(
+    pathLength,
+  );
+
+  const path = encodedEntry.subarray(
+    encodedNamespaceLength + encodedSubspaceLength + encodedPathLengthLength,
+    encodedNamespaceLength + encodedSubspaceLength + encodedPathLengthLength +
+      pathLength,
+  );
 
   const identifierLength = encodedNamespaceLength + encodedSubspaceLength +
-    encodedPathLength;
+    encodedPathLengthLength +
+    pathLength;
 
   return {
     identifier: {
@@ -127,7 +151,7 @@ export function decodeEntry<
     record: {
       timestamp: dataView.getBigUint64(identifierLength),
       length: dataView.getBigUint64(identifierLength + 8),
-      hash: opts.payloadDigestEncoding.decode(
+      hash: opts.payloadScheme.decode(
         encodedEntry.subarray(identifierLength + 8 + 8),
       ),
     },

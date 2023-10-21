@@ -1,10 +1,10 @@
-import { encodeBase32 } from "$std/encoding/base32.ts";
 import { ValidationError, WillowError } from "../../../errors.ts";
 import { EncodingScheme, Payload } from "../../types.ts";
 import { PayloadDriver } from "../types.ts";
 import { join } from "https://deno.land/std@0.188.0/path/mod.ts";
 import { ensureDir } from "https://deno.land/std@0.188.0/fs/ensure_dir.ts";
 import { move } from "https://deno.land/std@0.188.0/fs/move.ts";
+import { encodeBase32 } from "../../../../deps.ts";
 
 /** Stores and retrieves payloads from the filesystem. */
 export class PayloadDriverFilesystem<PayloadDigest>
