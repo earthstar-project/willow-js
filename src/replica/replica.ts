@@ -333,6 +333,10 @@ export class Replica<
       await this.entryDriver.prefixIterator.remove(
         toRemovePrefixKey,
       );
+
+      this.dispatchEvent(
+        new EntryRemoveEvent(otherEntry),
+      );
     }
 
     await this.insertEntry({

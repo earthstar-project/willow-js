@@ -656,7 +656,7 @@ export class TripleStorage<
         authTokenHash: values.authTokenHash,
       };
 
-      if (entriesYielded === query.limit) {
+      if (query.limit && entriesYielded === query.limit) {
         break;
       }
     }

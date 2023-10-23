@@ -150,11 +150,13 @@ export function decodeEntryKey<SubspacePublicKey>(
         0,
       );
 
-      path = encoded.subarray(8, 8 + pathLength);
-
       subspace = subspaceEncoding.decode(
-        encoded.subarray(8 + pathLength),
+        encoded.subarray(8),
       );
+
+      const encodedSubspaceLength = subspaceEncoding.encodedLength(subspace);
+
+      path = encoded.subarray(8 + encodedSubspaceLength);
     }
   }
 
