@@ -1,4 +1,4 @@
-import { Products } from "../../../../deps.ts";
+import { concat, Products } from "../../../../deps.ts";
 import { Entry } from "../../../entries/types.ts";
 import { bigintToBytes } from "../../../util/bytes.ts";
 import {
@@ -227,17 +227,34 @@ export class TripleStorage<
 
   async summarise(
     product: Products.CanonicProduct<SubspaceKey>,
-    countLimit?: number | undefined,
-    sizeLimit?: bigint | undefined,
+    countLimits?: { subspace?: number; path?: number; time?: number },
+    sizeLimits?: { subspace?: bigint; path?: bigint; time?: bigint },
   ): Promise<{ fingerprint: Fingerprint; size: number }> {
-    // Okay. How do I create a fingerprint from three summarisable storages?
-
     const [subspaceDisjoint, pathDisjoint, timeDisjoint] = product;
 
     let fingerprint = this.fingerprintScheme.neutral;
     let size = 0;
 
-    for (const subspaceRange of subspaceDisjoint) {
+    // These keep track of how much of the count and size limits we've used.
+    let sclUsed = 0;
+    let sslUsed = BigInt(0);
+    let pclUsed = 0;
+    let pslUsed = BigInt(0);
+    let tclUsed = 0;
+    let tslUsed = BigInt(0);
+
+    let limitsExceeded = false;
+
+    // Go backwards through each range of the subspace disjoint,
+    // As we need to return greatest items first.
+    for (
+      let subspaceDjIdx = subspaceDisjoint.length - 1;
+      subspaceDjIdx >= 0;
+      subspaceDjIdx--
+    ) {
+      const subspaceRange = subspaceDisjoint[subspaceDjIdx];
+
+      // Iterate through all the entries of each range.
       const subspaceEntriesLowerBound = subspaceRange.start;
       const subspaceEntriesUpperBound = subspaceRange.kind === "open"
         ? undefined
@@ -250,47 +267,42 @@ export class TripleStorage<
         subspaceEntriesUpperBound
           ? this.subspaceScheme.encode(subspaceEntriesUpperBound)
           : undefined,
+        {
+          reverse: true,
+        },
       );
 
-      let payloadLimitUsed = BigInt(0);
-      let countLimitUsed = 0;
+      /** The least excluded item we've run into.
+       * This is going to be the upper bound of a summarise op we run when we detect a contiguous range of included entries.
+       */
+      let leastExcluded = this.subspaceScheme.encode(
+        subspaceEntriesUpperBound !== undefined
+          ? subspaceEntriesUpperBound
+          : this.subspaceScheme.minimalSubspaceKey,
+      );
 
-      const qualifyingEntries: [
-        Uint8Array | undefined,
-        Uint8Array | undefined,
-      ] = [undefined, undefined];
+      /** The least included item we've run into.
+       * This is going to be the lower bound of a summarise op we run when we detect a contiguous range of included entries.
+       */
+      let leastIncluded: Uint8Array | undefined;
 
-      const updateQualifyingEntries = (key: Uint8Array) => {
-        if (qualifyingEntries[0] === undefined) {
-          qualifyingEntries[0] = key;
-        } else {
-          qualifyingEntries[1] = key;
-        }
-      };
-
-      const updateFingerprint = async () => {
-        const [fst, last] = qualifyingEntries;
-
-        if (!fst) {
-          return;
-        }
-
+      /** Run this when we detect a contiguous range of included entries. */
+      const updateFingerprint = async (start: Uint8Array) => {
         const { fingerprint: includedFp, size: includedSize } = await this
           .sptStorage.summarise(
-            fst,
-            last ? last : new Uint8Array(),
+            start,
+            leastExcluded,
           );
 
         fingerprint = this.fingerprintScheme.fingerprintCombine(
           fingerprint,
           includedFp,
         );
+
         size += includedSize;
 
-        qualifyingEntries[0] = undefined;
-        qualifyingEntries[1] = undefined;
-
-        return;
+        // Prevent this from running again until we run into another included entry.
+        leastIncluded = undefined;
       };
 
       for await (const subspaceEntry of subspaceEntries) {
@@ -304,7 +316,7 @@ export class TripleStorage<
         // Decode the key.
         const { timestamp, path } = decodeEntryKey(
           subspaceEntry.key,
-          "path",
+          "subspace",
           this.subspaceScheme,
           values.pathLength,
         );
@@ -312,65 +324,125 @@ export class TripleStorage<
         // Check that decoded time and subspace are included by both other dimensions
         let pathIncluded = false;
 
-        for (const range of pathDisjoint) {
+        for (
+          let pathDisjointIdx = pathDisjoint.length - 1;
+          pathDisjointIdx >= 0;
+          pathDisjointIdx--
+        ) {
           if (
             Products.rangeIncludesValue(
               { order: Products.orderPaths },
-              range,
+              pathDisjoint[pathDisjointIdx],
               path,
             )
           ) {
             pathIncluded = true;
+            // If we're included in one, we don't need to check the others.
             break;
           }
         }
 
+        // If it's not included, and we ran into an included item earlier,
+        // that indicates the end of a contiguous range.
+        // Recalculate the fingerprint!
         if (!pathIncluded) {
-          // Update the fingerprint using the last accepted thing, if there.
-          await updateFingerprint();
+          if (leastIncluded) {
+            await updateFingerprint(leastIncluded);
+          }
 
+          // This entry is now the least excluded entry we've run into.
+          leastExcluded = subspaceEntry.key;
           continue;
         }
 
         let timeIncluded = false;
 
-        for (const range of timeDisjoint) {
+        for (
+          let timeDisjointIdx = timeDisjoint.length - 1;
+          timeDisjointIdx >= 0;
+          timeDisjointIdx--
+        ) {
           if (
             Products.rangeIncludesValue(
               { order: Products.orderTimestamps },
-              range,
+              timeDisjoint[timeDisjointIdx],
               timestamp,
             )
           ) {
             timeIncluded = true;
+            // If we're included in one, we don't need to check the others.
             break;
           }
         }
 
+        // If it's not included, and we ran into an included item earlier,
+        // that indicates the end of a contiguous range.
+        // Recalculate the fingerprint!
         if (!timeIncluded) {
-          // Update fingerprint using last updated thing, if there
+          if (leastIncluded) {
+            await updateFingerprint(leastIncluded);
+          }
 
-          await updateFingerprint();
-
+          // This entry is now the least excluded entry we've run into.
+          leastExcluded = subspaceEntry.key;
           continue;
         }
 
-        payloadLimitUsed += values.payloadLength;
+        // Now we know this entry is included.
 
-        if (sizeLimit && payloadLimitUsed > sizeLimit) {
+        // Check all dimension count and size limits.
+        // If any limits have been exceeded, we have to stop here.
+
+        // Boring.
+
+        const nextSclUsed = sclUsed + 1;
+        const nextPclUsed = pclUsed + 1;
+        const nextTclUsed = tclUsed + 1;
+
+        const nextSslUsed = sslUsed + values.payloadLength;
+        const nextPslUsed = pslUsed + values.payloadLength;
+        const nextTslUsed = tslUsed + values.payloadLength;
+
+        const sclExceeded = countLimits?.subspace &&
+          nextSclUsed > countLimits.subspace;
+        const pclExceeded = countLimits?.path && nextPclUsed > countLimits.path;
+        const tclExceeded = countLimits?.time && nextTclUsed > countLimits.time;
+
+        const sslExceeded = sizeLimits?.subspace &&
+          nextSslUsed > sizeLimits.subspace;
+        const pslExceeded = sizeLimits?.path && nextPslUsed > sizeLimits.path;
+        const tslExceeded = sizeLimits?.time && nextTslUsed > sizeLimits.time;
+
+        if (
+          sclExceeded || pclExceeded || tclExceeded || sslExceeded ||
+          pslExceeded || tslExceeded
+        ) {
+          limitsExceeded = true;
           break;
         }
 
-        countLimitUsed += 1;
+        sclUsed = nextSclUsed;
+        pclUsed = nextPclUsed;
+        tclUsed = nextTclUsed;
 
-        if (countLimit && countLimitUsed > countLimit) {
-          break;
-        }
+        sslUsed = nextSslUsed;
+        pslUsed = nextPslUsed;
+        tslUsed = nextTslUsed;
 
-        updateQualifyingEntries(subspaceEntry.key);
+        // This entry is part of a contiguous range of included entries,
+        // and it's the least included key we've encountered so far.
+        leastIncluded = subspaceEntry.key;
       }
 
-      await updateFingerprint();
+      // Calculate a range that was left over, if any.
+      if (leastIncluded) {
+        await updateFingerprint(leastIncluded);
+      }
+
+      // If the limits have been exceeded, we don't need to go through all the other ranges.
+      if (limitsExceeded) {
+        break;
+      }
     }
 
     return {

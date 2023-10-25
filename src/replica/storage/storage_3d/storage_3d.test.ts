@@ -1,5 +1,5 @@
 import { assert } from "https://deno.land/std@0.202.0/assert/assert.ts";
-import { encodeBase64, Products } from "../../../../deps.ts";
+import { concat, encodeBase64, Products } from "../../../../deps.ts";
 import {
   makeNamespaceKeypair,
   makeSubspaceKeypair,
@@ -13,9 +13,9 @@ import {
   testSchemeSubspace,
 } from "../../../test/test_schemes.ts";
 import { getSubspaces, randomTimestamp } from "../../../test/utils.ts";
-import { compareBytes } from "../../../util/bytes.ts";
+import { bigintToBytes, compareBytes } from "../../../util/bytes.ts";
 import { Replica } from "../../replica.ts";
-import { OptionalBounds, Query } from "../../types.ts";
+import { OptionalBounds, ProtocolParameters, Query } from "../../types.ts";
 import { RadixishTree } from "../prefix_iterators/radixish_tree.ts";
 import { MonoidRbTree } from "../summarisable_storage/monoid_rbtree.ts";
 import { TripleStorage } from "./triple_storage.ts";
@@ -27,36 +27,61 @@ import { Entry } from "../../../entries/types.ts";
 
 const emptyUi8 = new Uint8Array();
 
-type Storage3dScenario<NamespaceKey, SubspaceKey, PayloadDigest, Fingerprint> =
-  {
-    name: string;
-    makeScenario: (namespace: NamespaceKey) => Promise<
-      {
-        storage: Storage3d<
-          NamespaceKey,
-          SubspaceKey,
-          PayloadDigest,
-          Fingerprint
-        >;
-        dispose: () => Promise<void>;
-      }
-    >;
-  };
-
-const tripleStorageScenario: Storage3dScenario<
-  Uint8Array,
-  Uint8Array,
-  ArrayBuffer,
-  Uint8Array
+type Storage3dScenario<
+  NamespaceKey,
+  SubspaceKey,
+  PayloadDigest,
+  AuthorisationOpts,
+  AuthorisationToken,
+  Fingerprint,
 > = {
+  name: string;
+  makeScenario: (
+    namespace: NamespaceKey,
+    params: ProtocolParameters<
+      NamespaceKey,
+      SubspaceKey,
+      PayloadDigest,
+      AuthorisationOpts,
+      AuthorisationToken,
+      Fingerprint
+    >,
+  ) => Promise<
+    {
+      storage: Storage3d<
+        NamespaceKey,
+        SubspaceKey,
+        PayloadDigest,
+        Fingerprint
+      >;
+      dispose: () => Promise<void>;
+    }
+  >;
+};
+
+const tripleStorageScenario = {
   name: "Triple storage",
-  makeScenario: (namespace) => {
+  makeScenario: <
+    NamespaceKey,
+    SubspaceKey,
+    PayloadDigest,
+    AuthorisationOpts,
+    AuthorisationToken,
+    Fingerprint,
+  >(
+    namespace: NamespaceKey,
+    params: ProtocolParameters<
+      NamespaceKey,
+      SubspaceKey,
+      PayloadDigest,
+      AuthorisationOpts,
+      AuthorisationToken,
+      Fingerprint
+    >,
+  ) => {
     const storage = new TripleStorage({
       namespace,
-      subspaceScheme: testSchemeSubspace,
-      pathLengthScheme: testSchemePathLength,
-      payloadScheme: testSchemePayload,
-      fingerprintScheme: testSchemeFingerprint,
+      ...params,
       createSummarisableStorage: (monoid) => {
         return new MonoidRbTree({
           monoid,
@@ -77,6 +102,14 @@ Deno.test("Storage3d.insert, get, and remove", async (test) => {
 
     const { storage, dispose } = await scenario.makeScenario(
       namespaceKeypair.namespace,
+      {
+        namespaceScheme: testSchemeNamespace,
+        subspaceScheme: testSchemeSubspace,
+        pathLengthScheme: testSchemePathLength,
+        payloadScheme: testSchemePayload,
+        fingerprintScheme: testSchemeFingerprint,
+        authorisationScheme: testSchemeAuthorisation,
+      },
     );
 
     await test.step(scenario.name, async () => {
@@ -115,12 +148,452 @@ Deno.test("Storage3d.insert, get, and remove", async (test) => {
   }
 });
 
+Deno.test("Storage3d.summarise", async () => {
+  // Design a totally ordered monoid
+  const specialFingerprintScheme = {
+    fingerprintSingleton(
+      entry: Entry<null, number, Uint8Array>,
+    ): Promise<[number, Uint8Array, bigint][]> {
+      return Promise.resolve([[
+        entry.identifier.subspace,
+        entry.identifier.path,
+        entry.record.timestamp,
+      ]]);
+    },
+    fingerprintCombine(
+      a: Array<[number, Uint8Array, bigint]>,
+      b: Array<[number, Uint8Array, bigint]>,
+    ) {
+      const newFingerprint = [...a];
+
+      for (const element of b) {
+        const existing = newFingerprint.find(
+          ([subspaceA, pathA, timestampA]) => {
+            const [subspaceB, pathB, timestampB] = element;
+
+            if (subspaceA !== subspaceB) return false;
+            if (Products.orderPaths(pathA, pathB) !== 0) return false;
+            if (Products.orderTimestamps(timestampA, timestampB) !== 0) {
+              return false;
+            }
+
+            return true;
+          },
+        );
+
+        if (existing) {
+          continue;
+        }
+
+        newFingerprint.push(element);
+      }
+
+      newFingerprint.sort((a, b) => {
+        const [subspaceA, pathA, timestampA] = a;
+        const [subspaceB, pathB, timestampB] = b;
+
+        if (subspaceA < subspaceB) return -1;
+        if (subspaceA > subspaceB) return 1;
+        if (Products.orderPaths(pathA, pathB) === -1) return -1;
+        if (Products.orderPaths(pathA, pathB) === 1) return 1;
+        if (Products.orderTimestamps(timestampA, timestampB) === -1) {
+          return -1;
+        }
+        if (Products.orderTimestamps(timestampA, timestampB) === 1) {
+          return 1;
+        }
+
+        return 0;
+      });
+
+      return newFingerprint;
+    },
+    neutral: [] as Array<[number, Uint8Array, bigint]>,
+  };
+
+  for (const scenario of scenarios) {
+    const { storage, dispose } = await scenario.makeScenario(
+      null,
+      {
+        namespaceScheme: {
+          encode() {
+            return new Uint8Array();
+          },
+          decode() {
+            return null;
+          },
+          encodedLength() {
+            return 0;
+          },
+          isEqual() {
+            return true;
+          },
+        },
+        subspaceScheme: {
+          encode(value: number) {
+            return new Uint8Array([value]);
+          },
+          decode(encoded) {
+            return encoded[0];
+          },
+          encodedLength() {
+            return 1;
+          },
+          isEqual(a, b) {
+            return a === b;
+          },
+          order(a: number, b: number) {
+            if (a < b) return -1;
+            if (a > b) return 1;
+            return 0;
+          },
+          minimalSubspaceKey: 0,
+          successor(a) {
+            return a + 1;
+          },
+        },
+        payloadScheme: {
+          encode(value: Uint8Array) {
+            return value;
+          },
+          decode(encoded) {
+            return encoded;
+          },
+          encodedLength(value: Uint8Array) {
+            return value.byteLength;
+          },
+          fromBytes(bytes: Uint8Array | ReadableStream<Uint8Array>) {
+            return Promise.resolve(bytes as Uint8Array);
+          },
+          order: compareBytes,
+        },
+        pathLengthScheme: {
+          encode(value: number) {
+            return new Uint8Array([value]);
+          },
+          decode(encoded) {
+            return encoded[0];
+          },
+          encodedLength() {
+            return 1;
+          },
+          maxLength: 4,
+        },
+        authorisationScheme: {
+          isAuthorised() {
+            return Promise.resolve(true);
+          },
+          authorise() {
+            return Promise.resolve(null);
+          },
+          tokenEncoding: {
+            encode() {
+              return new Uint8Array();
+            },
+            decode() {
+              return null;
+            },
+            encodedLength() {
+              return 0;
+            },
+          },
+        },
+        fingerprintScheme: specialFingerprintScheme,
+      },
+    );
+
+    // Create some random products using these (pull from Meadowcap)
+
+    const summariseParams: {
+      product: Products.ThreeDimensionalProduct<number>;
+      countLimits?: { subspace?: number; path?: number; time?: number };
+      sizeLimits?: { subspace?: bigint; path?: bigint; time?: bigint };
+    }[] = [];
+
+    for (let i = 0; i < 100; i++) {
+      const randomCount = () => {
+        return Math.random() > 0.5
+          ? Math.floor(Math.random() * (3 - 1 + 1) + 1)
+          : undefined;
+      };
+
+      const randomSize = () => {
+        return Math.random() > 0.5
+          ? BigInt(Math.floor(Math.random() * (64 - 16 + 1) + 16))
+          : undefined;
+      };
+
+      const randomCounts = () => {
+        return Math.random() > 0.5
+          ? {
+            subspace: randomCount(),
+            path: randomCount(),
+            time: randomCount(),
+          }
+          : undefined;
+      };
+
+      const randomSizes = () => {
+        return Math.random() > 0.5
+          ? {
+            subspace: randomSize(),
+            path: randomSize(),
+            time: randomSize(),
+          }
+          : undefined;
+      };
+
+      summariseParams.push({
+        product: getRandom3dProduct({
+          noEmpty: true,
+        }),
+        countLimits: randomCounts(),
+        sizeLimits: randomSizes(),
+      });
+    }
+
+    // Define includedByProduct fn
+    const includedBySummariseParams = (
+      subspace: number,
+      path: Uint8Array,
+      time: bigint,
+    ): {
+      product: Products.ThreeDimensionalProduct<number>;
+      countLimits?: { subspace?: number; path?: number; time?: number };
+      sizeLimits?: { subspace?: bigint; path?: bigint; time?: bigint };
+    }[] => {
+      const includedProducts = [];
+
+      for (const { product, countLimits, sizeLimits } of summariseParams) {
+        if (
+          Products.disjointIntervalIncludesValue(
+            { order: orderNumbers },
+            product[0],
+            subspace,
+          ) === false
+        ) {
+          continue;
+        }
+
+        if (
+          Products.disjointIntervalIncludesValue(
+            { order: Products.orderPaths },
+            product[1],
+            path,
+          ) === false
+        ) {
+          continue;
+        }
+
+        if (
+          Products.disjointIntervalIncludesValue(
+            { order: Products.orderTimestamps },
+            product[2],
+            time,
+          ) === false
+        ) {
+          continue;
+        }
+
+        includedProducts.push({ product, countLimits, sizeLimits });
+      }
+
+      return includedProducts;
+    };
+
+    // Define expected fingerprint map
+    const actualFingerprintMap = new Map<
+      Products.ThreeDimensionalProduct<number>,
+      {
+        fingerprint: [number, Uint8Array, bigint][];
+        count: number;
+        size: bigint;
+      }
+    >();
+
+    for (const { product } of summariseParams) {
+      actualFingerprintMap.set(product, {
+        fingerprint: specialFingerprintScheme.neutral,
+        count: 0,
+        size: BigInt(0),
+      });
+    }
+
+    const occupiedPaths = new Map<number, Set<number>>();
+
+    const entries: Entry<null, number, Uint8Array>[] = [];
+
+    // Generate some entries
+    for (let i = 0; i < 100; i++) {
+      const subspace = Math.floor(Math.random() * 100);
+
+      const pathLastByte = Math.floor(Math.random() * 256);
+
+      const pathAndPayload = new Uint8Array([
+        0,
+        0,
+        0,
+        pathLastByte,
+      ]);
+      const timestamp = randomTimestamp();
+
+      if (occupiedPaths.get(subspace)?.has(pathLastByte)) {
+        continue;
+      }
+
+      await storage.insert({
+        subspace,
+        path: pathAndPayload,
+        timestamp: timestamp,
+        length: BigInt(4),
+        authTokenHash: new Uint8Array(),
+        payloadHash: pathAndPayload,
+      });
+
+      const entry: Entry<null, number, Uint8Array> = {
+        identifier: {
+          namespace: null,
+          subspace: subspace,
+          path: pathAndPayload,
+        },
+        record: {
+          hash: pathAndPayload,
+          length: BigInt(4),
+          timestamp,
+        },
+      };
+
+      entries.push(entry);
+
+      const usedPaths = occupiedPaths.get(subspace);
+
+      if (!usedPaths) {
+        occupiedPaths.set(subspace, new Set([pathLastByte]));
+      } else {
+        usedPaths.add(pathLastByte);
+      }
+    }
+
+    entries.sort((a, b) => {
+      const aKey = concat(
+        new Uint8Array([a.identifier.subspace]),
+        a.identifier.path,
+        bigintToBytes(a.record.timestamp),
+      );
+      const bKey = concat(
+        new Uint8Array([b.identifier.subspace]),
+        b.identifier.path,
+        bigintToBytes(b.record.timestamp),
+      );
+
+      return Products.orderPaths(aKey, bKey) * -1;
+    });
+
+    for (const entry of entries) {
+      const includedBy = includedBySummariseParams(
+        entry.identifier.subspace,
+        entry.identifier.path,
+        entry.record.timestamp,
+      );
+
+      for (const { product, countLimits, sizeLimits } of includedBy) {
+        const { fingerprint, count, size } = actualFingerprintMap.get(product)!;
+
+        const nextCount = count + 1;
+        const nextSize = size + entry.record.length;
+
+        const sclExceeded = countLimits?.subspace &&
+          nextCount > countLimits.subspace;
+        const pclExceeded = countLimits?.path && nextCount > countLimits.path;
+        const tclExceeded = countLimits?.time && nextCount > countLimits.time;
+
+        const sslExceeded = sizeLimits?.subspace &&
+          nextSize > sizeLimits.subspace;
+        const pslExceeded = sizeLimits?.path && nextSize > sizeLimits.path;
+        const tslExceeded = sizeLimits?.time && nextSize > sizeLimits.time;
+
+        if (
+          sclExceeded || pclExceeded || tclExceeded || sslExceeded ||
+          pslExceeded || tslExceeded
+        ) {
+          continue;
+        }
+
+        const lifted = await specialFingerprintScheme.fingerprintSingleton(
+          entry,
+        );
+
+        actualFingerprintMap.set(
+          product,
+          {
+            fingerprint: specialFingerprintScheme.fingerprintCombine(
+              fingerprint,
+              lifted,
+            ),
+            size: nextSize,
+            count: nextCount,
+          },
+        );
+      }
+    }
+
+    // For all products, see if fingerprint matches the expected one.
+    for (const { product, countLimits, sizeLimits } of summariseParams) {
+      const actual = await storage.summarise(product, countLimits, sizeLimits);
+      const expected = actualFingerprintMap.get(product)!;
+
+      assertEquals(actual.fingerprint, expected.fingerprint);
+      assertEquals(actual.size, expected.count);
+
+      let actualPayloadSize = 0;
+
+      for (const element of actual.fingerprint) {
+        actualPayloadSize += element[1].byteLength;
+      }
+
+      assertEquals(BigInt(actualPayloadSize), expected.size);
+    }
+
+    await dispose();
+  }
+});
+
+Deno.test.ignore("Storage3d.entriesByProduct", async () => {
+  // Items included by product appear
+  // count limit is respected.
+  // size limit is respected.
+
+  // Generate limited range of subspaces
+  // Paths
+  // Timestamps
+
+  // Create some random products using these (pull from Meadowcap)
+
+  // Define includedByProduct fn
+
+  // Define product inclusion map
+
+  // Add event listener for entry removals
+
+  // Generate some entries
+
+  // For all products, see if all the products included are there.
+});
+
 Deno.test("Storage3d.entriesByQuery", async (test) => {
   for (const scenario of scenarios) {
     const namespaceKeypair = await makeNamespaceKeypair();
 
     const { storage, dispose } = await scenario.makeScenario(
       namespaceKeypair.namespace,
+      {
+        namespaceScheme: testSchemeNamespace,
+        subspaceScheme: testSchemeSubspace,
+        pathLengthScheme: testSchemePathLength,
+        payloadScheme: testSchemePayload,
+        fingerprintScheme: testSchemeFingerprint,
+        authorisationScheme: testSchemeAuthorisation,
+      },
     );
 
     const replica = new Replica({
@@ -532,4 +1005,120 @@ function rangeFromOptionalBounds<ValueType>(
     start: bounds.lowerBound!,
     end: bounds.upperBound!,
   };
+}
+
+// Product stuff
+
+function getRandomDisjointInterval<ValueType>(
+  { minValue, successor, order, maxSize }: {
+    minValue: ValueType;
+    successor: Products.SuccessorFn<ValueType>;
+    maxSize: ValueType;
+    order: Products.TotalOrder<ValueType>;
+  },
+): Products.DisjointInterval<ValueType> {
+  let disjointInterval: Products.DisjointInterval<ValueType> = [];
+
+  let start = minValue;
+  let end = minValue;
+
+  while (true) {
+    start = end;
+
+    while (true) {
+      start = successor(start);
+
+      if (Math.random() > 0.8) {
+        break;
+      }
+    }
+
+    end = start;
+
+    while (true) {
+      end = successor(end);
+
+      if ((order(end, maxSize) >= 0) || Math.random() > 0.8) {
+        break;
+      }
+    }
+
+    if ((order(end, maxSize) >= 0)) {
+      break;
+    }
+
+    disjointInterval = Products.addToDisjointInterval({ order: order }, {
+      kind: "closed_exclusive",
+      start,
+      end,
+    }, disjointInterval);
+
+    if (Math.random() > 0.95) {
+      break;
+    }
+  }
+
+  const isOpen = order(end, maxSize) < 0 && Math.random() > 0.8;
+
+  if (isOpen) {
+    let openStart = end;
+
+    while (true) {
+      openStart = successor(openStart);
+
+      if (order(end, maxSize) >= 0 || Math.random() > 0.9) {
+        break;
+      }
+    }
+
+    disjointInterval = Products.addToDisjointInterval({ order: order }, {
+      kind: "open",
+      start,
+    }, disjointInterval);
+  }
+
+  return disjointInterval;
+}
+
+function getRandom3dProduct(
+  { noEmpty }: {
+    noEmpty?: boolean;
+  },
+): Products.ThreeDimensionalProduct<number> {
+  const isEmpty = Math.random() > 0.75;
+
+  if (!noEmpty && isEmpty) {
+    return [[], [], []];
+  }
+
+  return [
+    getRandomDisjointInterval({
+      minValue: 0,
+      maxSize: 255,
+      order: (a, b) => {
+        if (a < b) return -1;
+        if (a > b) return 1;
+        return 0;
+      },
+      successor: (a) => a + 1,
+    }),
+    getRandomDisjointInterval({
+      minValue: new Uint8Array(),
+      maxSize: new Uint8Array([0, 0, 0, 255]),
+      order: Products.orderPaths,
+      successor: Products.makeSuccessorPath(4),
+    }),
+    getRandomDisjointInterval({
+      minValue: BigInt(0),
+      maxSize: BigInt(1000),
+      order: Products.orderTimestamps,
+      successor: Products.successorTimestamp,
+    }),
+  ];
+}
+
+function orderNumbers(a: number, b: number) {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
 }

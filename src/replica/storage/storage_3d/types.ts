@@ -35,8 +35,8 @@ export interface Storage3d<
   // Used during sync
   summarise(
     product: Products.CanonicProduct<SubspaceKey>,
-    countLimit?: number,
-    sizeLimit?: bigint,
+    countLimits?: { subspace?: number; path?: number; time?: number },
+    sizeLimits?: { subspace?: bigint; path?: bigint; time?: bigint },
   ): Promise<{ fingerprint: Fingerprint; size: number }>;
 
   // Used to fetch entries for transfer during sync.

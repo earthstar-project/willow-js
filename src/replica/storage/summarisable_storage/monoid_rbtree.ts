@@ -539,114 +539,73 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
         size: label[1][0],
         nextTree: nextNextTree,
       };
-    } else {
-      // A sub-range where the upper bound is less than the upper bound.
-      // e.g. [c, a) or [c, b);
+    }
 
-      const minNode = this.cachedMinNode!;
-      const maxValue = this.root.label[1][1];
+    // A sub-range where the upper bound is less than the upper bound.
+    // e.g. [c, a) or [c, b);
 
-      const willHaveHead = this.compare(y, minNode.value) > 0;
-      const willHaveTail = this.compare(x, maxValue) <= 0;
+    const minNode = this.cachedMinNode!;
+    const maxValue = this.root.label[1][1];
 
-      if (willHaveHead && willHaveTail) {
-        const { label: firstLabel, nextTree: firstTree } = this.aggregateUntil(
-          minNode as NodeType<ValueType, LiftedType>,
-          minNode.value,
-          y,
-        );
+    const willHaveHead = this.compare(y, minNode.value) > 0;
+    const willHaveTail = this.compare(x, maxValue) <= 0;
 
+    if (willHaveHead && willHaveTail) {
+      const { label: firstLabel, nextTree: firstTree } = this.aggregateUntil(
+        minNode as NodeType<ValueType, LiftedType>,
+        minNode.value,
+        y,
+      );
+
+      const maxLifted = await this.monoid.lift(
+        maxValue,
+        this.valueMapping.get(maxValue) as Uint8Array,
+      );
+
+      const synthesisedLabel = [maxLifted[0], [1, maxValue]] as CombinedLabel<
+        ValueType,
+        LiftedType
+      >;
+
+      const nodeToPass = nextTree || this.findGteNode(
+        x,
+      ) as NodeType<ValueType, LiftedType>;
+
+      const { label: lastLabel } = this.aggregateUntil(
+        nodeToPass,
+        x,
+        maxValue,
+      );
+
+      const combinedLabel = this.monoid.combine(
+        lastLabel,
+        synthesisedLabel,
+      );
+
+      const newLabel = this.monoid.combine(firstLabel, combinedLabel);
+
+      return {
+        fingerprint: newLabel[0],
+        size: newLabel[1][0],
+        nextTree: firstTree,
+      };
+    } else if (willHaveHead) {
+      const { label, nextTree } = this.aggregateUntil(
+        minNode as NodeType<ValueType, LiftedType>,
+        minNode.value,
+        y,
+      );
+
+      if (this.compare(x, maxValue) === 0) {
         const maxLifted = await this.monoid.lift(
           maxValue,
           this.valueMapping.get(maxValue) as Uint8Array,
         );
 
-        const synthesisedLabel = [maxLifted[0], [1, maxValue]] as CombinedLabel<
-          ValueType,
-          LiftedType
-        >;
-
-        const nodeToPass = nextTree || this.findGteNode(
-          x,
-        ) as NodeType<ValueType, LiftedType>;
-
-        const { label: lastLabel } = this.aggregateUntil(
-          nodeToPass,
-          x,
+        const synthesisedLabel = [maxLifted[0], [
+          1,
           maxValue,
-        );
-
-        const combinedLabel = this.monoid.combine(
-          lastLabel,
-          synthesisedLabel,
-        );
-
-        const newLabel = this.monoid.combine(firstLabel, combinedLabel);
-
-        return {
-          fingerprint: newLabel[0],
-          size: newLabel[1][0],
-          nextTree: firstTree,
-        };
-      } else if (willHaveHead) {
-        const { label, nextTree } = this.aggregateUntil(
-          minNode as NodeType<ValueType, LiftedType>,
-          minNode.value,
-          y,
-        );
-
-        if (this.compare(x, maxValue) === 0) {
-          const maxLifted = await this.monoid.lift(
-            maxValue,
-            this.valueMapping.get(maxValue) as Uint8Array,
-          );
-
-          const synthesisedLabel = [maxLifted[0], [
-            1,
-            maxValue,
-          ]] as CombinedLabel<ValueType, LiftedType>;
-
-          const combinedLabel = this.monoid.combine(
-            label,
-            synthesisedLabel,
-          );
-
-          return {
-            fingerprint: combinedLabel[0],
-            size: combinedLabel[1][0],
-            nextTree: nextTree,
-          };
-        }
-
-        return {
-          fingerprint: label[0],
-          size: label[1][0],
-          nextTree: nextTree,
-        };
-      } else if (willHaveTail) {
-        const minNode = this.compare(x, this.cachedMinNode!.value) <= 0
-          ? this.cachedMinNode
-          : null;
-
-        const nodeToPass = nextTree || minNode || this.findGteNode(
-          x,
-        ) as NodeType<ValueType, LiftedType>;
-
-        const { label } = this.aggregateUntil(
-          nodeToPass,
-          x,
-          maxValue,
-        );
-
-        const maxLifted = await this.monoid.lift(
-          maxValue,
-          this.valueMapping.get(maxValue) as Uint8Array,
-        );
-
-        const synthesisedLabel = [maxLifted[0], [1, maxValue]] as CombinedLabel<
-          ValueType,
-          LiftedType
-        >;
+        ]] as CombinedLabel<ValueType, LiftedType>;
 
         const combinedLabel = this.monoid.combine(
           label,
@@ -656,15 +615,56 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
         return {
           fingerprint: combinedLabel[0],
           size: combinedLabel[1][0],
-          nextTree: minNode,
-        };
-      } else {
-        return {
-          fingerprint: this.monoid.neutral[0],
-          size: 0,
-          nextTree: null,
+          nextTree: nextTree,
         };
       }
+
+      return {
+        fingerprint: label[0],
+        size: label[1][0],
+        nextTree: nextTree,
+      };
+    } else if (willHaveTail) {
+      const minNode = this.compare(x, this.cachedMinNode!.value) <= 0
+        ? this.cachedMinNode
+        : null;
+
+      const nodeToPass = nextTree || minNode || this.findGteNode(
+        x,
+      ) as NodeType<ValueType, LiftedType>;
+
+      const { label } = this.aggregateUntil(
+        nodeToPass,
+        x,
+        maxValue,
+      );
+
+      const maxLifted = await this.monoid.lift(
+        maxValue,
+        this.valueMapping.get(maxValue) as Uint8Array,
+      );
+
+      const synthesisedLabel = [maxLifted[0], [1, maxValue]] as CombinedLabel<
+        ValueType,
+        LiftedType
+      >;
+
+      const combinedLabel = this.monoid.combine(
+        label,
+        synthesisedLabel,
+      );
+
+      return {
+        fingerprint: combinedLabel[0],
+        size: combinedLabel[1][0],
+        nextTree: minNode,
+      };
+    } else {
+      return {
+        fingerprint: this.monoid.neutral[0],
+        size: 0,
+        nextTree: null,
+      };
     }
   }
 
