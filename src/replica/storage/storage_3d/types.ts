@@ -43,8 +43,8 @@ export interface Storage3d<
   // All three dimensions are defined
   entriesByProduct(
     product: Products.CanonicProduct<SubspaceKey>,
-    countLimit?: number,
-    sizeLimit?: bigint,
+    countLimits?: { subspace?: number; path?: number; time?: number },
+    sizeLimits?: { subspace?: bigint; path?: bigint; time?: bigint },
   ): AsyncIterable<
     {
       entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>;
