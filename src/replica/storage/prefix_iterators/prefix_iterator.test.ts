@@ -1,4 +1,4 @@
-import { assertEquals } from "$std/testing/asserts.ts";
+import { assertEquals } from "https://deno.land/std@0.202.0/testing/asserts.ts";
 import { RadixishTree } from "./radixish_tree.ts";
 import { PrefixIterator } from "./types.ts";
 import { KeyHopTree } from "./key_hop_tree.ts";

@@ -1,5 +1,9 @@
-import { concat } from "$std/bytes/concat.ts";
-import { EncodingScheme } from "../replica/types.ts";
+import {
+  NamespaceScheme,
+  PathLengthScheme,
+  PayloadScheme,
+  SubspaceScheme,
+} from "../replica/types.ts";
 import { decodeEntry, encodeEntry } from "./encode_decode.ts";
 import { Entry } from "./types.ts";
 import { assertEquals } from "https://deno.land/std@0.188.0/testing/asserts.ts";
@@ -19,23 +23,23 @@ Deno.test("Encodes and decodes", () => {
   };
 
   const encoded = encodeEntry(entry, {
-    namespacePublicKeyEncoding: namespaceEncoding,
-    subspacePublicKeyEncoding: subspaceEncoding,
-    pathEncoding,
-    payloadDigestEncoding,
+    namespaceScheme: namespaceScheme,
+    subspaceScheme: subspaceScheme,
+    pathLengthScheme: pathLengthScheme,
+    payloadScheme: payloadScheme,
   });
 
   const decoded = decodeEntry(encoded, {
-    namespacePublicKeyEncoding: namespaceEncoding,
-    subspacePublicKeyEncoding: subspaceEncoding,
-    pathEncoding,
-    payloadDigestEncoding,
+    namespaceScheme: namespaceScheme,
+    subspaceScheme: subspaceScheme,
+    pathLengthScheme: pathLengthScheme,
+    payloadScheme: payloadScheme,
   });
 
   assertEquals(decoded, entry);
 });
 
-const namespaceEncoding: EncodingScheme<number> = {
+const namespaceScheme: NamespaceScheme<number> = {
   encode(namespace) {
     return new Uint8Array([namespace]);
   },
@@ -43,9 +47,10 @@ const namespaceEncoding: EncodingScheme<number> = {
     return encoded[0];
   },
   encodedLength: () => 1,
+  isEqual: (a, b) => a === b,
 };
 
-const subspaceEncoding: EncodingScheme<number> = {
+const subspaceScheme: SubspaceScheme<number> = {
   encode(namespace) {
     return new Uint8Array([0, namespace]);
   },
@@ -53,23 +58,31 @@ const subspaceEncoding: EncodingScheme<number> = {
     return encoded[1];
   },
   encodedLength: () => 2,
+  isEqual: (a, b) => a === b,
+  minimalSubspaceKey: 0,
+  order: (a, b) => {
+    if (a < b) return -1;
+    else if (a > b) return 1;
+
+    return 0;
+  },
+  successor: (a) => a + 1,
 };
 
-const pathEncoding: EncodingScheme<Uint8Array> = {
-  encode(value) {
-    return concat(new Uint8Array([value.byteLength]), value);
+const pathLengthScheme: PathLengthScheme = {
+  encode(length) {
+    return new Uint8Array([length]);
   },
   decode(encoded) {
-    const length = encoded[0];
-
-    return encoded.subarray(1, 1 + length);
+    return encoded[0];
   },
-  encodedLength(value) {
-    return value.byteLength + 1;
+  encodedLength() {
+    return 1;
   },
+  maxLength: 4,
 };
 
-const payloadDigestEncoding: EncodingScheme<number> = {
+const payloadScheme: PayloadScheme<number> = {
   encode(value) {
     return new Uint8Array([0, 0, 0, value]);
   },
@@ -77,4 +90,11 @@ const payloadDigestEncoding: EncodingScheme<number> = {
     return encoded[3];
   },
   encodedLength: () => 4,
+  fromBytes: () => Promise.resolve(1),
+  order: (a, b) => {
+    if (a < b) return -1;
+    else if (a > b) return 1;
+
+    return 0;
+  },
 };

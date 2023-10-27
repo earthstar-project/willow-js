@@ -1,10 +1,11 @@
 import { join } from "https://deno.land/std@0.188.0/path/mod.ts";
 import { EntryDriverKvStore } from "./storage/entry_drivers/kv_store.ts";
 import { PayloadDriverFilesystem } from "./storage/payload_drivers/filesystem.ts";
-import { EncodingScheme, ProtocolParameters } from "./types.ts";
+import { EncodingScheme, PayloadScheme, ProtocolParameters } from "./types.ts";
 import { ensureDir } from "https://deno.land/std@0.188.0/fs/ensure_dir.ts";
 import { bigintToBytes } from "../util/bytes.ts";
-import { concat } from "$std/bytes/concat.ts";
+import { concat } from "../../deps.ts";
+import { KvDriverDeno } from "./storage/kv/kv_driver_deno.ts";
 
 /** Create a pair of entry and payload drivers for use with a {@link Replica} which will store their data at a given filesystem path. */
 export async function getPersistedDrivers<
@@ -13,6 +14,7 @@ export async function getPersistedDrivers<
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
+  Fingerprint,
 >(
   /** The filesystem path to store entry and payload data within. */
   path: string,
@@ -21,7 +23,8 @@ export async function getPersistedDrivers<
     SubspacePublicKey,
     PayloadDigest,
     AuthorisationOpts,
-    AuthorisationToken
+    AuthorisationToken,
+    Fingerprint
   >,
 ) {
   const kvPath = join(path, "entries");
@@ -29,10 +32,14 @@ export async function getPersistedDrivers<
 
   await ensureDir(path);
 
+  // TODO: Use the platform appropriate KV driver.
   const kv = await Deno.openKv(kvPath);
 
   return {
-    entryDriver: new EntryDriverKvStore(kv),
+    entryDriver: new EntryDriverKvStore({
+      ...protocolParameters,
+      kvDriver: new KvDriverDeno(kv),
+    }),
     payloadDriver: new PayloadDriverFilesystem(
       payloadPath,
       protocolParameters.payloadScheme,
@@ -143,11 +150,13 @@ export function decodeEntryKey<SubspacePublicKey>(
         0,
       );
 
-      path = encoded.subarray(8, 8 + pathLength);
-
       subspace = subspaceEncoding.decode(
-        encoded.subarray(8 + pathLength),
+        encoded.subarray(8),
       );
+
+      const encodedSubspaceLength = subspaceEncoding.encodedLength(subspace);
+
+      path = encoded.subarray(8 + encodedSubspaceLength);
     }
   }
 
@@ -163,14 +172,14 @@ export function encodeSummarisableStorageValue<PayloadDigest>(
     authTokenHash,
     payloadHash,
     payloadLength,
-    payloadEncoding,
+    payloadScheme,
     pathLength,
     pathLengthEncoding,
   }: {
     authTokenHash: PayloadDigest;
     payloadHash: PayloadDigest;
     payloadLength: bigint;
-    payloadEncoding: EncodingScheme<PayloadDigest>;
+    payloadScheme: PayloadScheme<PayloadDigest>;
     pathLength: number;
     pathLengthEncoding: EncodingScheme<number>;
   },
@@ -178,8 +187,8 @@ export function encodeSummarisableStorageValue<PayloadDigest>(
   return concat(
     pathLengthEncoding.encode(pathLength),
     bigintToBytes(payloadLength),
-    payloadEncoding.encode(payloadHash),
-    payloadEncoding.encode(authTokenHash),
+    payloadScheme.encode(payloadHash),
+    payloadScheme.encode(authTokenHash),
   );
 }
 

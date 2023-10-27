@@ -103,7 +103,7 @@ const protocolParameters: ProtocolParameters<
           decode: (v) => v,
           encodedLength: (v) => v.byteLength,
         },
-        pathEncoding: {
+        pathLengthScheme: {
           encode(path) {
             const bytes = new Uint8Array(1 + path.byteLength);
             bytes[0] = path.byteLength;
@@ -119,7 +119,7 @@ const protocolParameters: ProtocolParameters<
             return 1 + path.byteLength;
           },
         },
-        payloadDigestEncoding: {
+        payloadScheme: {
           encode(hash) {
             return new Uint8Array(hash);
           },
@@ -157,7 +157,7 @@ const protocolParameters: ProtocolParameters<
           decode: (v) => v,
           encodedLength: (v) => v.byteLength,
         },
-        pathEncoding: {
+        pathLengthScheme: {
           encode(path) {
             const bytes = new Uint8Array(1 + path.byteLength);
             bytes[0] = path.byteLength;
@@ -173,7 +173,7 @@ const protocolParameters: ProtocolParameters<
             return 1 + path.byteLength;
           },
         },
-        payloadDigestEncoding: {
+        payloadScheme: {
           encode(hash) {
             return new Uint8Array(hash);
           },

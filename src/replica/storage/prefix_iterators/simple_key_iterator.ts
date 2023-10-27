@@ -1,4 +1,4 @@
-import { equals as bytesEquals } from "$std/bytes/equals.ts";
+import { equalsBytes } from "../../../../deps.ts";
 import { compareBytes, incrementLastByte } from "../../../util/bytes.ts";
 import { Key, KvDriver } from "../kv/types.ts";
 
@@ -69,7 +69,7 @@ export class SimpleKeyIterator<ValueType> {
         end: [incrementLastByte(key)],
       })
     ) {
-      if (bytesEquals(entry.key[0] as Uint8Array, key)) {
+      if (equalsBytes(entry.key[0] as Uint8Array, key)) {
         continue;
       }
 

@@ -1,5 +1,4 @@
-import { encodeBase64 } from "$std/encoding/base64.ts";
-import { toArrayBuffer } from "$std/streams/to_array_buffer.ts";
+import { encodeBase64, toArrayBuffer } from "../../../../deps.ts";
 import { ValidationError } from "../../../errors.ts";
 import { EncodingScheme, Payload } from "../../types.ts";
 import { PayloadDriver } from "../types.ts";

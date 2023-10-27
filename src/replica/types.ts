@@ -1,66 +1,123 @@
+import { Products } from "../../deps.ts";
 import { Entry } from "../entries/types.ts";
 import { EntryDriver, PayloadDriver } from "./storage/types.ts";
 
-/** Concrete parameters peculiar to a specific usage of Willow. */
-export interface ProtocolParameters<
-  NamespacePublicKey,
-  SubspacePublicKey,
-  PayloadDigest,
-  AuthorisationOpts,
-  AuthorisationToken,
-> {
-  pathLengthEncoding: EncodingScheme<number> & {
-    maxLength: number;
-  };
+export type PathLengthScheme = EncodingScheme<number> & {
+  maxLength: number;
+};
 
-  // Namespace encoding scheme
-  namespaceScheme: EncodingScheme<NamespacePublicKey> & {
-    isEqual: EqualityFn<NamespacePublicKey>;
-  };
+export type NamespaceScheme<NamespaceKey> = EncodingScheme<NamespaceKey> & {
+  isEqual: EqualityFn<NamespaceKey>;
+};
 
-  // Learn what
-  subspaceScheme: EncodingScheme<SubspacePublicKey> & {
-    isEqual: EqualityFn<SubspacePublicKey>;
-  };
+export type SubspaceScheme<SubspaceKey> = EncodingScheme<SubspaceKey> & {
+  isEqual: EqualityFn<SubspaceKey>;
+  order: Products.TotalOrder<SubspaceKey>;
+  successor: Products.SuccessorFn<SubspaceKey>;
+  minimalSubspaceKey: SubspaceKey;
+};
 
-  // Learn about payloads and producing them from bytes
-  payloadScheme: EncodingScheme<PayloadDigest> & {
-    fromBytes: (bytes: Uint8Array | ReadableStream) => Promise<PayloadDigest>;
-    order: (a: PayloadDigest, b: PayloadDigest) => -1 | 0 | 1;
-  };
+export type PayloadScheme<PayloadDigest> = EncodingScheme<PayloadDigest> & {
+  fromBytes: (bytes: Uint8Array | ReadableStream) => Promise<PayloadDigest>;
+  order: (a: PayloadDigest, b: PayloadDigest) => -1 | 0 | 1;
+};
 
-  authorisationScheme: {
-    authorise(
-      entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
-      opts: AuthorisationOpts,
-    ): Promise<AuthorisationToken>;
-    isAuthorised: (
-      entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
-      token: AuthorisationToken,
-    ) => Promise<boolean>;
-    tokenEncoding: EncodingScheme<AuthorisationToken>;
-  };
-}
-
-export type ReplicaOpts<
-  NamespacePublicKey,
-  SubspacePublicKey,
+export type AuthorisationScheme<
+  NamespaceKey,
+  SubspaceKey,
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
 > = {
-  /** The public key of the namespace this replica is a snapshot of. */
-  namespace: NamespacePublicKey;
-  /** The protocol parameters this replica should use. */
-  protocolParameters: ProtocolParameters<
-    NamespacePublicKey,
-    SubspacePublicKey,
+  authorise(
+    entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
+    opts: AuthorisationOpts,
+  ): Promise<AuthorisationToken>;
+  isAuthorised: (
+    entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
+    token: AuthorisationToken,
+  ) => Promise<boolean>;
+  tokenEncoding: EncodingScheme<AuthorisationToken>;
+};
+
+export type FingerprintScheme<
+  NamespaceKey,
+  SubspaceKey,
+  PayloadDigest,
+  Fingerprint,
+> = {
+  fingerprintSingleton(
+    entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
+  ): Promise<Fingerprint>;
+  fingerprintCombine(
+    a: Fingerprint,
+    b: Fingerprint,
+  ): Fingerprint;
+  neutral: Fingerprint;
+};
+
+/** Concrete parameters peculiar to a specific usage of Willow. */
+export interface ProtocolParameters<
+  NamespaceKey,
+  SubspaceKey,
+  PayloadDigest,
+  AuthorisationOpts,
+  AuthorisationToken,
+  Fingerprint,
+> {
+  pathLengthScheme: PathLengthScheme;
+
+  // Namespace encoding scheme
+  namespaceScheme: NamespaceScheme<NamespaceKey>;
+
+  // Learn what
+  subspaceScheme: SubspaceScheme<SubspaceKey>;
+
+  // Learn about payloads and producing them from bytes
+  payloadScheme: PayloadScheme<PayloadDigest>;
+
+  authorisationScheme: AuthorisationScheme<
+    NamespaceKey,
+    SubspaceKey,
     PayloadDigest,
     AuthorisationOpts,
     AuthorisationToken
   >;
+
+  fingerprintScheme: FingerprintScheme<
+    NamespaceKey,
+    SubspaceKey,
+    PayloadDigest,
+    Fingerprint
+  >;
+}
+
+export type ReplicaOpts<
+  NamespaceKey,
+  SubspaceKey,
+  PayloadDigest,
+  AuthorisationOpts,
+  AuthorisationToken,
+  Fingerprint,
+> = {
+  /** The public key of the namespace this replica is a snapshot of. */
+  namespace: NamespaceKey;
+  /** The protocol parameters this replica should use. */
+  protocolParameters: ProtocolParameters<
+    NamespaceKey,
+    SubspaceKey,
+    PayloadDigest,
+    AuthorisationOpts,
+    AuthorisationToken,
+    Fingerprint
+  >;
   /** An optional driver used to store and retrieve a replica's entries. */
-  entryDriver?: EntryDriver;
+  entryDriver?: EntryDriver<
+    NamespaceKey,
+    SubspaceKey,
+    PayloadDigest,
+    Fingerprint
+  >;
   /** An option driver used to store and retrieve a replica's payloads.  */
   payloadDriver?: PayloadDriver<PayloadDigest>;
 };
@@ -73,43 +130,28 @@ export type QueryOrder =
   /** By subspace, then path, then timestamp */
   | "subspace";
 
-export interface QueryBase {
-  /** The order to return results in. */
+export type OptionalBounds<ValueType> = {
+  /** The value to start returning results from, inclusive. Starts from the first entry in the replica if left undefined. */
+  lowerBound?: ValueType;
+  /** The value to stop returning results at, exclusive. Stops after the last entry in the replica if  undefined. */
+  upperBound: ValueType;
+} | {
+  /** The value to start returning results from, inclusive. Starts from the first entry in the replica if left undefined. */
+  lowerBound: ValueType;
+  /** The value to stop returning results at, exclusive. Stops after the last entry in the replica if  undefined. */
+  upperBound?: ValueType;
+};
+
+export interface Query<SubspaceKey> {
   order: QueryOrder;
+  subspace?: OptionalBounds<SubspaceKey>;
+  path?: OptionalBounds<Uint8Array>;
+  time?: OptionalBounds<bigint>;
   /** The maximum number of results to return. */
   limit?: number;
   /** Whether the results should be returned in reverse order. */
   reverse?: boolean;
 }
-
-export interface PathQuery extends QueryBase {
-  order: "path";
-  /** The path to start returning results from, inclusive. Starts from the first entry in the replica if left undefined. */
-  lowerBound?: Uint8Array;
-  /** The path to stop returning results at, exclusive. Stops after the last entry in the replica if  undefined. */
-  upperBound?: Uint8Array;
-}
-
-export interface SubspaceQuery<SubspacePublicKey> extends QueryBase {
-  order: "subspace";
-  /** The subspace public key to start returning results from, inclusive. Starts from the first entry in the replica if left undefined. */
-  lowerBound?: SubspacePublicKey;
-  /** The subspace public key to stop returning results at, exclusive. Stops after the last entry in the replica if  undefined. */
-  upperBound?: SubspacePublicKey;
-}
-
-export interface TimestampQuery extends QueryBase {
-  order: "timestamp";
-  /** The timestamp to start returning results from, inclusive. Starts from the first entry in the replica if left undefined. */
-  lowerBound?: bigint;
-  /** The timestamp to stop returning results at, exclusive. Stops after the last entry in the replica if  undefined. */
-  upperBound?: bigint;
-}
-
-export type Query<SubspacePublicKey> =
-  | PathQuery
-  | SubspaceQuery<SubspacePublicKey>
-  | TimestampQuery;
 
 export type EncodingScheme<ValueType> = {
   /** A function to encode a given `ValueType`. */

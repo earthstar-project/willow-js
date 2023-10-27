@@ -1,5 +1,5 @@
-import { deferred } from "$std/async/deferred.ts";
-import { Key, KeyPart, KvDriver } from "../kv/types.ts";
+import { deferred } from "../../../../deps.ts";
+import { KeyPart, KvDriver } from "../kv/types.ts";
 import { combineMonoid, LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
 import { SummarisableStorage } from "./types.ts";
 
@@ -169,13 +169,13 @@ export class Skiplist<
       undefined;
     let previousComputedLabel: [LiftedType, number] | undefined = undefined;
 
-    const liftedValue = await this.monoid.lift(key);
+    const liftedValue = await this.monoid.lift(key, value);
 
     for (let layer = 0; layer <= insertionHeight; layer++) {
       // On the first layer we don't need to compute any labels, as there is no skipping.
       // But unlike higher layeys, we DO need to store the payload hash.
       if (layer === 0) {
-        const label = await this.monoid.lift(key);
+        const label = await this.monoid.lift(key, value);
 
         previousComputedLabel = label;
 

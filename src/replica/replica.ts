@@ -1,10 +1,6 @@
 import { EntryDriverMemory } from "./storage/entry_drivers/memory.ts";
 import { EntryDriver, PayloadDriver } from "./storage/types.ts";
-import {
-  bigintToBytes,
-  compareBytes,
-  incrementLastByte,
-} from "../util/bytes.ts";
+import { bigintToBytes, compareBytes } from "../util/bytes.ts";
 import {
   EntryInput,
   IngestEvent,
@@ -15,7 +11,6 @@ import {
   ReplicaOpts,
 } from "./types.ts";
 import { PayloadDriverMemory } from "./storage/payload_drivers/memory.ts";
-import { SummarisableStorage } from "./storage/summarisable_storage/types.ts";
 import { Entry } from "../entries/types.ts";
 import {
   EntryIngestEvent,
@@ -23,16 +18,8 @@ import {
   EntryRemoveEvent,
   PayloadIngestEvent,
 } from "./events.ts";
-import { deferred } from "$std/async/deferred.ts";
-import { concat } from "$std/bytes/concat.ts";
-import { equals as equalsBytes } from "$std/bytes/equals.ts";
-import {
-  decodeEntryKey,
-  decodeSummarisableStorageValue,
-  encodeEntryKeys,
-  encodeSummarisableStorageValue,
-  makeSuccessorPath,
-} from "./util.ts";
+import { concat, deferred, Products } from "../../deps.ts";
+import { Storage3d } from "./storage/storage_3d/types.ts";
 
 /** A local snapshot of a namespace to be written to, queried from, and synced with other replicas.
  *
@@ -46,6 +33,7 @@ export class Replica<
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
+  Fingerprint,
 > extends EventTarget {
   namespace: NamespacePublicKey;
 
@@ -54,17 +42,24 @@ export class Replica<
     SubspacePublicKey,
     PayloadDigest,
     AuthorisationOpts,
-    AuthorisationToken
+    AuthorisationToken,
+    Fingerprint
   >;
 
-  private ptsStorage: SummarisableStorage<Uint8Array, Uint8Array>;
-  private sptStorage: SummarisableStorage<Uint8Array, Uint8Array>;
-  private tspStorage: SummarisableStorage<Uint8Array, Uint8Array>;
-
-  private entryDriver: EntryDriver;
+  private entryDriver: EntryDriver<
+    NamespacePublicKey,
+    SubspacePublicKey,
+    PayloadDigest,
+    Fingerprint
+  >;
   private payloadDriver: PayloadDriver<PayloadDigest>;
 
-  private incrementPath: (path: Uint8Array) => Uint8Array;
+  private storage: Storage3d<
+    NamespacePublicKey,
+    SubspacePublicKey,
+    PayloadDigest,
+    Fingerprint
+  >;
 
   private checkedWriteAheadFlag = deferred();
 
@@ -74,7 +69,8 @@ export class Replica<
       SubspacePublicKey,
       PayloadDigest,
       AuthorisationOpts,
-      AuthorisationToken
+      AuthorisationToken,
+      Fingerprint
     >,
   ) {
     super();
@@ -82,20 +78,20 @@ export class Replica<
     this.namespace = opts.namespace;
     this.protocolParams = opts.protocolParameters;
 
-    const entryDriver = opts.entryDriver || new EntryDriverMemory();
+    const entryDriver = opts.entryDriver || new EntryDriverMemory({
+      pathLengthScheme: opts.protocolParameters.pathLengthScheme,
+      payloadScheme: opts.protocolParameters.payloadScheme,
+      subspaceScheme: opts.protocolParameters.subspaceScheme,
+      fingerprintScheme: opts.protocolParameters.fingerprintScheme,
+    });
     const payloadDriver = opts.payloadDriver ||
       new PayloadDriverMemory(opts.protocolParameters.payloadScheme);
 
     this.entryDriver = entryDriver;
+
+    this.storage = entryDriver.makeStorage(this.namespace);
+
     this.payloadDriver = payloadDriver;
-
-    this.ptsStorage = entryDriver.createSummarisableStorage("pts");
-    this.sptStorage = entryDriver.createSummarisableStorage("spt");
-    this.tspStorage = entryDriver.createSummarisableStorage("tsp");
-
-    this.incrementPath = makeSuccessorPath(
-      this.protocolParams.pathLengthEncoding.maxLength,
-    );
 
     this.checkWriteAheadFlag();
   }
@@ -105,40 +101,9 @@ export class Replica<
     const existingRemove = await this.entryDriver.writeAheadFlag.wasRemoving();
 
     if (existingInsert) {
-      const ptsKey = existingInsert[0];
-
-      const values = decodeSummarisableStorageValue(
-        existingInsert[1],
-        this.protocolParams.payloadScheme,
-        this.protocolParams.pathLengthEncoding,
-      );
-
-      const details = decodeEntryKey(
-        ptsKey,
-        "path",
-        this.protocolParams.subspaceScheme,
-        values.pathLength,
-      );
-
-      const keys = encodeEntryKeys(
-        {
-          path: details.path,
-          timestamp: details.timestamp,
-          subspace: details.subspace,
-          subspaceEncoding: this.protocolParams.subspaceScheme,
-        },
-      );
-
-      // Remove key for each storage.
-      await Promise.all([
-        this.ptsStorage.remove(keys.pts),
-        this.tspStorage.remove(keys.tsp),
-        this.sptStorage.remove(keys.spt),
-      ]);
-
       // TODO(AUTH): Get the encoded authtoken out of payload driver.
       const encodedAuthToken = await this.payloadDriver.get(
-        values.authTokenHash,
+        existingInsert.authTokenHash,
       );
 
       if (encodedAuthToken) {
@@ -146,55 +111,20 @@ export class Replica<
           .tokenEncoding.decode(await encodedAuthToken?.bytes());
 
         await this.insertEntry({
-          path: details.path,
-          subspace: details.subspace,
-          hash: values.payloadHash,
-          length: values.payloadLength,
-          timestamp: details.timestamp,
+          path: existingInsert.entry.identifier.path,
+          subspace: existingInsert.entry.identifier.subspace,
+          hash: existingInsert.entry.record.hash,
+          length: existingInsert.entry.record.length,
+          timestamp: existingInsert.entry.record.timestamp,
           authToken: decodedToken,
         });
       }
+
+      await this.entryDriver.writeAheadFlag.unflagInsertion();
     }
 
     if (existingRemove) {
-      const entryValues = await this.ptsStorage.get(existingRemove);
-
-      if (!entryValues) {
-        await this.entryDriver.writeAheadFlag.unflagRemoval();
-
-        return;
-      }
-
-      const { pathLength } = decodeSummarisableStorageValue(
-        entryValues,
-        this.protocolParams.payloadScheme,
-        this.protocolParams.pathLengthEncoding,
-      );
-
-      // Derive TAP, APT keys from PTA.
-      const ptsKey = existingRemove;
-
-      const details = decodeEntryKey(
-        ptsKey,
-        "path",
-        this.protocolParams.subspaceScheme,
-        pathLength,
-      );
-      const keys = encodeEntryKeys(
-        {
-          path: details.path,
-          timestamp: details.timestamp,
-          subspace: details.subspace,
-          subspaceEncoding: this.protocolParams.subspaceScheme,
-        },
-      );
-
-      // Remove key for each storage.
-      await Promise.all([
-        this.ptsStorage.remove(keys.pts),
-        this.tspStorage.remove(keys.tsp),
-        this.sptStorage.remove(keys.spt),
-      ]);
+      await this.storage.remove(existingRemove);
 
       // Unflag remove
       await this.entryDriver.writeAheadFlag.unflagRemoval();
@@ -302,13 +232,6 @@ export class Replica<
       };
     }
 
-    // Check for entries at the same path from the same author.
-    const entryAuthorPathKey = concat(
-      this.protocolParams.subspaceScheme.encode(entry.identifier.subspace),
-      entry.identifier.path,
-    );
-    const entryAuthorPathKeyUpper = this.incrementPath(entryAuthorPathKey);
-
     const prefixKey = concat(
       this.protocolParams.subspaceScheme.encode(entry.identifier.subspace),
       entry.identifier.path,
@@ -330,47 +253,38 @@ export class Replica<
       }
     }
 
+    // Check for collisions with stored entries
+
     for await (
-      const otherEntry of this.sptStorage.entries(
-        entryAuthorPathKey,
-        entryAuthorPathKeyUpper,
+      const { entry: otherEntry } of this.storage.entriesByQuery(
+        {
+          order: "subspace",
+          subspace: {
+            lowerBound: entry.identifier.subspace,
+            upperBound: this.protocolParams.subspaceScheme.successor(
+              entry.identifier.subspace,
+            ),
+          },
+          path: {
+            lowerBound: entry.identifier.path,
+            upperBound: Products.makeSuccessorPath(
+              this.protocolParams.pathLengthScheme.maxLength,
+            )(entry.identifier.path),
+          },
+        },
       )
     ) {
-      // The new entry will overwrite the one we just found.
-      // Remove it.
-      const { pathLength: otherPathLength, payloadHash: otherPayloadHash } =
-        decodeSummarisableStorageValue(
-          otherEntry.value,
-          this.protocolParams.payloadScheme,
-          this.protocolParams.pathLengthEncoding,
-        );
-
-      const otherDetails = decodeEntryKey(
-        otherEntry.key,
-        "subspace",
-        this.protocolParams.subspaceScheme,
-        otherPathLength,
-      );
-
       if (
         compareBytes(
           entry.identifier.path,
-          otherDetails.path,
+          otherEntry.identifier.path,
         ) !== 0
       ) {
         break;
       }
 
-      const otherEntryTimestampBytesView = new DataView(
-        otherEntry.key.buffer,
-      );
-
-      const otherEntryTimestamp = otherEntryTimestampBytesView.getBigUint64(
-        otherEntry.key.byteLength - 8,
-      );
-
       //  If there is something existing and the timestamp is greater than ours, we have a no-op.
-      if (otherEntryTimestamp > entry.record.timestamp) {
+      if (otherEntry.record.timestamp > entry.record.timestamp) {
         return {
           kind: "no_op",
           reason: "obsolete_from_same_subspace",
@@ -379,12 +293,12 @@ export class Replica<
 
       const payloadDigestOrder = this.protocolParams.payloadScheme.order(
         entry.record.hash,
-        otherPayloadHash,
+        otherEntry.record.hash,
       );
 
       // If the timestamps are the same, and our hash is less, we have a no-op.
       if (
-        otherEntryTimestamp === entry.record.timestamp &&
+        otherEntry.record.timestamp === entry.record.timestamp &&
         payloadDigestOrder === -1
       ) {
         return {
@@ -394,11 +308,11 @@ export class Replica<
       }
 
       const otherPayloadLengthIsGreater =
-        entry.record.length < otherEntryTimestamp;
+        entry.record.length < otherEntry.record.timestamp;
 
       // If the timestamps and hashes are the same, and the other payload's length is greater, we have a no-op.
       if (
-        otherEntryTimestamp === entry.record.timestamp &&
+        otherEntry.record.timestamp === entry.record.timestamp &&
         payloadDigestOrder === 0 && otherPayloadLengthIsGreater
       ) {
         return {
@@ -407,28 +321,21 @@ export class Replica<
         };
       }
 
-      const otherKeys = encodeEntryKeys(
-        {
-          path: otherDetails.path,
-          timestamp: otherDetails.timestamp,
-          subspace: otherDetails.subspace,
-          subspaceEncoding: this.protocolParams.subspaceScheme,
-        },
-      );
-
-      await Promise.all([
-        this.ptsStorage.remove(otherKeys.pts),
-        this.tspStorage.remove(otherKeys.tsp),
-        this.sptStorage.remove(otherKeys.spt),
-      ]);
+      await this.storage.remove(otherEntry);
 
       const toRemovePrefixKey = concat(
-        this.protocolParams.subspaceScheme.encode(otherDetails.subspace),
-        otherDetails.path,
+        this.protocolParams.subspaceScheme.encode(
+          otherEntry.identifier.subspace,
+        ),
+        otherEntry.identifier.path,
       );
 
       await this.entryDriver.prefixIterator.remove(
         toRemovePrefixKey,
+      );
+
+      this.dispatchEvent(
+        new EntryRemoveEvent(otherEntry),
       );
     }
 
@@ -472,32 +379,23 @@ export class Replica<
       authToken: AuthorisationToken;
     },
   ) {
-    const keys = encodeEntryKeys(
-      {
-        path,
-        timestamp,
-        subspace,
-        subspaceEncoding: this.protocolParams.subspaceScheme,
-      },
-    );
-
     const encodedToken = this.protocolParams.authorisationScheme
       .tokenEncoding.encode(authToken);
 
     const stagingResult = await this.payloadDriver.stage(encodedToken);
 
-    const toStore = encodeSummarisableStorageValue(
-      {
-        payloadHash: hash,
-        payloadLength: length,
-        authTokenHash: stagingResult.hash,
-        payloadEncoding: this.protocolParams.payloadScheme,
-        pathLength: path.byteLength,
-        pathLengthEncoding: this.protocolParams.pathLengthEncoding,
+    await this.entryDriver.writeAheadFlag.flagInsertion({
+      identifier: {
+        namespace: this.namespace,
+        subspace: subspace,
+        path: path,
       },
-    );
-
-    await this.entryDriver.writeAheadFlag.flagInsertion(keys.pts, toStore);
+      record: {
+        hash,
+        length,
+        timestamp,
+      },
+    }, stagingResult.hash);
 
     const prefixKey = concat(
       this.protocolParams.subspaceScheme.encode(subspace),
@@ -505,20 +403,24 @@ export class Replica<
     );
 
     await Promise.all([
-      this.ptsStorage.insert(keys.pts, toStore),
-      this.sptStorage.insert(keys.spt, toStore),
-      this.tspStorage.insert(keys.tsp, toStore),
+      this.storage.insert({
+        payloadHash: hash,
+        authTokenHash: stagingResult.hash,
+        length,
+        path,
+        subspace,
+        timestamp,
+      }),
       stagingResult.commit(),
+      this.entryDriver.prefixIterator.insert(
+        prefixKey,
+        bigintToBytes(timestamp),
+      ),
     ]);
-
-    await this.entryDriver.prefixIterator.insert(
-      prefixKey,
-      keys.spt.subarray(keys.spt.byteLength - 8),
-    );
 
     // And remove all prefixes with smaller timestamps.
     for await (
-      const [prefixedByPath, prefixedByTimestamp] of this.entryDriver
+      const [prefixedByKey, prefixedByTimestamp] of this.entryDriver
         .prefixIterator
         .prefixedBy(
           prefixKey,
@@ -529,69 +431,35 @@ export class Replica<
 
       if (prefixTimestamp < timestamp) {
         const subspace = this.protocolParams.subspaceScheme.decode(
-          prefixedByPath,
+          prefixedByKey,
         );
 
         const encodedSubspaceLength = this.protocolParams.subspaceScheme
           .encodedLength(subspace);
 
-        const prefixedPath = prefixedByPath.subarray(
+        const prefixedPath = prefixedByKey.subarray(
           encodedSubspaceLength,
         );
 
-        // Delete.
-        // Flag a deletion.
-        const toDeleteKeys = encodeEntryKeys(
-          {
-            path: prefixedPath,
-            timestamp: prefixTimestamp,
-            subspace: subspace,
-            subspaceEncoding: this.protocolParams.subspaceScheme,
-          },
-        );
+        const toDeleteResult = await this.storage.get(subspace, prefixedPath);
 
-        const toDeleteValue = await this.ptsStorage.get(toDeleteKeys.pts);
+        if (toDeleteResult) {
+          await this.entryDriver.writeAheadFlag.flagRemoval(
+            toDeleteResult.entry,
+          );
 
-        const storageStuff = toDeleteValue
-          ? decodeSummarisableStorageValue(
-            toDeleteValue,
-            this.protocolParams.payloadScheme,
-            this.protocolParams.pathLengthEncoding,
-          )
-          : undefined;
+          await Promise.all([
+            this.storage.remove(toDeleteResult.entry),
+            this.payloadDriver.erase(toDeleteResult.entry.record.hash),
+            this.entryDriver.prefixIterator.remove(prefixedByKey),
+          ]);
 
-        await this.entryDriver.writeAheadFlag.flagRemoval(toDeleteKeys.pts);
+          await this.entryDriver.writeAheadFlag.unflagRemoval();
 
-        // Remove from all the summarisable storages...
-        await Promise.all([
-          this.ptsStorage.remove(toDeleteKeys.pts),
-          this.tspStorage.remove(toDeleteKeys.tsp),
-          this.sptStorage.remove(toDeleteKeys.spt),
-          this.entryDriver.prefixIterator.remove(prefixedByPath),
-          // Don't fail if we couldn't get the value of the hash due to DB being in a wonky state.
-          storageStuff
-            ? this.payloadDriver.erase(storageStuff.payloadHash)
-            : () => {},
-        ]);
-
-        if (storageStuff) {
           this.dispatchEvent(
-            new EntryRemoveEvent({
-              identifier: {
-                path: prefixedPath,
-                subspace,
-                namespace: this.namespace,
-              },
-              record: {
-                hash: storageStuff.payloadHash,
-                length: storageStuff.payloadLength,
-                timestamp: prefixTimestamp,
-              },
-            }),
+            new EntryRemoveEvent(toDeleteResult.entry),
           );
         }
-
-        await this.entryDriver.writeAheadFlag.unflagRemoval();
       }
     }
 
@@ -610,110 +478,53 @@ export class Replica<
     },
     payload: Uint8Array | ReadableStream<Uint8Array>,
   ): Promise<IngestPayloadEvent> {
-    // Check that there is an entry for this, and get the payload hash!
-    const encodedSubspace = this.protocolParams.subspaceScheme.encode(
+    const getResult = await this.storage.get(
       entryDetails.subspace,
+      entryDetails.path,
     );
 
-    const keyLength = 8 + encodedSubspace.byteLength +
-      entryDetails.path.byteLength;
-    const ptsBytes = new Uint8Array(keyLength);
-
-    ptsBytes.set(entryDetails.path, 0);
-    const ptsDv = new DataView(ptsBytes.buffer);
-    ptsDv.setBigUint64(
-      entryDetails.path.byteLength,
-      entryDetails.timestamp,
-    );
-    ptsBytes.set(encodedSubspace, entryDetails.path.byteLength + 8);
-
-    for await (
-      const kvEntry of this.ptsStorage.entries(
-        ptsBytes,
-        incrementLastByte(ptsBytes),
-        {
-          limit: 1,
-        },
-      )
-    ) {
-      if (!equalsBytes(kvEntry.key, ptsBytes)) {
-        break;
-      }
-
-      // Check if we already have it.
-      const {
-        payloadHash,
-        payloadLength,
-        pathLength,
-      } = decodeSummarisableStorageValue(
-        kvEntry.value,
-        this.protocolParams.payloadScheme,
-        this.protocolParams.pathLengthEncoding,
-      );
-
-      const existingPayload = await this.payloadDriver.get(payloadHash);
-
-      if (existingPayload) {
-        return {
-          kind: "no_op",
-          reason: "already_have_it",
-        };
-      }
-
-      const stagedResult = await this.payloadDriver.stage(payload);
-
-      if (
-        this.protocolParams.payloadScheme.order(
-          stagedResult.hash,
-          payloadHash,
-        ) !== 0
-      ) {
-        await stagedResult.reject();
-
-        return {
-          kind: "failure",
-          reason: "mismatched_hash",
-        };
-      }
-
-      const committedPayload = await stagedResult.commit();
-
-      const { subspace, path, timestamp } = decodeEntryKey(
-        kvEntry.key,
-        "path",
-        this.protocolParams.subspaceScheme,
-        pathLength,
-      );
-
-      const entry: Entry<
-        NamespacePublicKey,
-        SubspacePublicKey,
-        PayloadDigest
-      > = {
-        identifier: {
-          subspace,
-          namespace: this.namespace,
-          path,
-        },
-        record: {
-          hash: payloadHash,
-          length: payloadLength,
-          timestamp,
-        },
-      };
-
-      this.dispatchEvent(
-        new PayloadIngestEvent(entry, committedPayload),
-      );
-
+    if (!getResult) {
       return {
-        kind: "success",
+        kind: "failure",
+        reason: "no_entry",
       };
     }
 
+    const { entry } = getResult;
+
+    const existingPayload = await this.payloadDriver.get(entry.record.hash);
+
+    if (existingPayload) {
+      return {
+        kind: "no_op",
+        reason: "already_have_it",
+      };
+    }
+
+    const stagedResult = await this.payloadDriver.stage(payload);
+
+    if (
+      this.protocolParams.payloadScheme.order(
+        stagedResult.hash,
+        entry.record.hash,
+      ) !== 0
+    ) {
+      await stagedResult.reject();
+
+      return {
+        kind: "failure",
+        reason: "mismatched_hash",
+      };
+    }
+
+    const committedPayload = await stagedResult.commit();
+
+    this.dispatchEvent(
+      new PayloadIngestEvent(entry, committedPayload),
+    );
+
     return {
-      kind: "failure",
-      reason: "no_entry",
+      kind: "success",
     };
   }
 
@@ -727,78 +538,10 @@ export class Replica<
       AuthorisationToken,
     ]
   > {
-    let listToUse: SummarisableStorage<Uint8Array, Uint8Array>;
-    let lowerBound: Uint8Array | undefined;
-    let upperBound: Uint8Array | undefined;
-
-    switch (query.order) {
-      case "path":
-        lowerBound = query.lowerBound;
-        upperBound = query.upperBound;
-        listToUse = this.ptsStorage;
-        break;
-      case "subspace":
-        lowerBound = query.lowerBound
-          ? this.protocolParams.subspaceScheme.encode(query.lowerBound)
-          : undefined;
-        upperBound = query.upperBound
-          ? this.protocolParams.subspaceScheme.encode(query.upperBound)
-          : undefined;
-        listToUse = this.sptStorage;
-        break;
-      case "timestamp": {
-        if (query.lowerBound) {
-          lowerBound = bigintToBytes(query.lowerBound);
-        }
-
-        if (query.upperBound) {
-          upperBound = bigintToBytes(query.upperBound);
-        }
-
-        listToUse = this.tspStorage;
-        break;
-      }
-    }
-
-    const iterator = listToUse.entries(lowerBound, upperBound, {
-      reverse: query.reverse,
-      limit: query.limit,
-    });
-
-    for await (const kvEntry of iterator) {
-      const {
-        authTokenHash,
-        payloadHash,
-        payloadLength,
-        pathLength,
-      } = decodeSummarisableStorageValue(
-        kvEntry.value,
-        this.protocolParams.payloadScheme,
-        this.protocolParams.pathLengthEncoding,
-      );
-
-      const { subspace, path, timestamp } = decodeEntryKey(
-        kvEntry.key,
-        query.order,
-        this.protocolParams.subspaceScheme,
-        pathLength,
-      );
-
-      const entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest> =
-        {
-          identifier: {
-            subspace,
-            namespace: this.namespace,
-            path,
-          },
-          record: {
-            hash: payloadHash,
-            length: payloadLength,
-            timestamp,
-          },
-        };
-
-      const payload = await this.payloadDriver.get(payloadHash);
+    for await (
+      const { entry, authTokenHash } of this.storage.entriesByQuery(query)
+    ) {
+      const payload = await this.payloadDriver.get(entry.record.hash);
 
       const authTokenPayload = await this.payloadDriver.get(authTokenHash);
 

@@ -1,4 +1,4 @@
-export function compareBytes(a: Uint8Array, b: Uint8Array): number {
+export function compareBytes(a: Uint8Array, b: Uint8Array): -1 | 0 | 1 {
   const shorter = a.byteLength < b.byteLength ? a : b;
 
   for (let i = 0; i < shorter.byteLength; i++) {

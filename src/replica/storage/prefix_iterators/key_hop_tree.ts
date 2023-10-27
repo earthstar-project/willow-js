@@ -1,5 +1,4 @@
-import { concat } from "$std/bytes/concat.ts";
-import { equals as bytesEquals } from "$std/bytes/equals.ts";
+import { concat, equalsBytes } from "../../../../deps.ts";
 import { compareBytes, incrementLastByte } from "../../../util/bytes.ts";
 import { KvBatch, KvDriver } from "../kv/types.ts";
 
@@ -183,7 +182,7 @@ export class KeyHopTree<ValueType> {
     // First check if the key + vector is a prefix of ours.
     const completeValue = concat(searchKey, existingNode[1]);
 
-    if (bytesEquals(completeValue, key)) {
+    if (equalsBytes(completeValue, key)) {
       const batch = this.kv.batch();
 
       if (existingNode[0] === Phantomness.RealWithPhantom) {
@@ -321,7 +320,7 @@ export class KeyHopTree<ValueType> {
 
       const completeVal = concat(searchKey, node[1]);
 
-      if (bytesEquals(completeVal, key)) {
+      if (equalsBytes(completeVal, key)) {
         break;
       }
 
@@ -354,7 +353,7 @@ export class KeyHopTree<ValueType> {
         entry.value[1],
       );
 
-      if (bytesEquals(completeVal, key)) {
+      if (equalsBytes(completeVal, key)) {
         continue;
       }
 
