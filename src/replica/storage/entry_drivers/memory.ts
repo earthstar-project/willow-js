@@ -1,18 +1,15 @@
-import { compareBytes } from "../../../util/bytes.ts";
 import {
   FingerprintScheme,
-  PathLengthScheme,
   PayloadScheme,
   SubspaceScheme,
 } from "../../types.ts";
-import { RadixishTree } from "../prefix_iterators/radixish_tree.ts";
-
 import { LiftingMonoid } from "../summarisable_storage/lifting_monoid.ts";
 import { MonoidRbTree } from "../summarisable_storage/monoid_rbtree.ts";
 import { EntryDriver } from "../types.ts";
 import { Storage3d } from "../storage_3d/types.ts";
 import { TripleStorage } from "../storage_3d/triple_storage.ts";
-import { Entry } from "../../../entries/types.ts";
+import { Entry, orderBytes, PathScheme } from "../../../../deps.ts";
+import { RadixTree } from "../prefix_iterators/radix_tree.ts";
 
 type EntryDriverMemoryOpts<
   NamespaceKey,
@@ -22,7 +19,7 @@ type EntryDriverMemoryOpts<
 > = {
   subspaceScheme: SubspaceScheme<SubspaceKey>;
   payloadScheme: PayloadScheme<PayloadDigest>;
-  pathLengthScheme: PathLengthScheme;
+  pathScheme: PathScheme;
   fingerprintScheme: FingerprintScheme<
     NamespaceKey,
     SubspaceKey,
@@ -65,11 +62,11 @@ export class EntryDriverMemory<
       ) => {
         return new MonoidRbTree({
           monoid,
-          compare: compareBytes,
+          compare: orderBytes,
         });
       },
       fingerprintScheme: this.opts.fingerprintScheme,
-      pathLengthScheme: this.opts.pathLengthScheme,
+      pathScheme: this.opts.pathScheme,
       payloadScheme: this.opts.payloadScheme,
       subspaceScheme: this.opts.subspaceScheme,
     });
@@ -109,5 +106,5 @@ export class EntryDriverMemory<
       return Promise.resolve();
     },
   };
-  prefixIterator = new RadixishTree<Uint8Array>();
+  prefixIterator = new RadixTree<Uint8Array>();
 }

@@ -1,15 +1,18 @@
-import { equalsBytes, Products } from "../../deps.ts";
+import {
+  encodeEntry,
+  equalsBytes,
+  orderBytes,
+  PathScheme,
+  successorBytesFixedWidth,
+} from "../../deps.ts";
 import { crypto } from "https://deno.land/std@0.188.0/crypto/crypto.ts";
-import { encodeEntry } from "../entries/encode_decode.ts";
 import {
   AuthorisationScheme,
   FingerprintScheme,
   NamespaceScheme,
-  PathLengthScheme,
   PayloadScheme,
   SubspaceScheme,
 } from "../replica/types.ts";
-import { compareBytes } from "../util/bytes.ts";
 import { importPublicKey } from "./crypto.ts";
 
 export const testSchemeNamespace: NamespaceScheme<Uint8Array> = {
@@ -23,23 +26,15 @@ export const testSchemeSubspace: SubspaceScheme<Uint8Array> = {
   encode: (v) => v,
   decode: (v) => v.subarray(0, 65),
   encodedLength: () => 65,
-  isEqual: equalsBytes,
   minimalSubspaceKey: new Uint8Array(65),
-  order: Products.orderPaths,
-  successor: Products.makeSuccessorPath(65),
+  order: orderBytes,
+  successor: successorBytesFixedWidth,
 };
 
-export const testSchemePathLength: PathLengthScheme = {
-  encode(length) {
-    return new Uint8Array([length]);
-  },
-  decode(bytes) {
-    return bytes[0];
-  },
-  encodedLength() {
-    return 1;
-  },
-  maxLength: 8,
+export const testSchemePath: PathScheme = {
+  maxPathLength: 8,
+  maxComponentCount: 4,
+  maxComponentLength: 3,
 };
 
 export const testSchemePayload: PayloadScheme<ArrayBuffer> = {
@@ -56,7 +51,7 @@ export const testSchemePayload: PayloadScheme<ArrayBuffer> = {
     return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   },
   order(a, b) {
-    return compareBytes(new Uint8Array(a), new Uint8Array(b)) as
+    return orderBytes(new Uint8Array(a), new Uint8Array(b)) as
       | 1
       | 0
       | -1;
@@ -71,12 +66,12 @@ export const testSchemeFingerprint: FingerprintScheme<
 > = {
   neutral: new Uint8Array(32),
   async fingerprintSingleton(entry) {
-    const encodedEntry = encodeEntry(entry, {
+    const encodedEntry = encodeEntry({
       namespaceScheme: testSchemeNamespace,
       subspaceScheme: testSchemeSubspace,
-      pathLengthScheme: testSchemePathLength,
+      pathScheme: testSchemePath,
       payloadScheme: testSchemePayload,
-    });
+    }, entry);
 
     return new Uint8Array(await crypto.subtle.digest("SHA-256", encodedEntry));
   },
@@ -99,12 +94,12 @@ export const testSchemeAuthorisation: AuthorisationScheme<
   ArrayBuffer
 > = {
   async authorise(entry, secretKey) {
-    const encodedEntry = encodeEntry(entry, {
+    const encodedEntry = encodeEntry({
       namespaceScheme: testSchemeNamespace,
       subspaceScheme: testSchemeSubspace,
-      pathLengthScheme: testSchemePathLength,
+      pathScheme: testSchemePath,
       payloadScheme: testSchemePayload,
-    });
+    }, entry);
 
     const res = await crypto.subtle.sign(
       {
@@ -117,15 +112,15 @@ export const testSchemeAuthorisation: AuthorisationScheme<
 
     return new Uint8Array(res);
   },
-  async isAuthorised(entry, token) {
-    const cryptoKey = await importPublicKey(entry.identifier.subspace);
+  async isAuthorisedWrite(entry, token) {
+    const cryptoKey = await importPublicKey(entry.subspaceId);
 
-    const encodedEntry = encodeEntry(entry, {
+    const encodedEntry = encodeEntry({
       namespaceScheme: testSchemeNamespace,
       subspaceScheme: testSchemeSubspace,
-      pathLengthScheme: testSchemePathLength,
+      pathScheme: testSchemePath,
       payloadScheme: testSchemePayload,
-    });
+    }, entry);
 
     return crypto.subtle.verify(
       {

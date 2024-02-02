@@ -1,24 +1,30 @@
 import { EntryDriverMemory } from "./storage/entry_drivers/memory.ts";
 import { EntryDriver, PayloadDriver } from "./storage/types.ts";
-import { bigintToBytes, compareBytes } from "../util/bytes.ts";
 import {
   EntryInput,
   IngestEvent,
   IngestPayloadEvent,
   Payload,
   ProtocolParameters,
-  Query,
+  QueryOrder,
   ReplicaOpts,
 } from "./types.ts";
 import { PayloadDriverMemory } from "./storage/payload_drivers/memory.ts";
-import { Entry } from "../entries/types.ts";
 import {
   EntryIngestEvent,
   EntryPayloadSetEvent,
   EntryRemoveEvent,
   PayloadIngestEvent,
 } from "./events.ts";
-import { concat, deferred, Products } from "../../deps.ts";
+import {
+  AreaOfInterest,
+  bigintToBytes,
+  deferred,
+  Entry,
+  OPEN_END,
+  orderPath,
+  Path,
+} from "../../deps.ts";
 import { Storage3d } from "./storage/storage_3d/types.ts";
 
 /** A local snapshot of a namespace to be written to, queried from, and synced with other replicas.
@@ -79,7 +85,7 @@ export class Replica<
     this.protocolParams = opts.protocolParameters;
 
     const entryDriver = opts.entryDriver || new EntryDriverMemory({
-      pathLengthScheme: opts.protocolParameters.pathLengthScheme,
+      pathScheme: opts.protocolParameters.pathScheme,
       payloadScheme: opts.protocolParameters.payloadScheme,
       subspaceScheme: opts.protocolParameters.subspaceScheme,
       fingerprintScheme: opts.protocolParameters.fingerprintScheme,
@@ -111,11 +117,11 @@ export class Replica<
           .tokenEncoding.decode(await encodedAuthToken?.bytes());
 
         await this.insertEntry({
-          path: existingInsert.entry.identifier.path,
-          subspace: existingInsert.entry.identifier.subspace,
-          hash: existingInsert.entry.record.hash,
-          length: existingInsert.entry.record.length,
-          timestamp: existingInsert.entry.record.timestamp,
+          path: existingInsert.entry.path,
+          subspace: existingInsert.entry.subspaceId,
+          hash: existingInsert.entry.payloadDigest,
+          length: existingInsert.entry.payloadLength,
+          timestamp: existingInsert.entry.timestamp,
           authToken: decodedToken,
         });
       }
@@ -139,12 +145,6 @@ export class Replica<
     input: EntryInput<SubspacePublicKey>,
     authorisation: AuthorisationOpts,
   ) {
-    const identifier = {
-      namespace: this.namespace,
-      subspace: input.subspace,
-      path: input.path,
-    };
-
     const timestamp = input.timestamp !== undefined
       ? input.timestamp
       : BigInt(Date.now() * 1000);
@@ -152,13 +152,14 @@ export class Replica<
     // Stage it with the driver
     const stagedResult = await this.payloadDriver.stage(input.payload);
 
-    const record = {
-      timestamp,
-      length: BigInt(stagedResult.length),
-      hash: stagedResult.hash,
+    const entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest> = {
+      namespaceId: this.namespace,
+      subspaceId: input.subspace,
+      path: input.path,
+      timestamp: timestamp,
+      payloadLength: stagedResult.length,
+      payloadDigest: stagedResult.hash,
     };
-
-    const entry = { identifier, record };
 
     const authToken = await this.protocolParams.authorisationScheme.authorise(
       entry,
@@ -207,7 +208,7 @@ export class Replica<
     if (
       !this.protocolParams.namespaceScheme.isEqual(
         this.namespace,
-        entry.identifier.namespace,
+        entry.namespaceId,
       )
     ) {
       return {
@@ -219,7 +220,7 @@ export class Replica<
     }
 
     if (
-      await this.protocolParams.authorisationScheme.isAuthorised(
+      await this.protocolParams.authorisationScheme.isAuthorisedWrite(
         entry,
         authorisation,
       ) === false
@@ -232,20 +233,20 @@ export class Replica<
       };
     }
 
-    const prefixKey = concat(
-      this.protocolParams.subspaceScheme.encode(entry.identifier.subspace),
-      entry.identifier.path,
-    );
+    const subspacePath = [
+      this.protocolParams.subspaceScheme.encode(entry.subspaceId),
+      ...entry.path,
+    ];
 
     // Check if we have any newer entries with this prefix.
     for await (
       const [_path, timestampBytes] of this.entryDriver.prefixIterator
-        .prefixesOf(prefixKey)
+        .prefixesOf(subspacePath)
     ) {
       const view = new DataView(timestampBytes.buffer);
       const prefixTimestamp = view.getBigUint64(0);
 
-      if (prefixTimestamp >= entry.record.timestamp) {
+      if (prefixTimestamp >= entry.timestamp) {
         return {
           kind: "no_op",
           reason: "newer_prefix_found",
@@ -256,35 +257,34 @@ export class Replica<
     // Check for collisions with stored entries
 
     for await (
-      const { entry: otherEntry } of this.storage.entriesByQuery(
+      const { entry: otherEntry } of this.storage.query(
         {
-          order: "subspace",
-          subspace: {
-            lowerBound: entry.identifier.subspace,
-            upperBound: this.protocolParams.subspaceScheme.successor(
-              entry.identifier.subspace,
-            ),
+          area: {
+            pathPrefix: entry.path,
+
+            includedSubspaceId: entry.subspaceId,
+            timeRange: {
+              start: BigInt(0),
+              end: OPEN_END,
+            },
           },
-          path: {
-            lowerBound: entry.identifier.path,
-            upperBound: Products.makeSuccessorPath(
-              this.protocolParams.pathLengthScheme.maxLength,
-            )(entry.identifier.path),
-          },
+          maxCount: 1,
+          maxSize: BigInt(0),
         },
+        "subspace",
       )
     ) {
       if (
-        compareBytes(
-          entry.identifier.path,
-          otherEntry.identifier.path,
+        orderPath(
+          entry.path,
+          otherEntry.path,
         ) !== 0
       ) {
         break;
       }
 
       //  If there is something existing and the timestamp is greater than ours, we have a no-op.
-      if (otherEntry.record.timestamp > entry.record.timestamp) {
+      if (otherEntry.timestamp > entry.timestamp) {
         return {
           kind: "no_op",
           reason: "obsolete_from_same_subspace",
@@ -292,13 +292,13 @@ export class Replica<
       }
 
       const payloadDigestOrder = this.protocolParams.payloadScheme.order(
-        entry.record.hash,
-        otherEntry.record.hash,
+        entry.payloadDigest,
+        otherEntry.payloadDigest,
       );
 
       // If the timestamps are the same, and our hash is less, we have a no-op.
       if (
-        otherEntry.record.timestamp === entry.record.timestamp &&
+        otherEntry.timestamp === entry.timestamp &&
         payloadDigestOrder === -1
       ) {
         return {
@@ -308,11 +308,11 @@ export class Replica<
       }
 
       const otherPayloadLengthIsGreater =
-        entry.record.length < otherEntry.record.timestamp;
+        entry.payloadLength < otherEntry.payloadLength;
 
       // If the timestamps and hashes are the same, and the other payload's length is greater, we have a no-op.
       if (
-        otherEntry.record.timestamp === entry.record.timestamp &&
+        otherEntry.timestamp === entry.timestamp &&
         payloadDigestOrder === 0 && otherPayloadLengthIsGreater
       ) {
         return {
@@ -323,15 +323,15 @@ export class Replica<
 
       await this.storage.remove(otherEntry);
 
-      const toRemovePrefixKey = concat(
+      const toRemovePrefixPath = [
         this.protocolParams.subspaceScheme.encode(
-          otherEntry.identifier.subspace,
+          otherEntry.subspaceId,
         ),
-        otherEntry.identifier.path,
-      );
+        ...otherEntry.path,
+      ];
 
       await this.entryDriver.prefixIterator.remove(
-        toRemovePrefixKey,
+        toRemovePrefixPath,
       );
 
       this.dispatchEvent(
@@ -340,11 +340,11 @@ export class Replica<
     }
 
     await this.insertEntry({
-      path: entry.identifier.path,
-      subspace: entry.identifier.subspace,
-      hash: entry.record.hash,
-      timestamp: entry.record.timestamp,
-      length: entry.record.length,
+      path: entry.path,
+      subspace: entry.subspaceId,
+      hash: entry.payloadDigest,
+      timestamp: entry.timestamp,
+      length: entry.payloadLength,
       authToken: authorisation,
     });
 
@@ -371,7 +371,7 @@ export class Replica<
       length,
       authToken,
     }: {
-      path: Uint8Array;
+      path: Path;
       subspace: SubspacePublicKey;
       timestamp: bigint;
       hash: PayloadDigest;
@@ -385,27 +385,23 @@ export class Replica<
     const stagingResult = await this.payloadDriver.stage(encodedToken);
 
     await this.entryDriver.writeAheadFlag.flagInsertion({
-      identifier: {
-        namespace: this.namespace,
-        subspace: subspace,
-        path: path,
-      },
-      record: {
-        hash,
-        length,
-        timestamp,
-      },
+      namespaceId: this.namespace,
+      subspaceId: subspace,
+      path: path,
+      payloadDigest: hash,
+      payloadLength: length,
+      timestamp,
     }, stagingResult.hash);
 
-    const prefixKey = concat(
+    const prefixKey = [
       this.protocolParams.subspaceScheme.encode(subspace),
-      path,
-    );
+      ...path,
+    ];
 
     await Promise.all([
       this.storage.insert({
-        payloadHash: hash,
-        authTokenHash: stagingResult.hash,
+        payloadDigest: hash,
+        authTokenDigest: stagingResult.hash,
         length,
         path,
         subspace,
@@ -420,7 +416,7 @@ export class Replica<
 
     // And remove all prefixes with smaller timestamps.
     for await (
-      const [prefixedByKey, prefixedByTimestamp] of this.entryDriver
+      const [prefixedBySubspacePath, prefixedByTimestamp] of this.entryDriver
         .prefixIterator
         .prefixedBy(
           prefixKey,
@@ -429,19 +425,14 @@ export class Replica<
       const view = new DataView(prefixedByTimestamp.buffer);
       const prefixTimestamp = view.getBigUint64(prefixedByTimestamp.byteOffset);
 
+      const [prefixedBySubspace, ...prefixedByPath] = prefixedBySubspacePath;
+
       if (prefixTimestamp < timestamp) {
         const subspace = this.protocolParams.subspaceScheme.decode(
-          prefixedByKey,
+          prefixedBySubspace,
         );
 
-        const encodedSubspaceLength = this.protocolParams.subspaceScheme
-          .encodedLength(subspace);
-
-        const prefixedPath = prefixedByKey.subarray(
-          encodedSubspaceLength,
-        );
-
-        const toDeleteResult = await this.storage.get(subspace, prefixedPath);
+        const toDeleteResult = await this.storage.get(subspace, prefixedByPath);
 
         if (toDeleteResult) {
           await this.entryDriver.writeAheadFlag.flagRemoval(
@@ -450,8 +441,8 @@ export class Replica<
 
           await Promise.all([
             this.storage.remove(toDeleteResult.entry),
-            this.payloadDriver.erase(toDeleteResult.entry.record.hash),
-            this.entryDriver.prefixIterator.remove(prefixedByKey),
+            this.payloadDriver.erase(toDeleteResult.entry.payloadDigest),
+            this.entryDriver.prefixIterator.remove(prefixedBySubspacePath),
           ]);
 
           await this.entryDriver.writeAheadFlag.unflagRemoval();
@@ -472,7 +463,7 @@ export class Replica<
    */
   async ingestPayload(
     entryDetails: {
-      path: Uint8Array;
+      path: Path;
       timestamp: bigint;
       subspace: SubspacePublicKey;
     },
@@ -492,7 +483,7 @@ export class Replica<
 
     const { entry } = getResult;
 
-    const existingPayload = await this.payloadDriver.get(entry.record.hash);
+    const existingPayload = await this.payloadDriver.get(entry.payloadDigest);
 
     if (existingPayload) {
       return {
@@ -506,7 +497,7 @@ export class Replica<
     if (
       this.protocolParams.payloadScheme.order(
         stagedResult.hash,
-        entry.record.hash,
+        entry.payloadDigest,
       ) !== 0
     ) {
       await stagedResult.reject();
@@ -530,7 +521,9 @@ export class Replica<
 
   /** Retrieve a list of entry-payload pairs from the replica for a given {@link Query}. */
   async *query(
-    query: Query<SubspacePublicKey>,
+    areaOfInterest: AreaOfInterest<SubspacePublicKey>,
+    order: QueryOrder,
+    reverse = false,
   ): AsyncIterable<
     [
       Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
@@ -539,9 +532,13 @@ export class Replica<
     ]
   > {
     for await (
-      const { entry, authTokenHash } of this.storage.entriesByQuery(query)
+      const { entry, authTokenHash } of this.storage.query(
+        areaOfInterest,
+        order,
+        reverse,
+      )
     ) {
-      const payload = await this.payloadDriver.get(entry.record.hash);
+      const payload = await this.payloadDriver.get(entry.payloadDigest);
 
       const authTokenPayload = await this.payloadDriver.get(authTokenHash);
 

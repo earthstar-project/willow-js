@@ -1,58 +1,51 @@
-import { equalsBytes } from "../../../../deps.ts";
-import { compareBytes, incrementLastByte } from "../../../util/bytes.ts";
-import { Key, KvDriver } from "../kv/types.ts";
+import { isPathPrefixed, orderPath, Path } from "../../../../deps.ts";
+import { KvDriver } from "../kv/types.ts";
+import { PrefixIterator } from "./types.ts";
 
-export class SimpleKeyIterator<ValueType> {
+export class SimpleKeyIterator<ValueType> implements PrefixIterator<ValueType> {
   private kv: KvDriver;
 
   constructor(kv: KvDriver) {
     this.kv = kv;
   }
 
-  insert(key: Uint8Array, value: ValueType) {
-    return this.kv.set([key], value);
+  insert(path: Path, value: ValueType) {
+    return this.kv.set([0, ...path], value);
   }
 
-  async remove(key: Uint8Array) {
-    await this.kv.delete([key]);
+  async remove(path: Path) {
+    await this.kv.delete([0, ...path]);
 
     return true;
   }
 
   async *prefixesOf(
-    key: Uint8Array,
-    atLeast: Key = [],
-  ): AsyncIterable<[Uint8Array, ValueType]> {
+    path: Path,
+    atLeast: Path = [],
+  ): AsyncIterable<[Path, ValueType]> {
     for await (
       const entry of this.kv.list<ValueType>({
-        start: atLeast,
-        end: [key],
+        start: [0, ...atLeast],
+        end: [0, ...path],
       }, {
-        batchSize: key.length === 0 ? 1 : undefined,
-        limit: key.length === 0 ? 1 : undefined,
+        batchSize: path.length === 0 ? 1 : undefined,
+        limit: path.length === 0 ? 1 : undefined,
       })
     ) {
-      const candidate = entry.key[0] as Uint8Array;
-
-      if (compareBytes(candidate, key) >= 0) {
+      const candidate = entry.key.slice(1) as Path;
+      // If the candidate is greater than or equal to the current path, we've reached the end of the line.
+      if (orderPath(candidate, path) >= 0) {
         break;
       }
 
-      const longestCommonPrefix = getLongestCommonPrefix(
-        candidate,
-        key,
-      );
-
-      if (longestCommonPrefix.byteLength === candidate.byteLength) {
+      if (isPathPrefixed(candidate, path)) {
         yield [candidate, entry.value];
 
-        const nextAtLeast = new Uint8Array(longestCommonPrefix.byteLength + 1);
-        nextAtLeast.set(longestCommonPrefix);
-
         for await (
-          const result of this.prefixesOf(key, [
-            nextAtLeast,
-          ])
+          const result of this.prefixesOf(
+            path,
+            path.slice(0, candidate.length + 1),
+          )
         ) {
           yield result;
         }
@@ -62,35 +55,13 @@ export class SimpleKeyIterator<ValueType> {
     }
   }
 
-  async *prefixedBy(key: Uint8Array): AsyncIterable<[Uint8Array, ValueType]> {
+  async *prefixedBy(path: Path): AsyncIterable<[Path, ValueType]> {
     for await (
       const entry of this.kv.list<ValueType>({
-        start: [key],
-        end: [incrementLastByte(key)],
+        prefix: [0, ...path],
       })
     ) {
-      if (equalsBytes(entry.key[0] as Uint8Array, key)) {
-        continue;
-      }
-
-      yield [entry.key[0] as Uint8Array, entry.value];
+      yield [entry.key.slice(1) as Path, entry.value];
     }
   }
-}
-
-function getLongestCommonPrefix(
-  candidate: Uint8Array,
-  target: Uint8Array,
-): Uint8Array {
-  const bytes: number[] = [];
-
-  for (let i = 0; i < candidate.byteLength; i++) {
-    if (candidate[i] !== target[i]) {
-      break;
-    }
-
-    bytes.push(candidate[i]);
-  }
-
-  return new Uint8Array(bytes);
 }

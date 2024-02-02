@@ -1,6 +1,5 @@
-import { Products } from "../../../../deps.ts";
-import { Entry } from "../../../entries/types.ts";
-import { Query } from "../../types.ts";
+import { AreaOfInterest, Entry, Path } from "../../../../deps.ts";
+import { QueryOrder } from "../../types.ts";
 
 export interface Storage3d<
   NamespaceKey,
@@ -11,7 +10,7 @@ export interface Storage3d<
   /** Retrieve a value */
   get(
     subspace: SubspaceKey,
-    path: Uint8Array,
+    path: Path,
   ): Promise<
     {
       entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>;
@@ -20,12 +19,12 @@ export interface Storage3d<
   >;
 
   insert(opts: {
-    path: Uint8Array;
+    path: Path;
     subspace: SubspaceKey;
-    payloadHash: PayloadDigest;
+    payloadDigest: PayloadDigest;
     timestamp: bigint;
     length: bigint;
-    authTokenHash: PayloadDigest;
+    authTokenDigest: PayloadDigest;
   }): Promise<void>;
 
   remove(
@@ -34,28 +33,15 @@ export interface Storage3d<
 
   // Used during sync
   summarise(
-    product: Products.CanonicProduct<SubspaceKey>,
-    countLimits?: { subspace?: number; path?: number; time?: number },
-    sizeLimits?: { subspace?: bigint; path?: bigint; time?: bigint },
+    areaOfInterest: AreaOfInterest<SubspaceKey>,
   ): Promise<{ fingerprint: Fingerprint; size: number }>;
 
   // Used to fetch entries for transfer during sync.
   // All three dimensions are defined
-  entriesByProduct(
-    product: Products.CanonicProduct<SubspaceKey>,
-    countLimits?: { subspace?: number; path?: number; time?: number },
-    sizeLimits?: { subspace?: bigint; path?: bigint; time?: bigint },
-  ): AsyncIterable<
-    {
-      entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>;
-      authTokenHash: PayloadDigest;
-    }
-  >;
-
-  // Used to fetch entries when user is making query through replica
-  // 0 - 3 dimensions may be defined
-  entriesByQuery(
-    query: Query<SubspaceKey>,
+  query(
+    areaOfInterest: AreaOfInterest<SubspaceKey>,
+    order: QueryOrder,
+    reverse?: boolean,
   ): AsyncIterable<
     {
       entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>;

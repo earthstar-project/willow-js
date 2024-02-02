@@ -1,47 +1,18 @@
 import { assertEquals } from "https://deno.land/std@0.202.0/testing/asserts.ts";
-import { RadixishTree } from "./radixish_tree.ts";
+import { RadixTree } from "./radix_tree.ts";
 import { PrefixIterator } from "./types.ts";
-import { KeyHopTree } from "./key_hop_tree.ts";
 import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
 import { SimpleKeyIterator } from "./simple_key_iterator.ts";
+import { randomPath } from "../../../test/utils.ts";
+import { concat, Path, prefixesOf } from "../../../../deps.ts";
 
-const MAX_PATH_LENGTH = 100;
 const MAX_PATH_SETS = 64;
 
-function generateRandomPath() {
-  const pathLength = Math.floor(Math.random() * MAX_PATH_LENGTH + 1);
-
-  const path = new Uint8Array(pathLength);
-
-  for (let i = 0; i < pathLength; i++) {
-    const byte = Math.floor(Math.random() * (255));
-
-    path.set([byte], i);
-  }
-
-  return path;
-}
-
-function prefixesFromPath(path: Uint8Array) {
-  const prefixes: Uint8Array[] = [];
-
-  for (let i = 1; i < path.byteLength; i++) {
-    if (Math.random() > 0.5) {
-      const prefix = path.subarray(0, i);
-
-      prefixes.push(prefix);
-    }
-  }
-
-  return prefixes;
-}
-
-type PathSet = Uint8Array[];
+type PathSet = Path[];
 
 function getRandomPathAndPrefixes() {
-  const path = generateRandomPath();
-  const prefixes = prefixesFromPath(path);
-  return [...prefixes, path];
+  const path = randomPath();
+  return prefixesOf(path);
 }
 
 function getPaths() {
@@ -64,28 +35,13 @@ type PrefixIteratorScenario = {
   >;
 };
 
-const radixishTreeScenario: PrefixIteratorScenario = {
-  name: "Radixish tree",
+const radixTreeScenario: PrefixIteratorScenario = {
+  name: "Radix tree",
   makeScenario: () => {
     return Promise.resolve({
-      iterator: new RadixishTree<Uint8Array>(),
+      iterator: new RadixTree<Uint8Array>(),
       dispose: () => Promise.resolve(),
     });
-  },
-};
-
-const keyhopTreeScenario: PrefixIteratorScenario = {
-  name: "KeyHop tree",
-  makeScenario: async () => {
-    const kv = await Deno.openKv();
-    const kvDriver = new KvDriverDeno(kv);
-    const keyhopTree = new KeyHopTree<Uint8Array>(kvDriver);
-    await kvDriver.clear();
-
-    return {
-      iterator: keyhopTree,
-      dispose: () => Promise.resolve(kv.close()),
-    };
   },
 };
 
@@ -107,9 +63,8 @@ const simpleKeyIteratorScenario: PrefixIteratorScenario = {
 };
 
 const scenarios = [
-  radixishTreeScenario,
+  radixTreeScenario,
   simpleKeyIteratorScenario,
-  keyhopTreeScenario,
 ];
 
 Deno.test("Prefix Iterator", async (test) => {
@@ -126,15 +81,16 @@ Deno.test("Prefix Iterator", async (test) => {
           // Get a random path
           const idx = Math.floor(Math.random() * (remaining.size - 1));
           const remainingArr = Array.from(remaining);
-          const itemToInsert = remainingArr[idx];
+          const pathToInsert = remainingArr[idx];
+          const valueToInsert = concat(...pathToInsert);
 
-          await iterator.insert(itemToInsert, itemToInsert);
+          await iterator.insert(pathToInsert, valueToInsert);
 
           if (Math.random() > 0.75) {
-            await iterator.insert(itemToInsert, itemToInsert);
+            await iterator.insert(pathToInsert, valueToInsert);
           }
 
-          remaining.delete(itemToInsert);
+          remaining.delete(pathToInsert);
         }
 
         // Find a random index in the pathset length that is not zero or the path set length.
@@ -145,14 +101,16 @@ Deno.test("Prefix Iterator", async (test) => {
         const expectedPrefixes = pathSet.slice(0, splitPoint);
         const expectedPrefixedBy = pathSet.slice(splitPoint + 1);
 
-        const actualPrefixes: Uint8Array[] = [];
+        const actualPrefixes: Path[] = [];
+
+        const pathToTest = pathSet[splitPoint];
 
         for await (
-          const [key, value] of iterator.prefixesOf(pathSet[splitPoint])
+          const [path, value] of iterator.prefixesOf(pathToTest)
         ) {
-          assertEquals(key, value);
+          assertEquals(concat(...path), value);
 
-          actualPrefixes.push(key);
+          actualPrefixes.push(path);
         }
 
         assertEquals(actualPrefixes, expectedPrefixes);
@@ -161,11 +119,11 @@ Deno.test("Prefix Iterator", async (test) => {
         const actualPrefixedBy = [];
 
         for await (
-          const [key, value] of iterator.prefixedBy(pathSet[splitPoint])
+          const [path, value] of iterator.prefixedBy(pathToTest)
         ) {
-          assertEquals(key, value);
+          assertEquals(concat(...path), value);
 
-          actualPrefixedBy.push(key);
+          actualPrefixedBy.push(path);
         }
 
         assertEquals(actualPrefixedBy, expectedPrefixedBy);
@@ -184,14 +142,13 @@ Deno.test("Prefix Iterator", async (test) => {
           }
         }
 
-        const actualPrefixesAfterRemoval: Uint8Array[] = [];
+        const actualPrefixesAfterRemoval: Path[] = [];
 
         for await (
-          const [key, value] of iterator.prefixesOf(pathSet[splitPoint])
+          const [path, value] of iterator.prefixesOf(pathToTest)
         ) {
-          assertEquals(key, value);
-
-          actualPrefixesAfterRemoval.push(key);
+          assertEquals(concat(...path), value);
+          actualPrefixesAfterRemoval.push(path);
         }
 
         assertEquals(
@@ -203,11 +160,11 @@ Deno.test("Prefix Iterator", async (test) => {
         const actualPrefixedByAfterRemoval = [];
 
         for await (
-          const [key, value] of iterator.prefixedBy(pathSet[splitPoint])
+          const [path, value] of iterator.prefixedBy(pathSet[splitPoint])
         ) {
-          assertEquals(key, value);
+          assertEquals(concat(...path), value);
 
-          actualPrefixedByAfterRemoval.push(key);
+          actualPrefixedByAfterRemoval.push(path);
         }
 
         assertEquals(

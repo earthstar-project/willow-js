@@ -3,7 +3,8 @@ export type KeyPart =
   | string
   | number
   | bigint
-  | boolean;
+  | boolean
+  | symbol;
 
 export type Key = KeyPart[];
 
@@ -18,9 +19,8 @@ export interface KvDriver {
   set(key: Key, value: unknown): Promise<void>;
   delete(key: Key): Promise<void>;
   list<ValueType>(
-    range: { start: Key; end: Key },
+    selector: { start: Key; end: Key } | { prefix: Key },
     opts?: {
-      prefix?: Key;
       reverse?: boolean;
       limit?: number;
       batchSize?: number;

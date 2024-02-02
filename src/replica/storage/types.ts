@@ -1,4 +1,4 @@
-import { Entry } from "../../entries/types.ts";
+import { Entry } from "../../../deps.ts";
 import { ValidationError } from "../../errors.ts";
 import { Payload } from "../types.ts";
 
@@ -55,7 +55,7 @@ export interface EntryDriver<
 
 /**  */
 export interface PayloadDriver<PayloadDigest> {
-  /** Returns an payload for a given format and hash.*/
+  /** Returns a payload for a given format and hash.*/
   get(
     payloadHash: PayloadDigest,
     opts?: {
@@ -69,7 +69,7 @@ export interface PayloadDriver<PayloadDigest> {
   ): Promise<
     {
       hash: PayloadDigest;
-      length: number;
+      length: bigint;
       /** Commit the staged attachment to storage. */
       commit: () => Promise<Payload>;
       /** Reject the staged attachment, erasing it. */

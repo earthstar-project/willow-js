@@ -1,20 +1,21 @@
-import { Products } from "../../deps.ts";
-import { Entry } from "../entries/types.ts";
+import {
+  EncodingScheme,
+  Entry,
+  Path,
+  PathScheme,
+  SuccessorFn,
+  TotalOrder,
+} from "../../deps.ts";
 import { EntryDriver, PayloadDriver } from "./storage/types.ts";
 
-export type PathLengthScheme = EncodingScheme<number> & {
-  maxLength: number;
+export type NamespaceScheme<NamespaceId> = EncodingScheme<NamespaceId> & {
+  isEqual: EqualityFn<NamespaceId>;
 };
 
-export type NamespaceScheme<NamespaceKey> = EncodingScheme<NamespaceKey> & {
-  isEqual: EqualityFn<NamespaceKey>;
-};
-
-export type SubspaceScheme<SubspaceKey> = EncodingScheme<SubspaceKey> & {
-  isEqual: EqualityFn<SubspaceKey>;
-  order: Products.TotalOrder<SubspaceKey>;
-  successor: Products.SuccessorFn<SubspaceKey>;
-  minimalSubspaceKey: SubspaceKey;
+export type SubspaceScheme<SubspaceId> = EncodingScheme<SubspaceId> & {
+  successor: SuccessorFn<SubspaceId>;
+  order: TotalOrder<SubspaceId>;
+  minimalSubspaceKey: SubspaceId;
 };
 
 export type PayloadScheme<PayloadDigest> = EncodingScheme<PayloadDigest> & {
@@ -29,11 +30,13 @@ export type AuthorisationScheme<
   AuthorisationOpts,
   AuthorisationToken,
 > = {
+  /** Produce an authorisation token from an entry */
   authorise(
     entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
     opts: AuthorisationOpts,
   ): Promise<AuthorisationToken>;
-  isAuthorised: (
+  /** Verify if an entry is authorised to be written */
+  isAuthorisedWrite: (
     entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
     token: AuthorisationToken,
   ) => Promise<boolean>;
@@ -65,12 +68,10 @@ export interface ProtocolParameters<
   AuthorisationToken,
   Fingerprint,
 > {
-  pathLengthScheme: PathLengthScheme;
+  pathScheme: PathScheme;
 
-  // Namespace encoding scheme
   namespaceScheme: NamespaceScheme<NamespaceKey>;
 
-  // Learn what
   subspaceScheme: SubspaceScheme<SubspaceKey>;
 
   // Learn about payloads and producing them from bytes
@@ -122,68 +123,6 @@ export type ReplicaOpts<
   payloadDriver?: PayloadDriver<PayloadDigest>;
 };
 
-export type QueryOrder =
-  /** By path, then timestamp, then subspace */
-  | "path"
-  /** By timestamp, then subspace, then path */
-  | "timestamp"
-  /** By subspace, then path, then timestamp */
-  | "subspace";
-
-export type OptionalBounds<ValueType> = {
-  /** The value to start returning results from, inclusive. Starts from the first entry in the replica if left undefined. */
-  lowerBound?: ValueType;
-  /** The value to stop returning results at, exclusive. Stops after the last entry in the replica if  undefined. */
-  upperBound: ValueType;
-} | {
-  /** The value to start returning results from, inclusive. Starts from the first entry in the replica if left undefined. */
-  lowerBound: ValueType;
-  /** The value to stop returning results at, exclusive. Stops after the last entry in the replica if  undefined. */
-  upperBound?: ValueType;
-};
-
-export interface Query<SubspaceKey> {
-  order: QueryOrder;
-  subspace?: OptionalBounds<SubspaceKey>;
-  path?: OptionalBounds<Uint8Array>;
-  time?: OptionalBounds<bigint>;
-  /** The maximum number of results to return. */
-  limit?: number;
-  /** Whether the results should be returned in reverse order. */
-  reverse?: boolean;
-}
-
-export type EncodingScheme<ValueType> = {
-  /** A function to encode a given `ValueType`. */
-  encode(value: ValueType): Uint8Array;
-  /** A function to decode a given `ValueType` */
-  decode(encoded: Uint8Array): ValueType;
-  /** A function which returns the bytelength for a given `ValueType` when encoded. */
-  encodedLength(value: ValueType): number;
-};
-
-export type KeypairEncodingScheme<PublicKey, Signature> = {
-  /** The encoding scheme for a key pair's public key type. */
-  publicKey: EncodingScheme<PublicKey>;
-  /** The encoding scheme for a key pair's signature type. */
-  signature: EncodingScheme<Signature>;
-};
-
-/** A scheme for signing and verifying data using key pairs. */
-export type SignatureScheme<PublicKey, SecretKey, Signature> = {
-  sign: (secretKey: SecretKey, bytestring: Uint8Array) => Promise<Signature>;
-  verify: (
-    publicKey: PublicKey,
-    signature: Signature,
-    bytestring: Uint8Array,
-  ) => Promise<boolean>;
-};
-
-export type KeypairScheme<PublicKey, SecretKey, Signature> = {
-  signatureScheme: SignatureScheme<PublicKey, SecretKey, Signature>;
-  encodingScheme: KeypairEncodingScheme<PublicKey, Signature>;
-};
-
 export type EqualityFn<ValueType> = (a: ValueType, b: ValueType) => boolean;
 
 // Events
@@ -215,6 +154,14 @@ export type IngestEventSuccess<
   externalSourceId?: string;
 };
 
+export type QueryOrder =
+  /** By path, then timestamp, then subspace */
+  | "path"
+  /** By timestamp, then subspace, then path */
+  | "timestamp"
+  /** By subspace, then path, then timestamp */
+  | "subspace";
+
 export type IngestEvent<
   NamespacePublicKey,
   SubspacePublicKey,
@@ -239,7 +186,7 @@ export type Payload = {
 };
 
 export type EntryInput<SubspacePublicKey> = {
-  path: Uint8Array;
+  path: Path;
   subspace: SubspacePublicKey;
   payload: Uint8Array | ReadableStream<Uint8Array>;
   /** The desired timestamp for the new entry. If left undefined, uses the current time, OR if another entry exists at the same path will be that entry's timestamp + 1. */

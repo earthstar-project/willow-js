@@ -1,4 +1,4 @@
-import { Entry } from "../entries/types.ts";
+import { Entry } from "../../deps.ts";
 import { Payload } from "./types.ts";
 
 export class EntryPayloadSetEvent<

@@ -1,4 +1,5 @@
-export * as Products from "https://deno.land/x/willow_3d_products@0.1.0/mod.ts";
+export * from "https://deno.land/x/willow_utils@0.2.0/mod.ts";
+
 export { deferred } from "https://deno.land/std@0.202.0/async/deferred.ts";
 export { concat } from "https://deno.land/std@0.202.0/bytes/concat.ts";
 export { equals as equalsBytes } from "https://deno.land/std@0.202.0/bytes/equals.ts";

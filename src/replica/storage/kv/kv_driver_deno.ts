@@ -26,24 +26,14 @@ export class KvDriverDeno implements KvDriver {
   }
 
   async *list<ValueType>(
-    range: { start: Key; end: Key },
+    selector: { start: Key; end: Key } | { prefix: Key },
     opts?: {
-      prefix?: Key;
       reverse?: boolean;
       limit?: number;
       batchSize?: number;
     },
   ): AsyncIterable<{ key: Key; value: ValueType }> {
-    const rangeArg = opts?.prefix
-      ? {
-        start: [...opts.prefix, ...range.start],
-        end: [...opts.prefix, ...range.end],
-      }
-      : range;
-
-    const iter = this.kv.list<ValueType>({
-      ...rangeArg,
-    }, {
+    const iter = this.kv.list<ValueType>(selector, {
       reverse: opts?.reverse,
       limit: opts?.limit,
       batchSize: opts?.batchSize,
