@@ -11,6 +11,7 @@ import {
   PayloadScheme,
   SubspaceScheme,
 } from "../../types.ts";
+import { PrefixedDriver } from "../kv/prefixed_driver.ts";
 import { KvDriver } from "../kv/types.ts";
 import { SimpleKeyIterator } from "../prefix_iterators/simple_key_iterator.ts";
 import { PrefixIterator } from "../prefix_iterators/types.ts";
@@ -81,19 +82,27 @@ export class EntryDriverKvStore<
     this.fingerprintScheme = opts.fingerprintScheme;
 
     this.kvDriver = opts.kvDriver;
-    this.prefixIterator = new SimpleKeyIterator<Uint8Array>(this.kvDriver);
+
+    const prefixedKvDriver = new PrefixedDriver(["prefix"], this.kvDriver);
+
+    this.prefixIterator = new SimpleKeyIterator<Uint8Array>(prefixedKvDriver);
   }
 
   makeStorage(
     namespace: NamespaceKey,
   ): Storage3d<NamespaceKey, SubspaceKey, PayloadDigest, Fingerprint> {
+    const prefixedStorageDriver = new PrefixedDriver(
+      ["entries"],
+      this.kvDriver,
+    );
+
     return new TripleStorage({
       namespace,
       createSummarisableStorage: (
         monoid: LiftingMonoid<Uint8Array, Fingerprint>,
       ) => {
         return new Skiplist({
-          kv: this.kvDriver,
+          kv: prefixedStorageDriver,
           monoid,
           compare: orderBytes,
         });
