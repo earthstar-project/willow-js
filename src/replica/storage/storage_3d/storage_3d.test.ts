@@ -32,6 +32,7 @@ import { MonoidRbTree } from "../summarisable_storage/monoid_rbtree.ts";
 import { TripleStorage } from "./triple_storage.ts";
 import { Storage3d } from "./types.ts";
 import { assertEquals } from "https://deno.land/std@0.202.0/assert/assert_equals.ts";
+import { encodePathWithSeparators } from "../../util.ts";
 
 export type Storage3dScenario<
   NamespaceKey,
@@ -173,7 +174,7 @@ Deno.test("Storage3d.summarise", async () => {
     ) {
       const newFingerprint = [...a];
 
-      // Remove dupleicates
+      // Remove duplicates
 
       for (const element of b) {
         const existing = newFingerprint.find(
@@ -182,10 +183,10 @@ Deno.test("Storage3d.summarise", async () => {
 
             if (subspaceA !== subspaceB) return false;
             if (orderPath(pathA, pathB) !== 0) return false;
-            if (orderTimestamp(timestampA, timestampB) !== 0) {
+            if (timestampA !== timestampB) {
               return false;
             }
-            if (orderTimestamp(lengthA, lengthB) !== 0) {
+            if (lengthA !== lengthB) {
               return false;
             }
 
@@ -208,16 +209,16 @@ Deno.test("Storage3d.summarise", async () => {
         if (subspaceA > subspaceB) return 1;
         if (orderPath(pathA, pathB) === -1) return -1;
         if (orderPath(pathA, pathB) === 1) return 1;
-        if (orderTimestamp(timestampA, timestampB) === -1) {
+        if (timestampA < timestampB) {
           return -1;
         }
-        if (orderTimestamp(timestampA, timestampB) === 1) {
+        if (timestampA > timestampB) {
           return 1;
         }
-        if (orderTimestamp(lengthA, lengthB) === -1) {
+        if (lengthA < lengthB) {
           return -1;
         }
-        if (orderTimestamp(lengthA, lengthB) === 1) {
+        if (lengthA > lengthB) {
           return 1;
         }
 
@@ -459,12 +460,12 @@ Deno.test("Storage3d.summarise", async () => {
     entries.sort((a, b) => {
       const aKey = concat(
         new Uint8Array([a.subspaceId]),
-        ...a.path,
+        encodePathWithSeparators(a.path),
         bigintToBytes(a.timestamp),
       );
       const bKey = concat(
         new Uint8Array([b.subspaceId]),
-        ...b.path,
+        encodePathWithSeparators(b.path),
         bigintToBytes(b.timestamp),
       );
 
@@ -517,7 +518,10 @@ Deno.test("Storage3d.summarise", async () => {
       const actual = await storage.summarise(aoi);
       const expected = actualFingerprintMap.get(aoi)!;
 
-      assertEquals(actual.fingerprint, expected.fingerprint);
+      assertEquals(
+        actual.fingerprint,
+        expected.fingerprint,
+      );
       assertEquals(actual.size, expected.count);
 
       let actualPayloadSize = BigInt(0);
