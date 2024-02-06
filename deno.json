@@ -1,7 +1,7 @@
 {
   "tasks": {
-    "test": "deno test --unstable src",
-    "test-watch": "deno test --unstable src --watch",
+    "test": "deno test --unstable-kv src",
+    "test-watch": "deno test --unstable-kv src --watch",
     "bundle": "deno run --allow-all scripts/build_web_bundle.ts"
   },
   "lock": false,
