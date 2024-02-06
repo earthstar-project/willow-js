@@ -1,12 +1,21 @@
-import { Products } from "../../../../deps.ts";
-import { Entry } from "../../../entries/types.ts";
-import { bigintToBytes } from "../../../util/bytes.ts";
+import {
+  ANY_SUBSPACE,
+  AreaOfInterest,
+  bigintToBytes,
+  concat,
+  Entry,
+  isIncludedRange,
+  isPathPrefixed,
+  OPEN_END,
+  orderTimestamp,
+  Path,
+  PathScheme,
+  successorPrefix,
+} from "../../../../deps.ts";
 import {
   FingerprintScheme,
-  OptionalBounds,
-  PathLengthScheme,
   PayloadScheme,
-  Query,
+  QueryOrder,
   SubspaceScheme,
 } from "../../types.ts";
 import {
@@ -33,7 +42,7 @@ export type TripleStorageOpts<
   ) => SummarisableStorage<Uint8Array, Fingerprint>;
   subspaceScheme: SubspaceScheme<SubspaceKey>;
   payloadScheme: PayloadScheme<PayloadDigest>;
-  pathLengthScheme: PathLengthScheme;
+  pathScheme: PathScheme;
   fingerprintScheme: FingerprintScheme<
     NamespaceKey,
     SubspaceKey,
@@ -59,10 +68,9 @@ export class TripleStorage<
   private ptsStorage: SummarisableStorage<Uint8Array, Fingerprint>;
   private sptStorage: SummarisableStorage<Uint8Array, Fingerprint>;
   private tspStorage: SummarisableStorage<Uint8Array, Fingerprint>;
-
   private subspaceScheme: SubspaceScheme<SubspaceKey>;
   private payloadScheme: PayloadScheme<PayloadDigest>;
-  private pathLengthScheme: PathLengthScheme;
+  private pathScheme: PathScheme;
   private fingerprintScheme: FingerprintScheme<
     NamespaceKey,
     SubspaceKey,
@@ -88,7 +96,6 @@ export class TripleStorage<
       const values = decodeSummarisableStorageValue(
         value,
         this.payloadScheme,
-        this.pathLengthScheme,
       );
 
       // Decode the key.
@@ -96,20 +103,16 @@ export class TripleStorage<
         key,
         order,
         this.subspaceScheme,
-        values.pathLength,
+        values.encodedPathLength,
       );
 
       const entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest> = {
-        identifier: {
-          namespace: this.namespace,
-          path,
-          subspace,
-        },
-        record: {
-          timestamp,
-          hash: values.payloadHash,
-          length: values.payloadLength,
-        },
+        namespaceId: this.namespace,
+        subspaceId: subspace,
+        path,
+        timestamp,
+        payloadDigest: values.payloadHash,
+        payloadLength: values.payloadLength,
       };
 
       return opts.fingerprintScheme.fingerprintSingleton(entry);
@@ -133,34 +136,32 @@ export class TripleStorage<
 
     this.subspaceScheme = opts.subspaceScheme;
     this.payloadScheme = opts.payloadScheme;
-    this.pathLengthScheme = opts.pathLengthScheme;
+    this.pathScheme = opts.pathScheme;
 
     this.fingerprintScheme = opts.fingerprintScheme;
   }
 
   async get(
     subspace: SubspaceKey,
-    path: Uint8Array,
+    path: Path,
   ): Promise<
     {
       entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>;
       authTokenHash: PayloadDigest;
     } | undefined
   > {
-    const firstResult = this.entriesByQuery({
-      subspace: {
-        lowerBound: subspace,
-        upperBound: this.subspaceScheme.successor(subspace),
+    const firstResult = this.query({
+      area: {
+        includedSubspaceId: subspace,
+        pathPrefix: path,
+        timeRange: {
+          start: BigInt(0),
+          end: OPEN_END,
+        },
       },
-      path: {
-        lowerBound: path,
-        upperBound: Products.makeSuccessorPath(this.pathLengthScheme.maxLength)(
-          path,
-        ),
-      },
-      limit: 1,
-      order: "subspace",
-    });
+      maxCount: 1,
+      maxSize: BigInt(0),
+    }, "subspace");
 
     for await (const result of firstResult) {
       return result;
@@ -168,13 +169,13 @@ export class TripleStorage<
   }
 
   async insert(
-    { path, subspace, payloadHash, timestamp, length, authTokenHash }: {
-      path: Uint8Array;
+    { path, subspace, payloadDigest, timestamp, length, authTokenDigest }: {
+      path: Path;
       subspace: SubspaceKey;
-      payloadHash: PayloadDigest;
+      payloadDigest: PayloadDigest;
       timestamp: bigint;
       length: bigint;
-      authTokenHash: PayloadDigest;
+      authTokenDigest: PayloadDigest;
     },
   ): Promise<void> {
     const keys = encodeEntryKeys(
@@ -186,14 +187,15 @@ export class TripleStorage<
       },
     );
 
+    // console.log(keys.spt);
+
     const toStore = encodeSummarisableStorageValue(
       {
-        payloadHash,
+        payloadDigest,
         payloadLength: length,
-        authTokenHash: authTokenHash,
+        authTokenDigest: authTokenDigest,
         payloadScheme: this.payloadScheme,
-        pathLength: path.byteLength,
-        pathLengthEncoding: this.pathLengthScheme,
+        encodedPathLength: keys.encodedPathLength,
       },
     );
 
@@ -209,9 +211,9 @@ export class TripleStorage<
   ): Promise<boolean> {
     const keys = encodeEntryKeys(
       {
-        path: entry.identifier.path,
-        timestamp: entry.record.timestamp,
-        subspace: entry.identifier.subspace,
+        path: entry.path,
+        timestamp: entry.timestamp,
+        subspace: entry.subspaceId,
         subspaceEncoding: this.subspaceScheme,
       },
     );
@@ -226,234 +228,160 @@ export class TripleStorage<
   }
 
   async summarise(
-    product: Products.CanonicProduct<SubspaceKey>,
-    countLimits?: { subspace?: number; path?: number; time?: number },
-    sizeLimits?: { subspace?: bigint; path?: bigint; time?: bigint },
+    areaOfInterest: AreaOfInterest<SubspaceKey>,
   ): Promise<{ fingerprint: Fingerprint; size: number }> {
-    const [subspaceDisjoint, pathDisjoint, timeDisjoint] = product;
-
-    // Get the empty product out the way.
-    if (
-      subspaceDisjoint.length === 0 && pathDisjoint.length === 0 &&
-      timeDisjoint.length === 0
-    ) {
-      return {
-        fingerprint: this.fingerprintScheme.neutral,
-        size: 0,
-      };
-    }
-
     let fingerprint = this.fingerprintScheme.neutral;
+    /** The size of the fingerprint. */
     let size = 0;
 
-    // These keep track of how much of the count and size limits we've used.
-    let sclUsed = 0;
-    let sslUsed = BigInt(0);
-    let pclUsed = 0;
-    let pslUsed = BigInt(0);
-    let tclUsed = 0;
-    let tslUsed = BigInt(0);
+    let countUsed = 0;
+    let sizeUsed = BigInt(0);
 
-    let limitsExceeded = false;
-
-    // Go backwards through each range of the subspace disjoint,
-    // As we need to return greatest items first.
-    for (
-      let subspaceDjIdx = subspaceDisjoint.length - 1;
-      subspaceDjIdx >= 0;
-      subspaceDjIdx--
-    ) {
-      const subspaceRange = subspaceDisjoint[subspaceDjIdx];
-
-      // Iterate through all the entries of each range.
-      const subspaceEntriesLowerBound = subspaceRange.start;
-      const subspaceEntriesUpperBound = subspaceRange.kind === "open"
+    // Iterate through all the entries of each range.
+    const subspaceEntriesLowerBound =
+      areaOfInterest.area.includedSubspaceId === ANY_SUBSPACE
         ? undefined
-        : subspaceRange.kind === "closed_exclusive"
-        ? subspaceRange.end
-        : this.subspaceScheme.successor(subspaceRange.end);
+        : areaOfInterest.area.includedSubspaceId;
+    const subspaceEntriesUpperBound =
+      areaOfInterest.area.includedSubspaceId === ANY_SUBSPACE
+        ? undefined
+        : this.subspaceScheme.successor(areaOfInterest.area.includedSubspaceId);
 
-      const subspaceEntries = this.sptStorage.entries(
-        this.subspaceScheme.encode(subspaceEntriesLowerBound),
-        subspaceEntriesUpperBound
-          ? this.subspaceScheme.encode(subspaceEntriesUpperBound)
-          : undefined,
-        {
-          reverse: true,
-        },
+    const subspaceEntries = this.sptStorage.entries(
+      subspaceEntriesLowerBound
+        ? this.subspaceScheme.encode(subspaceEntriesLowerBound)
+        : undefined,
+      subspaceEntriesUpperBound
+        ? this.subspaceScheme.encode(subspaceEntriesUpperBound)
+        : undefined,
+      {
+        reverse: true,
+      },
+    );
+
+    /** The least excluded item we've run into.
+     * This is going to be the upper bound of a summarise op we run when we detect a contiguous range of included entries.
+     */
+    let leastExcluded = this.subspaceScheme.encode(
+      subspaceEntriesUpperBound
+        ? subspaceEntriesUpperBound
+        : this.subspaceScheme.minimalSubspaceKey,
+    );
+
+    /** The least included item we've run into.
+     * This is going to be the lower bound of a summarise op we run when we detect a contiguous range of included entries.
+     */
+    let leastIncluded: Uint8Array | undefined;
+
+    /** Run this when we detect a contiguous range of included entries. */
+    const updateFingerprint = async (start: Uint8Array) => {
+      const { fingerprint: includedFp, size: includedSize } = await this
+        .sptStorage.summarise(
+          start,
+          leastExcluded,
+        );
+
+      fingerprint = this.fingerprintScheme.fingerprintCombine(
+        fingerprint,
+        includedFp,
       );
 
-      /** The least excluded item we've run into.
-       * This is going to be the upper bound of a summarise op we run when we detect a contiguous range of included entries.
-       */
-      let leastExcluded = this.subspaceScheme.encode(
-        subspaceEntriesUpperBound !== undefined
-          ? subspaceEntriesUpperBound
-          : this.subspaceScheme.minimalSubspaceKey,
+      size += includedSize;
+
+      // Prevent this from running again until we run into another included entry.
+      leastIncluded = undefined;
+    };
+
+    for await (const subspaceEntry of subspaceEntries) {
+      // Decode the key.
+      const values = decodeSummarisableStorageValue(
+        subspaceEntry.value,
+        this.payloadScheme,
       );
 
-      /** The least included item we've run into.
-       * This is going to be the lower bound of a summarise op we run when we detect a contiguous range of included entries.
-       */
-      let leastIncluded: Uint8Array | undefined;
+      // Decode the key.
+      const { timestamp, path } = decodeEntryKey(
+        subspaceEntry.key,
+        "subspace",
+        this.subspaceScheme,
+        values.encodedPathLength,
+      );
 
-      /** Run this when we detect a contiguous range of included entries. */
-      const updateFingerprint = async (start: Uint8Array) => {
-        const { fingerprint: includedFp, size: includedSize } = await this
-          .sptStorage.summarise(
-            start,
-            leastExcluded,
-          );
+      // Check that decoded time and subspace are included by both other dimensions
+      let pathIncluded = false;
 
-        fingerprint = this.fingerprintScheme.fingerprintCombine(
-          fingerprint,
-          includedFp,
-        );
-
-        size += includedSize;
-
-        // Prevent this from running again until we run into another included entry.
-        leastIncluded = undefined;
-      };
-
-      for await (const subspaceEntry of subspaceEntries) {
-        // Decode the key.
-        const values = decodeSummarisableStorageValue(
-          subspaceEntry.value,
-          this.payloadScheme,
-          this.pathLengthScheme,
-        );
-
-        // Decode the key.
-        const { timestamp, path } = decodeEntryKey(
-          subspaceEntry.key,
-          "subspace",
-          this.subspaceScheme,
-          values.pathLength,
-        );
-
-        // Check that decoded time and subspace are included by both other dimensions
-        let pathIncluded = false;
-
-        for (
-          let pathDisjointIdx = pathDisjoint.length - 1;
-          pathDisjointIdx >= 0;
-          pathDisjointIdx--
-        ) {
-          if (
-            Products.rangeIncludesValue(
-              { order: Products.orderPaths },
-              pathDisjoint[pathDisjointIdx],
-              path,
-            )
-          ) {
-            pathIncluded = true;
-            // If we're included in one, we don't need to check the others.
-            break;
-          }
-        }
-
-        // If it's not included, and we ran into an included item earlier,
-        // that indicates the end of a contiguous range.
-        // Recalculate the fingerprint!
-        if (!pathIncluded) {
-          if (leastIncluded) {
-            await updateFingerprint(leastIncluded);
-          }
-
-          // This entry is now the least excluded entry we've run into.
-          leastExcluded = subspaceEntry.key;
-          continue;
-        }
-
-        let timeIncluded = false;
-
-        for (
-          let timeDisjointIdx = timeDisjoint.length - 1;
-          timeDisjointIdx >= 0;
-          timeDisjointIdx--
-        ) {
-          if (
-            Products.rangeIncludesValue(
-              { order: Products.orderTimestamps },
-              timeDisjoint[timeDisjointIdx],
-              timestamp,
-            )
-          ) {
-            timeIncluded = true;
-            // If we're included in one, we don't need to check the others.
-            break;
-          }
-        }
-
-        // If it's not included, and we ran into an included item earlier,
-        // that indicates the end of a contiguous range.
-        // Recalculate the fingerprint!
-        if (!timeIncluded) {
-          if (leastIncluded) {
-            await updateFingerprint(leastIncluded);
-          }
-
-          // This entry is now the least excluded entry we've run into.
-          leastExcluded = subspaceEntry.key;
-          continue;
-        }
-
-        // Now we know this entry is included.
-
-        // Check all dimension count and size limits.
-        // If any limits have been exceeded, we have to stop here.
-
-        // Boring.
-
-        const nextSclUsed = sclUsed + 1;
-        const nextPclUsed = pclUsed + 1;
-        const nextTclUsed = tclUsed + 1;
-
-        const nextSslUsed = sslUsed + values.payloadLength;
-        const nextPslUsed = pslUsed + values.payloadLength;
-        const nextTslUsed = tslUsed + values.payloadLength;
-
-        const sclExceeded = countLimits?.subspace &&
-          nextSclUsed > countLimits.subspace;
-        const pclExceeded = countLimits?.path && nextPclUsed > countLimits.path;
-        const tclExceeded = countLimits?.time && nextTclUsed > countLimits.time;
-
-        const sslExceeded = sizeLimits?.subspace &&
-          nextSslUsed > sizeLimits.subspace;
-        const pslExceeded = sizeLimits?.path && nextPslUsed > sizeLimits.path;
-        const tslExceeded = sizeLimits?.time && nextTslUsed > sizeLimits.time;
-
-        if (
-          sclExceeded || pclExceeded || tclExceeded || sslExceeded ||
-          pslExceeded || tslExceeded
-        ) {
-          limitsExceeded = true;
-          break;
-        }
-
-        sclUsed = nextSclUsed;
-        pclUsed = nextPclUsed;
-        tclUsed = nextTclUsed;
-
-        sslUsed = nextSslUsed;
-        pslUsed = nextPslUsed;
-        tslUsed = nextTslUsed;
-
-        // This entry is part of a contiguous range of included entries,
-        // and it's the least included key we've encountered so far.
-        leastIncluded = subspaceEntry.key;
+      if (isPathPrefixed(areaOfInterest.area.pathPrefix, path)) {
+        pathIncluded = true;
       }
 
-      // Calculate a range that was left over, if any.
-      if (leastIncluded) {
-        await updateFingerprint(leastIncluded);
+      // If it's not included, and we ran into an included item earlier,
+      // that indicates the end of a contiguous range.
+      // Recalculate the fingerprint!
+      if (!pathIncluded) {
+        if (leastIncluded) {
+          await updateFingerprint(leastIncluded);
+        }
+
+        // This entry is now the least excluded entry we've run into.
+        leastExcluded = subspaceEntry.key;
+        continue;
       }
 
-      // If the limits have been exceeded, we don't need to go through all the other ranges.
-      if (limitsExceeded) {
+      let timeIncluded = false;
+
+      if (
+        isIncludedRange(
+          orderTimestamp,
+          areaOfInterest.area.timeRange,
+          timestamp,
+        )
+      ) {
+        timeIncluded = true;
+      }
+
+      // If it's not included, and we ran into an included item earlier,
+      // that indicates the end of a contiguous range.
+      // Recalculate the fingerprint!
+      if (!timeIncluded) {
+        if (leastIncluded) {
+          await updateFingerprint(leastIncluded);
+        }
+
+        // This entry is now the least excluded entry we've run into.
+        leastExcluded = subspaceEntry.key;
+        continue;
+      }
+
+      // Now we know this entry is included.
+
+      // Check all dimension count and size limits.
+      // If any limits have been exceeded, we have to stop here.
+
+      // Boring.
+
+      const nextCountUsed = countUsed + 1;
+      const nextSizeUsed = sizeUsed + values.payloadLength;
+
+      if (
+        (areaOfInterest.maxCount !== 0 &&
+          nextCountUsed > areaOfInterest.maxCount) ||
+        (areaOfInterest.maxSize !== BigInt(0) &&
+          nextSizeUsed > areaOfInterest.maxSize)
+      ) {
         break;
       }
+
+      countUsed = nextCountUsed;
+      sizeUsed = nextSizeUsed;
+
+      // This entry is part of a contiguous range of included entries,
+      // and it's the least included key we've encountered so far.
+      leastIncluded = subspaceEntry.key;
+    }
+
+    // Calculate a range that was left over, if any.
+    if (leastIncluded) {
+      await updateFingerprint(leastIncluded);
     }
 
     return {
@@ -462,238 +390,61 @@ export class TripleStorage<
     };
   }
 
-  async *entriesByProduct(
-    product: Products.CanonicProduct<SubspaceKey>,
-    countLimits?: { subspace?: number; path?: number; time?: number },
-    sizeLimits?: { subspace?: bigint; path?: bigint; time?: bigint },
+  async *query(
+    areaOfInterest: AreaOfInterest<SubspaceKey>,
+    order: QueryOrder,
+    reverse = false,
   ): AsyncIterable<{
     entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>;
     authTokenHash: PayloadDigest;
   }> {
-    const [subspaceDisjoint, pathDisjoint, timeDisjoint] = product;
-
-    // Get the empty product out the way.
-    if (
-      subspaceDisjoint.length === 0 && pathDisjoint.length === 0 &&
-      timeDisjoint.length === 0
-    ) {
-      return;
-    }
-
-    // These keep track of how much of the count and size limits we've used.
-    let sclUsed = 0;
-    let sslUsed = BigInt(0);
-    let pclUsed = 0;
-    let pslUsed = BigInt(0);
-    let tclUsed = 0;
-    let tslUsed = BigInt(0);
-
-    let limitsExceeded = false;
-
-    // Go backwards through each range of the subspace disjoint,
-    // As we need to return greatest items first.
-    for (
-      let subspaceDjIdx = subspaceDisjoint.length - 1;
-      subspaceDjIdx >= 0;
-      subspaceDjIdx--
-    ) {
-      const subspaceRange = subspaceDisjoint[subspaceDjIdx];
-
-      // Iterate through all the entries of each range.
-      const subspaceEntriesLowerBound = subspaceRange.start;
-      const subspaceEntriesUpperBound = subspaceRange.kind === "open"
-        ? undefined
-        : subspaceRange.kind === "closed_exclusive"
-        ? subspaceRange.end
-        : this.subspaceScheme.successor(subspaceRange.end);
-
-      const subspaceEntries = this.sptStorage.entries(
-        this.subspaceScheme.encode(subspaceEntriesLowerBound),
-        subspaceEntriesUpperBound
-          ? this.subspaceScheme.encode(subspaceEntriesUpperBound)
-          : undefined,
-        {
-          reverse: true,
-        },
-      );
-
-      for await (const subspaceEntry of subspaceEntries) {
-        // Decode the key.
-        const values = decodeSummarisableStorageValue(
-          subspaceEntry.value,
-          this.payloadScheme,
-          this.pathLengthScheme,
-        );
-
-        // Decode the key.
-        const { timestamp, path, subspace } = decodeEntryKey(
-          subspaceEntry.key,
-          "subspace",
-          this.subspaceScheme,
-          values.pathLength,
-        );
-
-        // Check that decoded time and subspace are included by both other dimensions
-        let pathIncluded = false;
-
-        for (
-          let pathDisjointIdx = pathDisjoint.length - 1;
-          pathDisjointIdx >= 0;
-          pathDisjointIdx--
-        ) {
-          if (
-            Products.rangeIncludesValue(
-              { order: Products.orderPaths },
-              pathDisjoint[pathDisjointIdx],
-              path,
-            )
-          ) {
-            pathIncluded = true;
-            // If we're included in one, we don't need to check the others.
-            break;
-          }
-        }
-
-        // Not included, continue to the next entry.
-        if (!pathIncluded) {
-          continue;
-        }
-
-        let timeIncluded = false;
-
-        for (
-          let timeDisjointIdx = timeDisjoint.length - 1;
-          timeDisjointIdx >= 0;
-          timeDisjointIdx--
-        ) {
-          if (
-            Products.rangeIncludesValue(
-              { order: Products.orderTimestamps },
-              timeDisjoint[timeDisjointIdx],
-              timestamp,
-            )
-          ) {
-            timeIncluded = true;
-            // If we're included in one, we don't need to check the others.
-            break;
-          }
-        }
-
-        // Not included, continue to the next entry.
-        if (!timeIncluded) {
-          continue;
-        }
-
-        // Now we know this entry is included.
-
-        // Check all dimension count and size limits.
-        // If any limits have been exceeded, we have to stop here.
-
-        // Boring.
-
-        const nextSclUsed = sclUsed + 1;
-        const nextPclUsed = pclUsed + 1;
-        const nextTclUsed = tclUsed + 1;
-
-        const nextSslUsed = sslUsed + values.payloadLength;
-        const nextPslUsed = pslUsed + values.payloadLength;
-        const nextTslUsed = tslUsed + values.payloadLength;
-
-        const sclExceeded = countLimits?.subspace &&
-          nextSclUsed > countLimits.subspace;
-        const pclExceeded = countLimits?.path && nextPclUsed > countLimits.path;
-        const tclExceeded = countLimits?.time && nextTclUsed > countLimits.time;
-
-        const sslExceeded = sizeLimits?.subspace &&
-          nextSslUsed > sizeLimits.subspace;
-        const pslExceeded = sizeLimits?.path && nextPslUsed > sizeLimits.path;
-        const tslExceeded = sizeLimits?.time && nextTslUsed > sizeLimits.time;
-
-        if (
-          sclExceeded || pclExceeded || tclExceeded || sslExceeded ||
-          pslExceeded || tslExceeded
-        ) {
-          limitsExceeded = true;
-          break;
-        }
-
-        sclUsed = nextSclUsed;
-        pclUsed = nextPclUsed;
-        tclUsed = nextTclUsed;
-
-        sslUsed = nextSslUsed;
-        pslUsed = nextPslUsed;
-        tslUsed = nextTslUsed;
-
-        yield {
-          entry: {
-            identifier: {
-              namespace: this.namespace,
-              subspace,
-              path,
-            },
-            record: {
-              hash: values.payloadHash,
-              length: values.payloadLength,
-              timestamp: timestamp,
-            },
-          },
-          authTokenHash: values.authTokenHash,
-        };
-      }
-
-      // If the limits have been exceeded, we don't need to go through all the other ranges.
-      if (limitsExceeded) {
-        break;
-      }
-    }
-  }
-
-  async *entriesByQuery(
-    query: Query<SubspaceKey>,
-  ): AsyncIterable<{
-    entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>;
-    authTokenHash: PayloadDigest;
-  }> {
-    const storage = query.order === "subspace"
+    const storage = order === "subspace"
       ? this.sptStorage
-      : query.order === "path"
+      : order === "path"
       ? this.ptsStorage
       : this.tspStorage;
 
-    if (!query.subspace && !query.path && !query.time) {
+    const includesAllTime = areaOfInterest.area.timeRange.start === BigInt(0) &&
+      areaOfInterest.area.timeRange.end === OPEN_END;
+    const includesAllPaths = areaOfInterest.area.pathPrefix.length === 0;
+    const includesAllSubspaces =
+      areaOfInterest.area.includedSubspaceId === ANY_SUBSPACE;
+
+    // Do the simplest thing if the area starts from the lowest value and is open ended in all dimensions.
+    if (
+      includesAllTime &&
+      includesAllPaths &&
+      includesAllSubspaces &&
+      areaOfInterest.maxSize === BigInt(0) &&
+      areaOfInterest.maxCount === 0
+    ) {
       const allEntriesOnOrder = storage.entries(undefined, undefined, {
-        limit: query.limit,
-        reverse: query.reverse,
+        limit: areaOfInterest.maxCount,
+        reverse: reverse,
       });
 
       for await (const { key, value } of allEntriesOnOrder) {
         const values = decodeSummarisableStorageValue(
           value,
           this.payloadScheme,
-          this.pathLengthScheme,
         );
 
         // Decode the key.
         const { subspace, timestamp, path } = decodeEntryKey(
           key,
-          query.order,
+          order,
           this.subspaceScheme,
-          values.pathLength,
+          values.encodedPathLength,
         );
 
         yield {
           entry: {
-            identifier: {
-              namespace: this.namespace,
-              subspace,
-              path,
-            },
-            record: {
-              hash: values.payloadHash,
-              length: values.payloadLength,
-              timestamp,
-            },
+            namespaceId: this.namespace,
+            subspaceId: subspace,
+            path,
+            payloadDigest: values.payloadHash,
+            payloadLength: values.payloadLength,
+            timestamp,
           },
           authTokenHash: values.authTokenHash,
         };
@@ -705,74 +456,80 @@ export class TripleStorage<
     let lowerBound: Uint8Array | undefined;
     let upperBound: Uint8Array | undefined;
 
-    const leastPath = new Uint8Array();
+    if (order === "path") {
+      lowerBound = concat(...areaOfInterest.area.pathPrefix);
 
-    if (query.order === "path" && query.path) {
-      lowerBound = query.path.lowerBound;
-      upperBound = query.path.upperBound;
-    } else if (query.order === "subspace" && query.subspace) {
-      lowerBound = query.subspace.lowerBound
-        ? this.subspaceScheme.encode(query.subspace.lowerBound)
-        : undefined;
-      upperBound = query.subspace.upperBound
-        ? this.subspaceScheme.encode(query.subspace.upperBound)
-        : undefined;
-    } else if (query.order === "timestamp" && query.time) {
-      lowerBound = query.time.lowerBound
-        ? bigintToBytes(query.time.lowerBound)
-        : undefined;
-      upperBound = query.time.upperBound
-        ? bigintToBytes(query.time.upperBound)
-        : undefined;
+      const maybeSuccessorPrefix = successorPrefix(
+        areaOfInterest.area.pathPrefix,
+      );
+
+      if (maybeSuccessorPrefix) {
+        upperBound = concat(...maybeSuccessorPrefix);
+      }
+    } else if (
+      order === "subspace" &&
+      areaOfInterest.area.includedSubspaceId !== ANY_SUBSPACE
+    ) {
+      lowerBound = this.subspaceScheme.encode(
+        areaOfInterest.area.includedSubspaceId,
+      );
+
+      const maybeSuccessorSubspace = this.subspaceScheme.successor(
+        areaOfInterest.area.includedSubspaceId,
+      );
+
+      if (maybeSuccessorSubspace) {
+        upperBound = this.subspaceScheme.encode(maybeSuccessorSubspace);
+      }
+    } else if (order === "timestamp") {
+      if (areaOfInterest.area.timeRange.start > BigInt(0)) {
+        lowerBound = bigintToBytes(areaOfInterest.area.timeRange.start);
+      }
+
+      if (areaOfInterest.area.timeRange.end !== OPEN_END) {
+        upperBound = bigintToBytes(areaOfInterest.area.timeRange.start);
+      }
     }
 
     let entriesYielded = 0;
+    let payloadBytesYielded = BigInt(0);
 
     const iterator = storage.entries(lowerBound, upperBound, {
-      reverse: query.reverse,
+      reverse,
     });
 
     for await (const { key, value } of iterator) {
       const values = decodeSummarisableStorageValue(
         value,
         this.payloadScheme,
-        this.pathLengthScheme,
       );
 
       // Decode the key.
       const { subspace, timestamp, path } = decodeEntryKey(
         key,
-        query.order,
+        order,
         this.subspaceScheme,
-        values.pathLength,
+        values.encodedPathLength,
       );
 
       if (
-        (query.order === "path" || query.order === "timestamp") &&
-        query.subspace
+        (order === "path" || order === "timestamp") &&
+        areaOfInterest.area.includedSubspaceId !== ANY_SUBSPACE
       ) {
-        const isIncludedInSubspaceRange = Products.rangeIncludesValue(
-          {
-            order: this.subspaceScheme.order,
-          },
-          rangeFromOptionalBounds(
-            query.subspace,
-            this.subspaceScheme.minimalSubspaceKey,
-          ),
+        const isSubspace = this.subspaceScheme.order(
           subspace,
+          areaOfInterest.area.includedSubspaceId,
         );
 
-        if (!isIncludedInSubspaceRange) {
+        if (!isSubspace) {
           continue;
         }
       }
 
-      if (
-        (query.order === "path" || query.order === "subspace") && query.time
-      ) {
-        const isIncluded = Products.rangeIncludesValue(
-          { order: Products.orderTimestamps },
-          rangeFromOptionalBounds(query.time, BigInt(0)),
+      if ((order === "path" || order === "subspace") && !includesAllTime) {
+        const isIncluded = isIncludedRange(
+          orderTimestamp,
+          areaOfInterest.area.timeRange,
           timestamp,
         );
 
@@ -782,67 +539,43 @@ export class TripleStorage<
       }
 
       if (
-        (query.order === "subspace" || query.order === "timestamp") &&
-        query.path
+        (order === "subspace" || order === "timestamp") && !includesAllPaths
       ) {
-        const isIncludedInPathRange = Products.rangeIncludesValue(
-          { order: Products.orderPaths },
-          rangeFromOptionalBounds(query.path, leastPath),
-          path,
-        );
+        const isIncluded = isPathPrefixed(areaOfInterest.area.pathPrefix, path);
 
-        if (!isIncludedInPathRange) {
+        if (!isIncluded) {
           continue;
         }
       }
 
       entriesYielded += 1;
+      payloadBytesYielded += values.payloadLength;
+
+      if (
+        areaOfInterest.maxSize !== BigInt(0) &&
+        payloadBytesYielded >= areaOfInterest.maxSize
+      ) {
+        break;
+      }
 
       yield {
         entry: {
-          identifier: {
-            namespace: this.namespace,
-            subspace,
-            path,
-          },
-          record: {
-            hash: values.payloadHash,
-            length: values.payloadLength,
-            timestamp,
-          },
+          namespaceId: this.namespace,
+          subspaceId: subspace,
+          path,
+          payloadDigest: values.payloadHash,
+          payloadLength: values.payloadLength,
+          timestamp,
         },
         authTokenHash: values.authTokenHash,
       };
 
-      if (query.limit && entriesYielded === query.limit) {
+      if (
+        areaOfInterest.maxCount !== 0 &&
+        entriesYielded >= areaOfInterest.maxCount
+      ) {
         break;
       }
     }
   }
-}
-
-function rangeFromOptionalBounds<ValueType>(
-  bounds: OptionalBounds<ValueType>,
-  leastValue: ValueType,
-): Products.Range<ValueType> {
-  if (bounds.lowerBound && !bounds.upperBound) {
-    return {
-      kind: "open",
-      start: bounds.lowerBound,
-    };
-  }
-
-  if (bounds.upperBound && !bounds.lowerBound) {
-    return {
-      kind: "closed_exclusive",
-      start: leastValue,
-      end: bounds.upperBound,
-    };
-  }
-
-  return {
-    kind: "closed_exclusive",
-    start: bounds.lowerBound!,
-    end: bounds.upperBound!,
-  };
 }

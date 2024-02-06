@@ -5,8 +5,9 @@
     "\/Users\/gwil\/Projects\/willow-js\/debug"
   ],
   "co.gwil.deno.config.enableLinting" : "true",
-  "co.gwil.deno.config.enableUnstable" : "true",
+  "co.gwil.deno.config.enableUnstable" : true,
   "deno.disablePaths" : [
     "dist"
-  ]
+  ],
+  "deno.unstable" : true
 }

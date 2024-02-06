@@ -2,7 +2,6 @@ import {
   assert,
   assertEquals,
 } from "https://deno.land/std@0.177.0/testing/asserts.ts";
-import { compareBytes } from "../util/bytes.ts";
 import { Replica } from "./replica.ts";
 import { crypto } from "https://deno.land/std@0.188.0/crypto/crypto.ts";
 import { encodeEntryKeys, encodeSummarisableStorageValue } from "./util.ts";
@@ -10,11 +9,12 @@ import {
   testSchemeAuthorisation,
   testSchemeFingerprint,
   testSchemeNamespace,
-  testSchemePathLength,
+  testSchemePath,
   testSchemePayload,
   testSchemeSubspace,
 } from "../test/test_schemes.ts";
 import { makeSubspaceKeypair } from "../test/crypto.ts";
+import { fullArea, orderBytes, orderPath } from "../../deps.ts";
 
 class TestReplica extends Replica<
   Uint8Array,
@@ -30,7 +30,7 @@ class TestReplica extends Replica<
       protocolParameters: {
         namespaceScheme: testSchemeNamespace,
         subspaceScheme: testSchemeSubspace,
-        pathLengthScheme: testSchemePathLength,
+        pathScheme: testSchemePath,
         payloadScheme: testSchemePayload,
         authorisationScheme: testSchemeAuthorisation,
         fingerprintScheme: testSchemeFingerprint,
@@ -64,7 +64,7 @@ Deno.test("Replica.set", async (test) => {
     // Returns an error and does not ingest payload if the entry is invalid
     const badKeypairRes = await replica.set(
       {
-        path: new Uint8Array([1, 2, 3, 4]),
+        path: [new Uint8Array([1, 2, 3, 4])],
         payload: new Uint8Array([1, 1, 1, 1]),
         subspace: authorKeypair.subspace,
       },
@@ -76,7 +76,13 @@ Deno.test("Replica.set", async (test) => {
 
     const entries = [];
 
-    for await (const entry of replica.query({ order: "path" })) {
+    for await (
+      const entry of replica.query({
+        area: fullArea(),
+        maxCount: 0,
+        maxSize: BigInt(0),
+      }, "subspace")
+    ) {
       entries.push(entry);
     }
 
@@ -88,7 +94,7 @@ Deno.test("Replica.set", async (test) => {
 
     const goodKeypairRes = await replica.set(
       {
-        path: new Uint8Array([1, 2, 3, 4]),
+        path: [new Uint8Array([1, 2, 3, 4])],
         payload: new Uint8Array([1, 1, 1, 1]),
         subspace: authorKeypair.subspace,
       },
@@ -99,7 +105,13 @@ Deno.test("Replica.set", async (test) => {
 
     const entries = [];
 
-    for await (const entry of replica.query({ order: "path" })) {
+    for await (
+      const entry of replica.query({
+        area: fullArea(),
+        maxCount: 0,
+        maxSize: BigInt(0),
+      }, "subspace")
+    ) {
       entries.push(entry);
     }
 
@@ -112,7 +124,7 @@ Deno.test("Replica.set", async (test) => {
 
     const res = await replica.set(
       {
-        path: new Uint8Array([1, 2, 3, 4]),
+        path: [new Uint8Array([1, 2, 3, 4])],
         payload: new Uint8Array([1, 1, 1, 1]),
         timestamp: BigInt(0),
         subspace: authorKeypair.subspace,
@@ -121,7 +133,7 @@ Deno.test("Replica.set", async (test) => {
     );
 
     assert(res.kind === "success");
-    assertEquals(res.entry.record.timestamp, BigInt(0));
+    assertEquals(res.entry.timestamp, BigInt(0));
   });
 
   await test.step("If no timestamp is set, and there is nothing else at the same path, use the current time.", async () => {
@@ -131,7 +143,7 @@ Deno.test("Replica.set", async (test) => {
 
     const res = await replica.set(
       {
-        path: new Uint8Array([1, 2, 3, 4]),
+        path: [new Uint8Array([1, 2, 3, 4])],
         payload: new Uint8Array([1, 1, 1, 1]),
         subspace: authorKeypair.subspace,
       },
@@ -139,11 +151,9 @@ Deno.test("Replica.set", async (test) => {
     );
 
     assert(res.kind === "success");
-    assert(res.entry.record.timestamp >= timestampBefore);
-    assert(res.entry.record.timestamp <= BigInt(Date.now() * 1000));
+    assert(res.entry.timestamp >= timestampBefore);
+    assert(res.entry.timestamp <= BigInt(Date.now() * 1000));
   });
-
-  // if a timestamp is set,
 });
 
 // ==================================
@@ -160,7 +170,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     const otherReplicaRes = await otherReplica.set(
       {
-        path: new Uint8Array([0, 0, 0, 0]),
+        path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array(),
         subspace: authorKeypair.subspace,
       },
@@ -184,7 +194,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     const otherReplicaRes = await otherReplica.set(
       {
-        path: new Uint8Array([0, 0, 0, 0]),
+        path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array(),
         subspace: authorKeypair.subspace,
       },
@@ -208,7 +218,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     await replica.set(
       {
-        path: new Uint8Array([0, 0, 0, 0]),
+        path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 1]),
         timestamp: BigInt(2000),
         subspace: authorKeypair.subspace,
@@ -218,7 +228,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     const secondRes = await replica.set(
       {
-        path: new Uint8Array([0, 0, 0, 0, 1]),
+        path: [new Uint8Array([0, 0, 0, 0]), new Uint8Array([1])],
         payload: new Uint8Array([0, 1, 2, 3]),
         timestamp: BigInt(1000),
         subspace: authorKeypair.subspace,
@@ -235,7 +245,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     await replica.set(
       {
-        path: new Uint8Array([0, 0, 0, 0]),
+        path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 1]),
         timestamp: BigInt(2000),
         subspace: authorKeypair.subspace,
@@ -245,7 +255,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     const secondRes = await replica.set(
       {
-        path: new Uint8Array([0, 0, 0, 0]),
+        path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 3]),
         timestamp: BigInt(1000),
         subspace: authorKeypair.subspace,
@@ -262,7 +272,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     await replica.set(
       {
-        path: new Uint8Array([0, 0, 0, 0]),
+        path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 1]),
         timestamp: BigInt(2000),
         subspace: authorKeypair.subspace,
@@ -272,7 +282,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     const secondRes = await replica.set(
       {
-        path: new Uint8Array([0, 0, 0, 0]),
+        path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 3]),
         timestamp: BigInt(2000),
         subspace: authorKeypair.subspace,
@@ -298,7 +308,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     await replica.set(
       {
-        path: new Uint8Array([0, 0, 0, 0]),
+        path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 1]),
         timestamp: BigInt(1000),
         subspace: authorKeypair.subspace,
@@ -308,7 +318,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     const secondRes = await replica.set(
       {
-        path: new Uint8Array([0, 0, 0, 0]),
+        path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 3]),
         timestamp: BigInt(2000),
         subspace: authorKeypair.subspace,
@@ -320,7 +330,13 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     const entries = [];
 
-    for await (const entry of replica.query({ order: "path" })) {
+    for await (
+      const entry of replica.query({
+        area: fullArea(),
+        maxCount: 0,
+        maxSize: BigInt(0),
+      }, "path")
+    ) {
       entries.push(entry);
     }
 
@@ -335,7 +351,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     await replica.set(
       {
-        path: new Uint8Array([0, 1]),
+        path: [new Uint8Array([0]), new Uint8Array([1])],
         payload: new Uint8Array([0, 1, 2, 1]),
         timestamp: BigInt(0),
         subspace: authorKeypair.subspace,
@@ -345,7 +361,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     await replica.set(
       {
-        path: new Uint8Array([0, 2]),
+        path: [new Uint8Array([0]), new Uint8Array([2])],
         payload: new Uint8Array([0, 1, 2, 1]),
         timestamp: BigInt(0),
         subspace: authorKeypair.subspace,
@@ -355,7 +371,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     const prefixRes = await replica.set(
       {
-        path: new Uint8Array([0]),
+        path: [new Uint8Array([0])],
         payload: new Uint8Array([0, 1, 2, 3]),
         timestamp: BigInt(1),
         subspace: authorKeypair.subspace,
@@ -367,13 +383,19 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     const entries = [];
 
-    for await (const entry of replica.query({ order: "path" })) {
+    for await (
+      const entry of replica.query({
+        area: fullArea(),
+        maxCount: 0,
+        maxSize: BigInt(0),
+      }, "path")
+    ) {
       entries.push(entry);
     }
 
     assertEquals(entries.length, 1);
     assert(entries[0]);
-    assertEquals(entries[0][0].identifier.path, new Uint8Array([0]));
+    assertEquals(entries[0][0].path, [new Uint8Array([0])]);
     assert(entries[0][1]);
     assertEquals(await entries[0][1].bytes(), new Uint8Array([0, 1, 2, 3]));
   });
@@ -383,7 +405,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     await replica.set(
       {
-        path: new Uint8Array([0, 1]),
+        path: [new Uint8Array([0]), new Uint8Array([1])],
         payload: new Uint8Array([0, 1, 2, 1]),
         timestamp: BigInt(0),
         subspace: authorKeypair.subspace,
@@ -393,7 +415,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     await replica.set(
       {
-        path: new Uint8Array([0, 1]),
+        path: [new Uint8Array([0]), new Uint8Array([1])],
         payload: new Uint8Array([0, 1, 2, 3]),
         timestamp: BigInt(1),
         subspace: authorKeypair.subspace,
@@ -403,7 +425,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     const prefixRes = await replica.set(
       {
-        path: new Uint8Array([0]),
+        path: [new Uint8Array([0])],
         payload: new Uint8Array([0, 1, 2, 3]),
         timestamp: BigInt(2),
         subspace: authorKeypair.subspace,
@@ -415,13 +437,19 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
     const entries = [];
 
-    for await (const entry of replica.query({ order: "path" })) {
+    for await (
+      const entry of replica.query({
+        area: fullArea(),
+        maxCount: 0,
+        maxSize: BigInt(0),
+      }, "path")
+    ) {
       entries.push(entry);
     }
 
     assertEquals(entries.length, 1);
     assert(entries[0]);
-    assertEquals(entries[0][0].identifier.path, new Uint8Array([0]));
+    assertEquals(entries[0][0].path, [new Uint8Array([0])]);
     assert(entries[0][1]);
     assertEquals(await entries[0][1].bytes(), new Uint8Array([0, 1, 2, 3]));
   });
@@ -437,7 +465,7 @@ Deno.test("Replica.ingestPayload", async (test) => {
     const replica = new TestReplica();
 
     const res = await replica.ingestPayload({
-      path: new Uint8Array([0]),
+      path: [new Uint8Array([0])],
       subspace: new Uint8Array([0]),
       timestamp: BigInt(0),
     }, new Uint8Array());
@@ -455,7 +483,7 @@ Deno.test("Replica.ingestPayload", async (test) => {
     crypto.getRandomValues(payload);
 
     const res = await otherReplica.set({
-      path: new Uint8Array([0, 2]),
+      path: [new Uint8Array([0, 2])],
       payload,
       subspace: authorKeypair.subspace,
     }, authorKeypair.privateKey);
@@ -467,17 +495,17 @@ Deno.test("Replica.ingestPayload", async (test) => {
     assert(res2.kind === "success");
 
     const res3 = await replica.ingestPayload({
-      path: res.entry.identifier.path,
-      subspace: res.entry.identifier.subspace,
-      timestamp: res.entry.record.timestamp,
+      path: res.entry.path,
+      subspace: res.entry.subspaceId,
+      timestamp: res.entry.timestamp,
     }, payload);
 
     assert(res3.kind === "success");
 
     const res4 = await replica.ingestPayload({
-      path: new Uint8Array(res.entry.identifier.path),
-      subspace: new Uint8Array(res.entry.identifier.subspace),
-      timestamp: res.entry.record.timestamp,
+      path: res.entry.path,
+      subspace: new Uint8Array(res.entry.subspaceId),
+      timestamp: res.entry.timestamp,
     }, payload);
 
     assert(res4.kind === "no_op");
@@ -492,7 +520,7 @@ Deno.test("Replica.ingestPayload", async (test) => {
     crypto.getRandomValues(payload);
 
     const res = await otherReplica.set({
-      path: new Uint8Array([0, 2]),
+      path: [new Uint8Array([0, 2])],
       payload,
       subspace: authorKeypair.subspace,
     }, authorKeypair.privateKey);
@@ -504,9 +532,9 @@ Deno.test("Replica.ingestPayload", async (test) => {
     assert(res2.kind === "success");
 
     const res3 = await replica.ingestPayload({
-      path: new Uint8Array(res.entry.identifier.path),
-      subspace: new Uint8Array(res.entry.identifier.subspace),
-      timestamp: res.entry.record.timestamp,
+      path: res.entry.path,
+      subspace: res.entry.subspaceId,
+      timestamp: res.entry.timestamp,
     }, new Uint8Array(32));
 
     assert(res3.kind === "failure");
@@ -522,7 +550,7 @@ Deno.test("Replica.ingestPayload", async (test) => {
     crypto.getRandomValues(payload);
 
     const res = await otherReplica.set({
-      path: new Uint8Array([0, 2]),
+      path: [new Uint8Array([0, 2])],
       payload,
       subspace: authorKeypair.subspace,
     }, authorKeypair.privateKey);
@@ -534,22 +562,28 @@ Deno.test("Replica.ingestPayload", async (test) => {
     assert(res2.kind === "success");
 
     const res3 = await replica.ingestPayload({
-      path: new Uint8Array(res.entry.identifier.path),
-      subspace: new Uint8Array(res.entry.identifier.subspace),
-      timestamp: res.entry.record.timestamp,
+      path: res.entry.path,
+      subspace: res.entry.subspaceId,
+      timestamp: res.entry.timestamp,
     }, payload);
 
     assert(res3.kind === "success");
 
     let retrievedPayload;
 
-    for await (const [_entry, payload] of replica.query({ order: "path" })) {
+    for await (
+      const [_entry, payload] of replica.query({
+        area: fullArea(),
+        maxCount: 0,
+        maxSize: BigInt(0),
+      }, "path")
+    ) {
       retrievedPayload = await payload?.bytes();
     }
 
     assert(retrievedPayload);
 
-    assert(compareBytes(payload, retrievedPayload) === 0);
+    assert(orderBytes(payload, retrievedPayload) === 0);
   });
 });
 
@@ -568,7 +602,7 @@ Deno.test("Write-ahead flags", async (test) => {
 
     const res = await otherReplica.set(
       {
-        path: new Uint8Array([0, 0, 0, 0]),
+        path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array(32),
         timestamp: BigInt(1000),
         subspace: authorKeypair.subspace,
@@ -581,9 +615,9 @@ Deno.test("Write-ahead flags", async (test) => {
     // Create PTA flag.
     const keys = encodeEntryKeys(
       {
-        path: new Uint8Array(res.entry.identifier.path),
-        timestamp: res.entry.record.timestamp,
-        subspace: new Uint8Array(res.entry.identifier.subspace),
+        path: res.entry.path,
+        timestamp: res.entry.timestamp,
+        subspace: res.entry.subspaceId,
 
         subspaceEncoding: {
           encode: (v) => v,
@@ -595,31 +629,20 @@ Deno.test("Write-ahead flags", async (test) => {
 
     // Create storage value.
     const storageValue = encodeSummarisableStorageValue({
-      payloadHash: res.entry.record.hash,
-      payloadLength: res.entry.record.length,
-      authTokenHash: new Uint8Array(
+      payloadDigest: res.entry.payloadDigest,
+      payloadLength: res.entry.payloadLength,
+      authTokenDigest: new Uint8Array(
         await crypto.subtle.digest("SHA-256", res.authToken),
       ),
       payloadScheme: testSchemePayload,
-      pathLength: res.entry.identifier.path.byteLength,
-      pathLengthEncoding: {
-        encode(length) {
-          return new Uint8Array([length]);
-        },
-        decode(bytes) {
-          return bytes[0];
-        },
-        encodedLength() {
-          return 1;
-        },
-      },
+      encodedPathLength: keys.encodedPathLength,
     });
 
     // Insert
 
     const result = await replica.set(
       {
-        path: new Uint8Array([0, 0, 0, 0, 1]),
+        path: [new Uint8Array([0, 0, 0, 0, 1])],
         payload: new Uint8Array(32),
         timestamp: BigInt(500),
         subspace: authorKeypair.subspace,
@@ -638,7 +661,13 @@ Deno.test("Write-ahead flags", async (test) => {
 
     const entries = [];
 
-    for await (const [entry] of replica.query({ order: "path" })) {
+    for await (
+      const [entry] of replica.query({
+        area: fullArea(),
+        maxCount: 0,
+        maxSize: BigInt(0),
+      }, "path")
+    ) {
       entries.push(entry);
     }
 
@@ -646,9 +675,9 @@ Deno.test("Write-ahead flags", async (test) => {
     assert(entries[0]);
 
     assert(
-      compareBytes(
-        new Uint8Array(entries[0].identifier.path),
-        new Uint8Array([0, 0, 0, 0, 1]),
+      orderPath(
+        entries[0].path,
+        [new Uint8Array([0, 0, 0, 0, 1])],
       ) === 0,
     );
   });
@@ -658,7 +687,7 @@ Deno.test("Write-ahead flags", async (test) => {
 
     const res = await replica.set(
       {
-        path: new Uint8Array([0, 0, 0, 0]),
+        path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array(32),
         timestamp: BigInt(1000),
         subspace: authorKeypair.subspace,
@@ -674,7 +703,13 @@ Deno.test("Write-ahead flags", async (test) => {
 
     const entries = [];
 
-    for await (const [entry] of replica.query({ order: "path" })) {
+    for await (
+      const [entry] of replica.query({
+        area: fullArea(),
+        maxCount: 0,
+        maxSize: BigInt(0),
+      }, "path")
+    ) {
       entries.push(entry);
     }
 

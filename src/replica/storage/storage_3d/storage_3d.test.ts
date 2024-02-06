@@ -1,5 +1,19 @@
 import { assert } from "https://deno.land/std@0.202.0/assert/assert.ts";
-import { concat, encodeBase64, Products } from "../../../../deps.ts";
+import {
+  ANY_SUBSPACE,
+  AreaOfInterest,
+  bigintToBytes,
+  concat,
+  Entry,
+  isIncludedRange,
+  isPathPrefixed,
+  OPEN_END,
+  orderBytes,
+  orderPath,
+  orderTimestamp,
+  Path,
+  Range,
+} from "../../../../deps.ts";
 import {
   makeNamespaceKeypair,
   makeSubspaceKeypair,
@@ -8,33 +22,19 @@ import {
   testSchemeAuthorisation,
   testSchemeFingerprint,
   testSchemeNamespace,
-  testSchemePathLength,
+  testSchemePath,
   testSchemePayload,
   testSchemeSubspace,
 } from "../../../test/test_schemes.ts";
-import { getSubspaces, randomTimestamp } from "../../../test/utils.ts";
-import { bigintToBytes, compareBytes } from "../../../util/bytes.ts";
-import { Replica } from "../../replica.ts";
-import {
-  FingerprintScheme,
-  NamespaceScheme,
-  OptionalBounds,
-  ProtocolParameters,
-  Query,
-  SubspaceScheme,
-} from "../../types.ts";
-import { RadixishTree } from "../prefix_iterators/radixish_tree.ts";
+import { randomPath, randomTimestamp } from "../../../test/utils.ts";
+import { ProtocolParameters } from "../../types.ts";
 import { MonoidRbTree } from "../summarisable_storage/monoid_rbtree.ts";
 import { TripleStorage } from "./triple_storage.ts";
 import { Storage3d } from "./types.ts";
-import { sample } from "https://deno.land/std@0.198.0/collections/sample.ts";
-import { encodeEntry } from "../../../entries/encode_decode.ts";
 import { assertEquals } from "https://deno.land/std@0.202.0/assert/assert_equals.ts";
-import { Entry } from "../../../entries/types.ts";
+import { encodePathWithSeparators } from "../../util.ts";
 
-const emptyUi8 = new Uint8Array();
-
-type Storage3dScenario<
+export type Storage3dScenario<
   NamespaceKey,
   SubspaceKey,
   PayloadDigest,
@@ -92,7 +92,7 @@ const tripleStorageScenario = {
       createSummarisableStorage: (monoid) => {
         return new MonoidRbTree({
           monoid,
-          compare: compareBytes,
+          compare: orderBytes,
         });
       },
     });
@@ -112,7 +112,7 @@ Deno.test("Storage3d.insert, get, and remove", async (test) => {
       {
         namespaceScheme: testSchemeNamespace,
         subspaceScheme: testSchemeSubspace,
-        pathLengthScheme: testSchemePathLength,
+        pathScheme: testSchemePath,
         payloadScheme: testSchemePayload,
         fingerprintScheme: testSchemeFingerprint,
         authorisationScheme: testSchemeAuthorisation,
@@ -121,32 +121,32 @@ Deno.test("Storage3d.insert, get, and remove", async (test) => {
 
     await test.step(scenario.name, async () => {
       const subspace = await makeSubspaceKeypair();
-      const pathAndPayload = crypto.getRandomValues(new Uint8Array(8));
+      const path = randomPath();
 
-      const payloadHash = crypto.getRandomValues(new Uint8Array(32));
-      const authTokenHash = crypto.getRandomValues(new Uint8Array(32));
+      const payloadDigest = crypto.getRandomValues(new Uint8Array(32));
+      const authTokenDigest = crypto.getRandomValues(new Uint8Array(32));
 
       await storage.insert({
-        path: pathAndPayload,
-        payloadHash,
-        authTokenHash,
+        path,
+        payloadDigest,
+        authTokenDigest,
         length: BigInt(8),
         subspace: subspace.subspace,
         timestamp: BigInt(1000),
       });
 
-      const res = await storage.get(subspace.subspace, pathAndPayload);
+      const res = await storage.get(subspace.subspace, path);
 
       assert(res);
 
-      assertEquals(res.entry.identifier.subspace, subspace.subspace);
-      assertEquals(res.entry.identifier.path, pathAndPayload);
-      assertEquals(res.entry.record.hash, payloadHash);
-      assertEquals(res.authTokenHash, authTokenHash);
+      assertEquals(res.entry.subspaceId, subspace.subspace);
+      assertEquals(res.entry.path, path);
+      assertEquals(res.entry.payloadDigest, payloadDigest);
+      assertEquals(res.authTokenHash, authTokenDigest);
 
       await storage.remove(res.entry);
 
-      const res2 = await storage.get(subspace.subspace, pathAndPayload);
+      const res2 = await storage.get(subspace.subspace, path);
 
       assert(res2 === undefined);
     });
@@ -160,27 +160,33 @@ Deno.test("Storage3d.summarise", async () => {
   const specialFingerprintScheme = {
     fingerprintSingleton(
       entry: Entry<null, number, Uint8Array>,
-    ): Promise<[number, Uint8Array, bigint][]> {
+    ): Promise<[number, Path, bigint, bigint][]> {
       return Promise.resolve([[
-        entry.identifier.subspace,
-        entry.identifier.path,
-        entry.record.timestamp,
+        entry.subspaceId,
+        entry.path,
+        entry.timestamp,
+        entry.payloadLength,
       ]]);
     },
     fingerprintCombine(
-      a: Array<[number, Uint8Array, bigint]>,
-      b: Array<[number, Uint8Array, bigint]>,
+      a: Array<[number, Path, bigint, bigint]>,
+      b: Array<[number, Path, bigint, bigint]>,
     ) {
       const newFingerprint = [...a];
 
+      // Remove duplicates
+
       for (const element of b) {
         const existing = newFingerprint.find(
-          ([subspaceA, pathA, timestampA]) => {
-            const [subspaceB, pathB, timestampB] = element;
+          ([subspaceA, pathA, timestampA, lengthA]) => {
+            const [subspaceB, pathB, timestampB, lengthB] = element;
 
             if (subspaceA !== subspaceB) return false;
-            if (Products.orderPaths(pathA, pathB) !== 0) return false;
-            if (Products.orderTimestamps(timestampA, timestampB) !== 0) {
+            if (orderPath(pathA, pathB) !== 0) return false;
+            if (timestampA !== timestampB) {
+              return false;
+            }
+            if (lengthA !== lengthB) {
               return false;
             }
 
@@ -196,17 +202,23 @@ Deno.test("Storage3d.summarise", async () => {
       }
 
       newFingerprint.sort((a, b) => {
-        const [subspaceA, pathA, timestampA] = a;
-        const [subspaceB, pathB, timestampB] = b;
+        const [subspaceA, pathA, timestampA, lengthA] = a;
+        const [subspaceB, pathB, timestampB, lengthB] = b;
 
         if (subspaceA < subspaceB) return -1;
         if (subspaceA > subspaceB) return 1;
-        if (Products.orderPaths(pathA, pathB) === -1) return -1;
-        if (Products.orderPaths(pathA, pathB) === 1) return 1;
-        if (Products.orderTimestamps(timestampA, timestampB) === -1) {
+        if (orderPath(pathA, pathB) === -1) return -1;
+        if (orderPath(pathA, pathB) === 1) return 1;
+        if (timestampA < timestampB) {
           return -1;
         }
-        if (Products.orderTimestamps(timestampA, timestampB) === 1) {
+        if (timestampA > timestampB) {
+          return 1;
+        }
+        if (lengthA < lengthB) {
+          return -1;
+        }
+        if (lengthA > lengthB) {
           return 1;
         }
 
@@ -215,7 +227,7 @@ Deno.test("Storage3d.summarise", async () => {
 
       return newFingerprint;
     },
-    neutral: [] as Array<[number, Uint8Array, bigint]>,
+    neutral: [] as Array<[number, Path, bigint, bigint]>,
   };
 
   for (const scenario of scenarios) {
@@ -246,48 +258,20 @@ Deno.test("Storage3d.summarise", async () => {
           encodedLength() {
             return 1;
           },
-          isEqual(a, b) {
-            return a === b;
-          },
           order(a: number, b: number) {
             if (a < b) return -1;
             if (a > b) return 1;
             return 0;
           },
           minimalSubspaceKey: 0,
-          successor(a) {
+          successor(a: number) {
             return a + 1;
           },
         },
-        payloadScheme: {
-          encode(value: Uint8Array) {
-            return value;
-          },
-          decode(encoded) {
-            return encoded;
-          },
-          encodedLength(value: Uint8Array) {
-            return value.byteLength;
-          },
-          fromBytes(bytes: Uint8Array | ReadableStream<Uint8Array>) {
-            return Promise.resolve(bytes as Uint8Array);
-          },
-          order: compareBytes,
-        },
-        pathLengthScheme: {
-          encode(value: number) {
-            return new Uint8Array([value]);
-          },
-          decode(encoded) {
-            return encoded[0];
-          },
-          encodedLength() {
-            return 1;
-          },
-          maxLength: 4,
-        },
+        payloadScheme: testSchemePayload,
+        pathScheme: testSchemePath,
         authorisationScheme: {
-          isAuthorised() {
+          isAuthorisedWrite() {
             return Promise.resolve(true);
           },
           authorise() {
@@ -311,115 +295,101 @@ Deno.test("Storage3d.summarise", async () => {
 
     // Create some random products using these (pull from Meadowcap)
 
-    const summariseParams: {
-      product: Products.ThreeDimensionalProduct<number>;
-      countLimits?: { subspace?: number; path?: number; time?: number };
-      sizeLimits?: { subspace?: bigint; path?: bigint; time?: bigint };
-    }[] = [];
+    const areaParams: AreaOfInterest<number>[] = [];
 
     for (let i = 0; i < 100; i++) {
       const randomCount = () => {
         return Math.random() > 0.5
           ? Math.floor(Math.random() * (3 - 1 + 1) + 1)
-          : undefined;
+          : 0;
       };
 
       const randomSize = () => {
         return Math.random() > 0.5
           ? BigInt(Math.floor(Math.random() * (64 - 16 + 1) + 16))
-          : undefined;
+          : BigInt(0);
       };
 
-      const randomCounts = () => {
+      const randomSubspaceId = () => {
         return Math.random() > 0.5
-          ? {
-            subspace: randomCount(),
-            path: randomCount(),
-            time: randomCount(),
-          }
-          : undefined;
+          ? Math.floor(Math.random() * 255)
+          : ANY_SUBSPACE;
       };
 
-      const randomSizes = () => {
-        return Math.random() > 0.5
-          ? {
-            subspace: randomSize(),
-            path: randomSize(),
-            time: randomSize(),
-          }
-          : undefined;
+      const randomTimeRange = () => {
+        const isOpen = Math.random() > 0.5;
+
+        const start = BigInt(Math.floor(Math.random() * 1000));
+
+        if (isOpen) {
+          return {
+            start,
+            end: OPEN_END,
+          } as Range<bigint>;
+        }
+
+        const end = start + BigInt(Math.floor(Math.random() * 1000));
+
+        return { start, end };
       };
 
-      summariseParams.push({
-        product: getRandom3dProduct({
-          noEmpty: true,
-        }),
-        countLimits: randomCounts(),
-        sizeLimits: randomSizes(),
+      areaParams.push({
+        area: {
+          includedSubspaceId: randomSubspaceId(),
+          pathPrefix: randomPath(),
+          timeRange: randomTimeRange(),
+        },
+        maxCount: randomCount(),
+        maxSize: randomSize(),
       });
     }
 
-    // Define includedByProduct fn
-    const includedBySummariseParams = (
+    // A function which returns all the areas a given spt is included by
+    const isIncludedByAreas = (
       subspace: number,
-      path: Uint8Array,
+      path: Path,
       time: bigint,
-    ): {
-      product: Products.ThreeDimensionalProduct<number>;
-      countLimits?: { subspace?: number; path?: number; time?: number };
-      sizeLimits?: { subspace?: bigint; path?: bigint; time?: bigint };
-    }[] => {
-      const includedProducts = [];
+    ): AreaOfInterest<number>[] => {
+      const inclusiveAreas: AreaOfInterest<number>[] = [];
 
-      for (const { product, countLimits, sizeLimits } of summariseParams) {
+      for (const aoi of areaParams) {
         if (
-          Products.disjointIntervalIncludesValue(
-            { order: orderNumbers },
-            product[0],
-            subspace,
-          ) === false
+          aoi.area.includedSubspaceId !== ANY_SUBSPACE &&
+          aoi.area.includedSubspaceId !== subspace
         ) {
           continue;
         }
 
         if (
-          Products.disjointIntervalIncludesValue(
-            { order: Products.orderPaths },
-            product[1],
-            path,
-          ) === false
+          isPathPrefixed(aoi.area.pathPrefix, path) === false
         ) {
           continue;
         }
 
         if (
-          Products.disjointIntervalIncludesValue(
-            { order: Products.orderTimestamps },
-            product[2],
-            time,
-          ) === false
+          isIncludedRange(orderTimestamp, aoi.area.timeRange, time) === false
         ) {
           continue;
         }
 
-        includedProducts.push({ product, countLimits, sizeLimits });
+        inclusiveAreas.push(aoi);
       }
 
-      return includedProducts;
+      return inclusiveAreas;
     };
 
     // Define expected fingerprint map
     const actualFingerprintMap = new Map<
-      Products.ThreeDimensionalProduct<number>,
+      AreaOfInterest<number>,
       {
-        fingerprint: [number, Uint8Array, bigint][];
+        fingerprint: [number, Path, bigint, bigint][];
         count: number;
         size: bigint;
       }
     >();
 
-    for (const { product } of summariseParams) {
-      actualFingerprintMap.set(product, {
+    for (const areaOfInterest of areaParams) {
+      actualFingerprintMap.set(areaOfInterest, {
         fingerprint: specialFingerprintScheme.neutral,
         count: 0,
         size: BigInt(0),
@@ -436,12 +406,22 @@ Deno.test("Storage3d.summarise", async () => {
 
       const pathLastByte = Math.floor(Math.random() * 256);
 
-      const pathAndPayload = new Uint8Array([
-        0,
-        0,
-        0,
-        pathLastByte,
-      ]);
+      const path = randomPath();
+
+      const authTokenDigest = new Uint8Array(
+        await crypto.subtle.digest(
+          "SHA-256",
+          new Uint8Array(0),
+        ),
+      );
+
+      const payloadDigest = new Uint8Array(
+        await crypto.subtle.digest(
+          "SHA-256",
+          crypto.getRandomValues(new Uint8Array(16)),
+        ),
+      );
+
       const timestamp = randomTimestamp();
 
       if (occupiedPaths.get(subspace)?.has(pathLastByte)) {
@@ -450,24 +430,20 @@ Deno.test("Storage3d.summarise", async () => {
 
       await storage.insert({
         subspace,
-        path: pathAndPayload,
+        path: path,
         timestamp: timestamp,
         length: BigInt(4),
-        authTokenHash: new Uint8Array(),
-        payloadHash: pathAndPayload,
+        authTokenDigest: authTokenDigest,
+        payloadDigest: payloadDigest,
       });
 
       const entry: Entry<null, number, Uint8Array> = {
-        identifier: {
-          namespace: null,
-          subspace: subspace,
-          path: pathAndPayload,
-        },
-        record: {
-          hash: pathAndPayload,
-          length: BigInt(4),
-          timestamp,
-        },
+        namespaceId: null,
+        subspaceId: subspace,
+        path: path,
+        payloadDigest: payloadDigest,
+        payloadLength: BigInt(4),
+        timestamp,
       };
 
       entries.push(entry);
@@ -483,45 +459,38 @@ Deno.test("Storage3d.summarise", async () => {
 
     entries.sort((a, b) => {
       const aKey = concat(
-        new Uint8Array([a.identifier.subspace]),
-        a.identifier.path,
-        bigintToBytes(a.record.timestamp),
+        new Uint8Array([a.subspaceId]),
+        encodePathWithSeparators(a.path),
+        bigintToBytes(a.timestamp),
       );
       const bKey = concat(
-        new Uint8Array([b.identifier.subspace]),
-        b.identifier.path,
-        bigintToBytes(b.record.timestamp),
+        new Uint8Array([b.subspaceId]),
+        encodePathWithSeparators(b.path),
+        bigintToBytes(b.timestamp),
       );
 
-      return Products.orderPaths(aKey, bKey) * -1;
+      return orderBytes(aKey, bKey) * -1;
     });
 
     for (const entry of entries) {
-      const includedBy = includedBySummariseParams(
-        entry.identifier.subspace,
-        entry.identifier.path,
-        entry.record.timestamp,
+      const includedBy = isIncludedByAreas(
+        entry.subspaceId,
+        entry.path,
+        entry.timestamp,
       );
 
-      for (const { product, countLimits, sizeLimits } of includedBy) {
-        const { fingerprint, count, size } = actualFingerprintMap.get(product)!;
+      for (const aoi of includedBy) {
+        const { fingerprint, count, size } = actualFingerprintMap.get(aoi)!;
 
         const nextCount = count + 1;
-        const nextSize = size + entry.record.length;
+        const nextSize = size + entry.payloadLength;
 
-        const sclExceeded = countLimits?.subspace &&
-          nextCount > countLimits.subspace;
-        const pclExceeded = countLimits?.path && nextCount > countLimits.path;
-        const tclExceeded = countLimits?.time && nextCount > countLimits.time;
-
-        const sslExceeded = sizeLimits?.subspace &&
-          nextSize > sizeLimits.subspace;
-        const pslExceeded = sizeLimits?.path && nextSize > sizeLimits.path;
-        const tslExceeded = sizeLimits?.time && nextSize > sizeLimits.time;
+        const countExceeded = aoi.maxCount !== 0 && nextCount > aoi.maxCount;
+        const sizeExceeded = aoi.maxSize !== BigInt(0) &&
+          nextSize > aoi.maxSize;
 
         if (
-          sclExceeded || pclExceeded || tclExceeded || sslExceeded ||
-          pslExceeded || tslExceeded
+          countExceeded || sizeExceeded
         ) {
           continue;
         }
@@ -531,7 +500,7 @@ Deno.test("Storage3d.summarise", async () => {
         );
 
         actualFingerprintMap.set(
-          product,
+          aoi,
           {
             fingerprint: specialFingerprintScheme.fingerprintCombine(
               fingerprint,
@@ -545,17 +514,20 @@ Deno.test("Storage3d.summarise", async () => {
     }
 
     // For all products, see if fingerprint matches the expected one.
-    for (const { product, countLimits, sizeLimits } of summariseParams) {
-      const actual = await storage.summarise(product, countLimits, sizeLimits);
-      const expected = actualFingerprintMap.get(product)!;
+    for (const aoi of areaParams) {
+      const actual = await storage.summarise(aoi);
+      const expected = actualFingerprintMap.get(aoi)!;
 
-      assertEquals(actual.fingerprint, expected.fingerprint);
+      assertEquals(
+        actual.fingerprint,
+        expected.fingerprint,
+      );
       assertEquals(actual.size, expected.count);
 
-      let actualPayloadSize = 0;
+      let actualPayloadSize = BigInt(0);
 
       for (const element of actual.fingerprint) {
-        actualPayloadSize += element[1].byteLength;
+        actualPayloadSize += element[3];
       }
 
       assertEquals(BigInt(actualPayloadSize), expected.size);
@@ -565,414 +537,8 @@ Deno.test("Storage3d.summarise", async () => {
   }
 });
 
-Deno.test("Storage3d.entriesByProduct", async () => {
-  const namespaceScheme: NamespaceScheme<null> = {
-    encode() {
-      return new Uint8Array();
-    },
-    decode() {
-      return null;
-    },
-    encodedLength() {
-      return 0;
-    },
-    isEqual() {
-      return true;
-    },
-  };
-
-  const subspaceScheme: SubspaceScheme<number> = {
-    encode(value: number) {
-      return new Uint8Array([value]);
-    },
-    decode(encoded) {
-      return encoded[0];
-    },
-    encodedLength() {
-      return 1;
-    },
-    isEqual(a, b) {
-      return a === b;
-    },
-    order(a: number, b: number) {
-      if (a < b) return -1;
-      if (a > b) return 1;
-      return 0;
-    },
-    minimalSubspaceKey: 0,
-    successor(a) {
-      return a + 1;
-    },
-  };
-
-  // A 'special' fingerprint which really just lists all the items it is made from.
-  const fingeprintScheme: FingerprintScheme<
-    null,
-    number,
-    Uint8Array,
-    Uint8Array
-  > = {
-    neutral: new Uint8Array(32),
-    async fingerprintSingleton(entry) {
-      const encodedEntry = encodeEntry(entry, {
-        namespaceScheme,
-        subspaceScheme,
-        pathLengthScheme: testSchemePathLength,
-        payloadScheme: testSchemePayload,
-      });
-
-      return new Uint8Array(
-        await crypto.subtle.digest("SHA-256", encodedEntry),
-      );
-    },
-    fingerprintCombine(a, b) {
-      const bytes = new Uint8Array(32);
-
-      for (let i = 0; i < 32; i++) {
-        bytes.set([a[i] ^ b[i]], i);
-      }
-
-      return bytes;
-    },
-  };
-
-  for (const scenario of scenarios) {
-    const { storage, dispose } = await scenario.makeScenario(
-      null,
-      {
-        namespaceScheme,
-        subspaceScheme,
-        payloadScheme: {
-          encode(value: Uint8Array) {
-            return value;
-          },
-          decode(encoded) {
-            return encoded;
-          },
-          encodedLength(value: Uint8Array) {
-            return value.byteLength;
-          },
-          fromBytes(bytes: Uint8Array | ReadableStream<Uint8Array>) {
-            return Promise.resolve(bytes as Uint8Array);
-          },
-          order: compareBytes,
-        },
-        pathLengthScheme: {
-          encode(value: number) {
-            return new Uint8Array([value]);
-          },
-          decode(encoded) {
-            return encoded[0];
-          },
-          encodedLength() {
-            return 1;
-          },
-          maxLength: 4,
-        },
-        authorisationScheme: {
-          isAuthorised() {
-            return Promise.resolve(true);
-          },
-          authorise() {
-            return Promise.resolve(null);
-          },
-          tokenEncoding: {
-            encode() {
-              return new Uint8Array();
-            },
-            decode() {
-              return null;
-            },
-            encodedLength() {
-              return 0;
-            },
-          },
-        },
-        fingerprintScheme: fingeprintScheme,
-      },
-    );
-
-    // Create some random products using these (pull from Meadowcap)
-
-    const summariseParams: {
-      product: Products.ThreeDimensionalProduct<number>;
-      countLimits?: { subspace?: number; path?: number; time?: number };
-      sizeLimits?: { subspace?: bigint; path?: bigint; time?: bigint };
-    }[] = [];
-
-    for (let i = 0; i < 100; i++) {
-      const randomCount = () => {
-        return Math.random() > 0.5
-          ? Math.floor(Math.random() * (3 - 1 + 1) + 1)
-          : undefined;
-      };
-
-      const randomSize = () => {
-        return Math.random() > 0.5
-          ? BigInt(Math.floor(Math.random() * (64 - 16 + 1) + 16))
-          : undefined;
-      };
-
-      const randomCounts = () => {
-        return Math.random() > 0.5
-          ? {
-            subspace: randomCount(),
-            path: randomCount(),
-            time: randomCount(),
-          }
-          : undefined;
-      };
-
-      const randomSizes = () => {
-        return Math.random() > 0.5
-          ? {
-            subspace: randomSize(),
-            path: randomSize(),
-            time: randomSize(),
-          }
-          : undefined;
-      };
-
-      summariseParams.push({
-        product: getRandom3dProduct({
-          noEmpty: true,
-        }),
-        countLimits: randomCounts(),
-        sizeLimits: randomSizes(),
-      });
-    }
-
-    // Define includedByProduct fn
-    const includedByQueryProductParams = (
-      subspace: number,
-      path: Uint8Array,
-      time: bigint,
-    ): {
-      product: Products.ThreeDimensionalProduct<number>;
-      countLimits?: { subspace?: number; path?: number; time?: number };
-      sizeLimits?: { subspace?: bigint; path?: bigint; time?: bigint };
-    }[] => {
-      const includedProducts = [];
-
-      for (const { product, countLimits, sizeLimits } of summariseParams) {
-        if (
-          Products.disjointIntervalIncludesValue(
-            { order: orderNumbers },
-            product[0],
-            subspace,
-          ) === false
-        ) {
-          continue;
-        }
-
-        if (
-          Products.disjointIntervalIncludesValue(
-            { order: Products.orderPaths },
-            product[1],
-            path,
-          ) === false
-        ) {
-          continue;
-        }
-
-        if (
-          Products.disjointIntervalIncludesValue(
-            { order: Products.orderTimestamps },
-            product[2],
-            time,
-          ) === false
-        ) {
-          continue;
-        }
-
-        includedProducts.push({ product, countLimits, sizeLimits });
-      }
-
-      return includedProducts;
-    };
-
-    const actualResultsMap = new Map<
-      Products.ThreeDimensionalProduct<number>,
-      {
-        entries: Set<string>;
-        count: number;
-        size: bigint;
-      }
-    >();
-
-    for (const { product } of summariseParams) {
-      actualResultsMap.set(product, {
-        entries: new Set(),
-        count: 0,
-        size: BigInt(0),
-      });
-    }
-
-    const occupiedPaths = new Map<number, Set<number>>();
-
-    const entries: Entry<null, number, Uint8Array>[] = [];
-
-    // Generate some entries
-    for (let i = 0; i < 100; i++) {
-      const subspace = Math.floor(Math.random() * 100);
-
-      const pathLastByte = Math.floor(Math.random() * 256);
-
-      const pathAndPayload = new Uint8Array([
-        0,
-        0,
-        0,
-        pathLastByte,
-      ]);
-      const timestamp = randomTimestamp();
-
-      if (occupiedPaths.get(subspace)?.has(pathLastByte)) {
-        continue;
-      }
-
-      await storage.insert({
-        subspace,
-        path: pathAndPayload,
-        timestamp: timestamp,
-        length: BigInt(4),
-        authTokenHash: new Uint8Array(),
-        payloadHash: pathAndPayload,
-      });
-
-      const entry: Entry<null, number, Uint8Array> = {
-        identifier: {
-          namespace: null,
-          subspace: subspace,
-          path: pathAndPayload,
-        },
-        record: {
-          hash: pathAndPayload,
-          length: BigInt(4),
-          timestamp,
-        },
-      };
-
-      entries.push(entry);
-
-      const usedPaths = occupiedPaths.get(subspace);
-
-      if (!usedPaths) {
-        occupiedPaths.set(subspace, new Set([pathLastByte]));
-      } else {
-        usedPaths.add(pathLastByte);
-      }
-    }
-
-    entries.sort((a, b) => {
-      const aKey = concat(
-        new Uint8Array([a.identifier.subspace]),
-        a.identifier.path,
-        bigintToBytes(a.record.timestamp),
-      );
-      const bKey = concat(
-        new Uint8Array([b.identifier.subspace]),
-        b.identifier.path,
-        bigintToBytes(b.record.timestamp),
-      );
-
-      return Products.orderPaths(aKey, bKey) * -1;
-    });
-
-    for (const entry of entries) {
-      const includedBy = includedByQueryProductParams(
-        entry.identifier.subspace,
-        entry.identifier.path,
-        entry.record.timestamp,
-      );
-
-      for (const { product, countLimits, sizeLimits } of includedBy) {
-        const { entries, count, size } = actualResultsMap.get(product)!;
-
-        const nextCount = count + 1;
-        const nextSize = size + entry.record.length;
-
-        const sclExceeded = countLimits?.subspace &&
-          nextCount > countLimits.subspace;
-        const pclExceeded = countLimits?.path && nextCount > countLimits.path;
-        const tclExceeded = countLimits?.time && nextCount > countLimits.time;
-
-        const sslExceeded = sizeLimits?.subspace &&
-          nextSize > sizeLimits.subspace;
-        const pslExceeded = sizeLimits?.path && nextSize > sizeLimits.path;
-        const tslExceeded = sizeLimits?.time && nextSize > sizeLimits.time;
-
-        if (
-          sclExceeded || pclExceeded || tclExceeded || sslExceeded ||
-          pslExceeded || tslExceeded
-        ) {
-          continue;
-        }
-
-        const encodedEntry = encodeEntry(entry, {
-          namespaceScheme,
-          subspaceScheme,
-          pathLengthScheme: testSchemePathLength,
-          payloadScheme: testSchemePayload,
-        });
-
-        const entryHash = await testSchemePayload.fromBytes(encodedEntry);
-
-        const b64EntryHash = encodeBase64(entryHash);
-
-        entries.add(b64EntryHash);
-
-        actualResultsMap.set(
-          product,
-          {
-            entries: entries,
-            size: nextSize,
-            count: nextCount,
-          },
-        );
-      }
-    }
-
-    // For all products, see if fingerprint matches the expected one.
-    for (const { product, countLimits, sizeLimits } of summariseParams) {
-      const expected = actualResultsMap.get(product)!;
-
-      let countUsed = 0;
-      let sizeUsed = BigInt(0);
-
-      for await (
-        const { entry } of storage.entriesByProduct(
-          product,
-          countLimits,
-          sizeLimits,
-        )
-      ) {
-        countUsed += 1;
-        sizeUsed += entry.record.length;
-
-        // Check for presence of entry.
-        const encodedEntry = encodeEntry(entry, {
-          namespaceScheme,
-          subspaceScheme,
-          pathLengthScheme: testSchemePathLength,
-          payloadScheme: testSchemePayload,
-        });
-
-        const entryHash = await testSchemePayload.fromBytes(encodedEntry);
-
-        const b64EntryHash = encodeBase64(entryHash);
-
-        expected.entries.has(b64EntryHash);
-      }
-
-      assertEquals(countUsed, expected.count);
-      assertEquals(sizeUsed, expected.size);
-    }
-
-    await dispose();
-  }
-});
-
-Deno.test("Storage3d.entriesByQuery", async (test) => {
+/*
+Deno.test("Storage3d.query", async (test) => {
   for (const scenario of scenarios) {
     const namespaceKeypair = await makeNamespaceKeypair();
 
@@ -981,12 +547,13 @@ Deno.test("Storage3d.entriesByQuery", async (test) => {
       {
         namespaceScheme: testSchemeNamespace,
         subspaceScheme: testSchemeSubspace,
-        pathLengthScheme: testSchemePathLength,
+        pathScheme: testSchemePath,
         payloadScheme: testSchemePayload,
         fingerprintScheme: testSchemeFingerprint,
         authorisationScheme: testSchemeAuthorisation,
       },
     );
+
 
     const replica = new Replica({
       namespace: namespaceKeypair.namespace,
@@ -1014,122 +581,100 @@ Deno.test("Storage3d.entriesByQuery", async (test) => {
       },
     });
 
+
     await test.step(scenario.name, async () => {
       // Generate the test queries
 
-      const subspaces = await getSubspaces(10);
-      const bytes = [];
+      const areaParams: AreaOfInterest<number>[] = [];
 
-      for (let i = 0; i < 50; i++) {
-        bytes.push(crypto.getRandomValues(new Uint8Array(4)));
-      }
-
-      const timestamps = [];
-
-      for (let i = 0; i < 25; i++) {
-        timestamps.push(randomTimestamp());
-      }
-
-      // Bounds
-
-      const subspaceBounds = manyRandomBounds(
-        100,
-        subspaces.map((s) => s.subspace),
-        compareBytes,
-      );
-      const pathBounds = manyRandomBounds(100, bytes, Products.orderPaths);
-      const timeBounds = manyRandomBounds(
-        100,
-        timestamps,
-        Products.orderTimestamps,
-      );
-
-      const queries: Query<Uint8Array>[] = [];
-
-      const includedByQueries = (
-        subspace: Uint8Array,
-        path: Uint8Array,
-        time: bigint,
-      ): Query<Uint8Array>[] => {
-        const includedQueries = [];
-
-        for (const query of queries) {
-          if (query.subspace) {
-            const range = rangeFromOptionalBounds(query.subspace, emptyUi8);
-
-            const isIncluded = Products.rangeIncludesValue(
-              { order: compareBytes },
-              range,
-              subspace,
-            );
-
-            if (!isIncluded) {
-              continue;
-            }
-          }
-
-          if (query.path) {
-            const range = rangeFromOptionalBounds(query.path, emptyUi8);
-
-            const isIncluded = Products.rangeIncludesValue(
-              { order: Products.orderPaths },
-              range,
-              path,
-            );
-
-            if (!isIncluded) {
-              continue;
-            }
-          }
-
-          if (query.time) {
-            const range = rangeFromOptionalBounds(query.time, BigInt(0));
-
-            const isIncluded = Products.rangeIncludesValue(
-              { order: Products.orderTimestamps },
-              range,
-              time,
-            );
-
-            if (!isIncluded) {
-              continue;
-            }
-          }
-
-          includedQueries.push(query);
-        }
-
-        return includedQueries;
-      };
-
-      for (let i = 0; i < 500; i++) {
-        const orderRoll = Math.random();
-
-        const query: Query<Uint8Array> = {
-          limit: Math.random() < 0.1
-            ? Math.floor(Math.random() * 10)
-            : undefined,
-          reverse: Math.random() < 0.25 ? true : false,
-          order: orderRoll < 0.33
-            ? "subspace"
-            : orderRoll < 0.66
-            ? "path"
-            : "timestamp",
-          subspace: Math.random() < 0.5 ? sample(subspaceBounds) : undefined,
-          path: Math.random() < 0.5 ? sample(pathBounds) : undefined,
-          time: Math.random() < 0.5 ? sample(timeBounds) : undefined,
+      for (let i = 0; i < 100; i++) {
+        const randomCount = () => {
+          return Math.random() > 0.5
+            ? Math.floor(Math.random() * (3 - 1 + 1) + 1)
+            : 0;
         };
 
-        queries.push(query);
+        const randomSize = () => {
+          return Math.random() > 0.5
+            ? BigInt(Math.floor(Math.random() * (64 - 16 + 1) + 16))
+            : BigInt(0);
+        };
+
+        const randomSubspaceId = () => {
+          return Math.random() > 0.5
+            ? Math.floor(Math.random() * 255)
+            : ANY_SUBSPACE;
+        };
+
+        const randomTimeRange = () => {
+          const isOpen = Math.random() > 0.5;
+
+          const start = BigInt(Math.floor(Math.random() * 1000));
+
+          if (isOpen) {
+            return {
+              start,
+              end: OPEN_END,
+            } as Range<bigint>;
+          }
+
+          const end = start + BigInt(Math.floor(Math.random() * 1000));
+
+          return { start, end };
+        };
+
+        areaParams.push({
+          area: {
+            includedSubspaceId: randomSubspaceId(),
+            pathPrefix: randomPath(),
+            timeRange: randomTimeRange(),
+          },
+          maxCount: randomCount(),
+          maxSize: randomSize(),
+        });
       }
 
-      const queryInclusionMap = new Map<
-        Query<Uint8Array>,
+      // A function which returns all the areas a given spt is included by
+      const isIncludedByAreas = (
+        subspace: number,
+        path: Path,
+        time: bigint,
+      ): AreaOfInterest<number>[] => {
+        const inclusiveAreas: AreaOfInterest<number>[] = [];
+
+        for (const aoi of areaParams) {
+          if (
+            aoi.area.includedSubspaceId !== ANY_SUBSPACE &&
+            aoi.area.includedSubspaceId !== subspace
+          ) {
+            continue;
+          }
+
+          if (
+            isPathPrefixed(aoi.area.pathPrefix, path) === false
+          ) {
+            continue;
+          }
+
+          if (
+            isIncludedRange(orderTimestamp, aoi.area.timeRange, time) === false
+          ) {
+            continue;
+          }
+
+          inclusiveAreas.push(aoi);
+        }
+
+        return inclusiveAreas;
+      };
+
+      const actualResultMap = new Map<
+        AreaOfInterest<number>,
         Set<string>
       >();
 
-      for (const query of queries) {
-        queryInclusionMap.set(query, new Set());
+      for (const areaOfInterest of areaParams) {
+        actualResultMap.set(areaOfInterest, new Set());
       }
 
       replica.addEventListener("entryremove", (event) => {
@@ -1147,7 +692,7 @@ Deno.test("Storage3d.entriesByQuery", async (test) => {
         testSchemePayload.fromBytes(encodedEntry).then((hash) => {
           const b64 = encodeBase64(hash);
 
-          for (const [, set] of queryInclusionMap) {
+          for (const [, set] of actualResultMap) {
             set.delete(b64);
           }
         });
@@ -1199,7 +744,7 @@ Deno.test("Storage3d.entriesByQuery", async (test) => {
         entryAuthHashMap.set(b64EntryHash, b64AuthHash);
 
         for (const query of correspondingQueries) {
-          const set = queryInclusionMap.get(query)!;
+          const set = actualResultMap.get(query)!;
 
           set.add(b64EntryHash);
         }
@@ -1208,7 +753,7 @@ Deno.test("Storage3d.entriesByQuery", async (test) => {
       for (const query of queries) {
         let entriesRead = 0;
 
-        const awaiting = new Set(queryInclusionMap.get(query));
+        const awaiting = new Set(actualResultMap.get(query));
 
         const prevIsCorrectOrder = (
           prev: Entry<Uint8Array, Uint8Array, ArrayBuffer>,
@@ -1293,7 +838,7 @@ Deno.test("Storage3d.entriesByQuery", async (test) => {
             assert(prevIsCorrectOrder(prevEntry, entry, query.order));
           }
 
-          assert(queryInclusionMap.get(query)?.has(b64EntryHash));
+          assert(actualResultMap.get(query)?.has(b64EntryHash));
           entriesRead += 1;
           prevEntry = entry;
 
@@ -1307,10 +852,10 @@ Deno.test("Storage3d.entriesByQuery", async (test) => {
         if (query.limit) {
           assertEquals(
             entriesRead,
-            Math.min(query.limit, queryInclusionMap.get(query)!.size),
+            Math.min(query.limit, actualResultMap.get(query)!.size),
           );
         } else {
-          assertEquals(entriesRead, queryInclusionMap.get(query)!.size);
+          assertEquals(entriesRead, actualResultMap.get(query)!.size);
         }
       }
     });
@@ -1319,195 +864,7 @@ Deno.test("Storage3d.entriesByQuery", async (test) => {
   }
 });
 
-function manyRandomBounds<ValueType>(
-  size: number,
-  sampleFrom: Array<ValueType>,
-  order: Products.TotalOrder<ValueType>,
-) {
-  const bounds = [];
-
-  for (let i = 0; i < size; i++) {
-    bounds.push(randomBounds(sampleFrom, order));
-  }
-
-  return bounds;
-}
-
-function randomBounds<ValueType>(
-  sampleFrom: Array<ValueType>,
-  order: Products.TotalOrder<ValueType>,
-): OptionalBounds<ValueType> {
-  const kindRoll = Math.random();
-
-  if (kindRoll < 0.33) {
-    return {
-      lowerBound: sample(sampleFrom)!,
-    };
-  } else if (kindRoll < 0.66) {
-    return {
-      upperBound: sample(sampleFrom)!,
-    };
-  }
-
-  while (true) {
-    const fst = sample(sampleFrom)!;
-    const snd = sample(sampleFrom)!;
-
-    const fstSndOrder = order(fst, snd);
-
-    if (fstSndOrder === 0) {
-      continue;
-    }
-
-    if (fstSndOrder === -1) {
-      return {
-        lowerBound: fst,
-        upperBound: snd,
-      };
-    }
-
-    return {
-      lowerBound: snd,
-      upperBound: fst,
-    };
-  }
-}
-
-function rangeFromOptionalBounds<ValueType>(
-  bounds: OptionalBounds<ValueType>,
-  leastValue: ValueType,
-): Products.Range<ValueType> {
-  if (bounds.lowerBound && !bounds.upperBound) {
-    return {
-      kind: "open",
-      start: bounds.lowerBound,
-    };
-  }
-
-  if (bounds.upperBound && !bounds.lowerBound) {
-    return {
-      kind: "closed_exclusive",
-      start: leastValue,
-      end: bounds.upperBound,
-    };
-  }
-
-  return {
-    kind: "closed_exclusive",
-    start: bounds.lowerBound!,
-    end: bounds.upperBound!,
-  };
-}
-
-// Product stuff
-
-function getRandomDisjointInterval<ValueType>(
-  { minValue, successor, order, maxSize }: {
-    minValue: ValueType;
-    successor: Products.SuccessorFn<ValueType>;
-    maxSize: ValueType;
-    order: Products.TotalOrder<ValueType>;
-  },
-): Products.DisjointInterval<ValueType> {
-  let disjointInterval: Products.DisjointInterval<ValueType> = [];
-
-  let start = minValue;
-  let end = minValue;
-
-  while (true) {
-    start = end;
-
-    while (true) {
-      start = successor(start);
-
-      if (Math.random() > 0.8) {
-        break;
-      }
-    }
-
-    end = start;
-
-    while (true) {
-      end = successor(end);
-
-      if ((order(end, maxSize) >= 0) || Math.random() > 0.8) {
-        break;
-      }
-    }
-
-    if ((order(end, maxSize) >= 0)) {
-      break;
-    }
-
-    disjointInterval = Products.addToDisjointInterval({ order: order }, {
-      kind: "closed_exclusive",
-      start,
-      end,
-    }, disjointInterval);
-
-    if (Math.random() > 0.95) {
-      break;
-    }
-  }
-
-  const isOpen = order(end, maxSize) < 0 && Math.random() > 0.8;
-
-  if (isOpen) {
-    let openStart = end;
-
-    while (true) {
-      openStart = successor(openStart);
-
-      if (order(end, maxSize) >= 0 || Math.random() > 0.9) {
-        break;
-      }
-    }
-
-    disjointInterval = Products.addToDisjointInterval({ order: order }, {
-      kind: "open",
-      start,
-    }, disjointInterval);
-  }
-
-  return disjointInterval;
-}
-
-function getRandom3dProduct(
-  { noEmpty }: {
-    noEmpty?: boolean;
-  },
-): Products.ThreeDimensionalProduct<number> {
-  const isEmpty = Math.random() > 0.75;
-
-  if (!noEmpty && isEmpty) {
-    return [[], [], []];
-  }
-
-  return [
-    getRandomDisjointInterval({
-      minValue: 0,
-      maxSize: 255,
-      order: (a, b) => {
-        if (a < b) return -1;
-        if (a > b) return 1;
-        return 0;
-      },
-      successor: (a) => a + 1,
-    }),
-    getRandomDisjointInterval({
-      minValue: new Uint8Array(),
-      maxSize: new Uint8Array([0, 0, 0, 255]),
-      order: Products.orderPaths,
-      successor: Products.makeSuccessorPath(4),
-    }),
-    getRandomDisjointInterval({
-      minValue: BigInt(0),
-      maxSize: BigInt(1000),
-      order: Products.orderTimestamps,
-      successor: Products.successorTimestamp,
-    }),
-  ];
-}
+*/
 
 function orderNumbers(a: number, b: number) {
   if (a < b) return -1;

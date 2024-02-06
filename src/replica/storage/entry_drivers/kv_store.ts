@@ -1,15 +1,19 @@
-import { decodeEntry, encodeEntry } from "../../../entries/encode_decode.ts";
-import { Entry } from "../../../entries/types.ts";
-import { compareBytes } from "../../../util/bytes.ts";
+import {
+  decodeEntry,
+  encodeEntry,
+  Entry,
+  orderBytes,
+  PathScheme,
+} from "../../../../deps.ts";
 import {
   FingerprintScheme,
   NamespaceScheme,
-  PathLengthScheme,
   PayloadScheme,
   SubspaceScheme,
 } from "../../types.ts";
+import { PrefixedDriver } from "../kv/prefixed_driver.ts";
 import { KvDriver } from "../kv/types.ts";
-import { KeyHopTree } from "../prefix_iterators/key_hop_tree.ts";
+import { SimpleKeyIterator } from "../prefix_iterators/simple_key_iterator.ts";
 import { PrefixIterator } from "../prefix_iterators/types.ts";
 import { TripleStorage } from "../storage_3d/triple_storage.ts";
 import { Storage3d } from "../storage_3d/types.ts";
@@ -27,7 +31,7 @@ type EntryDriverKvOpts<
   namespaceScheme: NamespaceScheme<NamespaceKey>;
   subspaceScheme: SubspaceScheme<SubspaceKey>;
   payloadScheme: PayloadScheme<PayloadDigest>;
-  pathLengthScheme: PathLengthScheme;
+  pathScheme: PathScheme;
   fingerprintScheme: FingerprintScheme<
     NamespaceKey,
     SubspaceKey,
@@ -52,7 +56,7 @@ export class EntryDriverKvStore<
   private namespaceScheme: NamespaceScheme<NamespaceKey>;
   private subspaceScheme: SubspaceScheme<SubspaceKey>;
   private payloadScheme: PayloadScheme<PayloadDigest>;
-  private pathLengthScheme: PathLengthScheme;
+  private pathScheme: PathScheme;
   private fingerprintScheme: FingerprintScheme<
     NamespaceKey,
     SubspaceKey,
@@ -74,29 +78,37 @@ export class EntryDriverKvStore<
     this.namespaceScheme = opts.namespaceScheme;
     this.subspaceScheme = opts.subspaceScheme;
     this.payloadScheme = opts.payloadScheme;
-    this.pathLengthScheme = opts.pathLengthScheme;
+    this.pathScheme = opts.pathScheme;
     this.fingerprintScheme = opts.fingerprintScheme;
 
     this.kvDriver = opts.kvDriver;
-    this.prefixIterator = new KeyHopTree<Uint8Array>(this.kvDriver);
+
+    const prefixedKvDriver = new PrefixedDriver(["prefix"], this.kvDriver);
+
+    this.prefixIterator = new SimpleKeyIterator<Uint8Array>(prefixedKvDriver);
   }
 
   makeStorage(
     namespace: NamespaceKey,
   ): Storage3d<NamespaceKey, SubspaceKey, PayloadDigest, Fingerprint> {
+    const prefixedStorageDriver = new PrefixedDriver(
+      ["entries"],
+      this.kvDriver,
+    );
+
     return new TripleStorage({
       namespace,
       createSummarisableStorage: (
         monoid: LiftingMonoid<Uint8Array, Fingerprint>,
       ) => {
         return new Skiplist({
-          kv: this.kvDriver,
+          kv: prefixedStorageDriver,
           monoid,
-          compare: compareBytes,
+          compare: orderBytes,
         });
       },
       fingerprintScheme: this.fingerprintScheme,
-      pathLengthScheme: this.pathLengthScheme,
+      pathScheme: this.pathScheme,
       payloadScheme: this.payloadScheme,
       subspaceScheme: this.subspaceScheme,
     });
@@ -127,12 +139,12 @@ export class EntryDriverKvStore<
         return;
       }
 
-      const entry = decodeEntry(maybeInsertion, {
+      const entry = decodeEntry({
         namespaceScheme: this.namespaceScheme,
         subspaceScheme: this.subspaceScheme,
         payloadScheme: this.payloadScheme,
-        pathLengthScheme: this.pathLengthScheme,
-      });
+        pathScheme: this.pathScheme,
+      }, maybeInsertion);
 
       const authTokenHash = this.payloadScheme.decode(probablyAuthTokenHash);
 
@@ -151,12 +163,12 @@ export class EntryDriverKvStore<
         return;
       }
 
-      const entry = decodeEntry(maybeRemoval, {
+      const entry = decodeEntry({
         namespaceScheme: this.namespaceScheme,
         subspaceScheme: this.subspaceScheme,
         payloadScheme: this.payloadScheme,
-        pathLengthScheme: this.pathLengthScheme,
-      });
+        pathScheme: this.pathScheme,
+      }, maybeRemoval);
 
       return entry;
     },
@@ -164,12 +176,12 @@ export class EntryDriverKvStore<
       entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
       authTokenHash: PayloadDigest,
     ) => {
-      const entryEncoded = encodeEntry(entry, {
+      const entryEncoded = encodeEntry({
         namespaceScheme: this.namespaceScheme,
         subspaceScheme: this.subspaceScheme,
-        pathLengthScheme: this.pathLengthScheme,
+        pathScheme: this.pathScheme,
         payloadScheme: this.payloadScheme,
-      });
+      }, entry);
 
       const authHashEncoded = this.payloadScheme.encode(authTokenHash);
 
@@ -185,12 +197,12 @@ export class EntryDriverKvStore<
     },
 
     flagRemoval: (entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>) => {
-      const entryEncoded = encodeEntry(entry, {
+      const entryEncoded = encodeEntry({
         namespaceScheme: this.namespaceScheme,
         subspaceScheme: this.subspaceScheme,
-        pathLengthScheme: this.pathLengthScheme,
+        pathScheme: this.pathScheme,
         payloadScheme: this.payloadScheme,
-      });
+      }, entry);
 
       return this.kvDriver.set(["waf", "remove"], entryEncoded);
     },

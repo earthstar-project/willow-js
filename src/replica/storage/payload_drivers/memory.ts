@@ -1,6 +1,10 @@
-import { encodeBase64, toArrayBuffer } from "../../../../deps.ts";
+import {
+  encodeBase64,
+  EncodingScheme,
+  toArrayBuffer,
+} from "../../../../deps.ts";
 import { ValidationError } from "../../../errors.ts";
-import { EncodingScheme, Payload } from "../../types.ts";
+import { Payload } from "../../types.ts";
 import { PayloadDriver } from "../types.ts";
 
 /** Store and retrieve payloads in memory. */
@@ -72,7 +76,7 @@ export class PayloadDriverMemory<PayloadDigest>
   ): Promise<
     {
       hash: PayloadDigest;
-      length: number;
+      length: bigint;
       commit: () => Promise<Payload>;
       reject: () => Promise<void>;
     }
@@ -91,7 +95,7 @@ export class PayloadDriverMemory<PayloadDigest>
 
     return Promise.resolve({
       hash,
-      length: newPayload.size,
+      length: BigInt(newPayload.size),
       commit: () => {
         this.payloadMap.set(key, newPayload);
         this.stagingMap.delete(key);

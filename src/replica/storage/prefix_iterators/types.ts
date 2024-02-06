@@ -1,6 +1,10 @@
+import { Path } from "../../../../deps.ts";
+
 export interface PrefixIterator<ValueType> {
-  insert(key: Uint8Array, value: ValueType): Promise<void>;
-  remove(key: Uint8Array): Promise<boolean>;
-  prefixesOf(key: Uint8Array): AsyncIterable<[Uint8Array, ValueType]>;
-  prefixedBy(key: Uint8Array): AsyncIterable<[Uint8Array, ValueType]>;
+  insert(path: Path, value: ValueType): Promise<void>;
+  remove(path: Path): Promise<boolean>;
+  /** Return all paths that are prefixes of the given path */
+  prefixesOf(path: Path): AsyncIterable<[Path, ValueType]>;
+  /** Returns all paths that are prefixed by the given path */
+  prefixedBy(path: Path): AsyncIterable<[Path, ValueType]>;
 }

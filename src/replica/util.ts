@@ -1,10 +1,9 @@
 import { join } from "https://deno.land/std@0.188.0/path/mod.ts";
 import { EntryDriverKvStore } from "./storage/entry_drivers/kv_store.ts";
 import { PayloadDriverFilesystem } from "./storage/payload_drivers/filesystem.ts";
-import { EncodingScheme, PayloadScheme, ProtocolParameters } from "./types.ts";
+import { PayloadScheme, ProtocolParameters } from "./types.ts";
 import { ensureDir } from "https://deno.land/std@0.188.0/fs/ensure_dir.ts";
-import { bigintToBytes } from "../util/bytes.ts";
-import { concat } from "../../deps.ts";
+import { bigintToBytes, concat, EncodingScheme, Path } from "../../deps.ts";
 import { KvDriverDeno } from "./storage/kv/kv_driver_deno.ts";
 
 /** Create a pair of entry and payload drivers for use with a {@link Replica} which will store their data at a given filesystem path. */
@@ -49,17 +48,88 @@ export async function getPersistedDrivers<
 
 // Keys
 
+export function encodePathWithSeparators(path: Path): Uint8Array {
+  const encodedComponents: Uint8Array[] = [];
+
+  for (const component of path) {
+    const bytes: number[] = [];
+
+    for (const byte of component) {
+      if (byte !== 0) {
+        bytes.push(byte);
+        continue;
+      }
+
+      bytes.push(0, 1);
+    }
+
+    bytes.push(0, 0);
+    const encodedComponent = new Uint8Array(bytes);
+    encodedComponents.push(encodedComponent);
+  }
+
+  return concat(...encodedComponents);
+}
+
+export function decodePathWithSeparators(
+  encoded: Uint8Array,
+): Path {
+  const path: Path = [];
+
+  let currentComponentBytes = [];
+  let previousWasZero = false;
+
+  for (const byte of encoded) {
+    if (previousWasZero && byte === 0) {
+      // Separator
+      previousWasZero = false;
+
+      const component = new Uint8Array(currentComponentBytes);
+
+      path.push(component);
+
+      currentComponentBytes = [];
+
+      continue;
+    }
+
+    if (previousWasZero && byte === 1) {
+      // Encoded zero.
+      currentComponentBytes.push(0);
+      previousWasZero = false;
+      continue;
+    }
+
+    if (byte === 0) {
+      previousWasZero = true;
+      continue;
+    }
+
+    currentComponentBytes.push(byte);
+    previousWasZero = false;
+  }
+
+  return path;
+}
+
 export function encodeEntryKeys<SubspacePublicKey>(
   opts: {
-    path: Uint8Array;
+    path: Path;
     timestamp: bigint;
     subspace: SubspacePublicKey;
     subspaceEncoding: EncodingScheme<SubspacePublicKey>;
   },
-): { spt: Uint8Array; pts: Uint8Array; tsp: Uint8Array } {
+): {
+  spt: Uint8Array;
+  pts: Uint8Array;
+  tsp: Uint8Array;
+  encodedPathLength: number;
+} {
   const encodedSubspace = opts.subspaceEncoding.encode(opts.subspace);
 
-  const keyLength = 8 + opts.path.byteLength +
+  const encodedPath = encodePathWithSeparators(opts.path);
+
+  const keyLength = 8 + encodedPath.byteLength +
     encodedSubspace.byteLength;
 
   const sptBytes = new Uint8Array(keyLength);
@@ -69,23 +139,23 @@ export function encodeEntryKeys<SubspacePublicKey>(
   // Subspace, path, timestamp
   sptBytes.set(encodedSubspace, 0);
   sptBytes.set(
-    opts.path,
+    encodedPath,
     encodedSubspace.byteLength,
   );
   const sptDv = new DataView(sptBytes.buffer);
   sptDv.setBigUint64(
-    encodedSubspace.byteLength + opts.path.byteLength,
+    encodedSubspace.byteLength + encodedPath.byteLength,
     opts.timestamp,
   );
 
   // Path, timestamp, subspace
-  ptsBytes.set(opts.path, 0);
+  ptsBytes.set(encodedPath, 0);
   const ptsDv = new DataView(ptsBytes.buffer);
   ptsDv.setBigUint64(
-    opts.path.byteLength,
+    encodedPath.byteLength,
     opts.timestamp,
   );
-  ptsBytes.set(encodedSubspace, opts.path.byteLength + 8);
+  ptsBytes.set(encodedSubspace, encodedPath.byteLength + 8);
 
   // Timestamp, subspace, path
   const tapDv = new DataView(tspBytes.buffer);
@@ -94,24 +164,29 @@ export function encodeEntryKeys<SubspacePublicKey>(
     opts.timestamp,
   );
   tspBytes.set(encodedSubspace, 8);
-  tspBytes.set(opts.path, 8 + encodedSubspace.byteLength);
+  tspBytes.set(encodedPath, 8 + encodedSubspace.byteLength);
 
-  return { spt: sptBytes, pts: ptsBytes, tsp: tspBytes };
+  return {
+    spt: sptBytes,
+    pts: ptsBytes,
+    tsp: tspBytes,
+    encodedPathLength: encodedPath.byteLength,
+  };
 }
 
 export function decodeEntryKey<SubspacePublicKey>(
   encoded: Uint8Array,
   order: "subspace" | "path" | "timestamp",
   subspaceEncoding: EncodingScheme<SubspacePublicKey>,
-  pathLength: number,
+  encodedPathLength: number,
 ): {
   subspace: SubspacePublicKey;
-  path: Uint8Array;
+  path: Path;
   timestamp: bigint;
 } {
-  let subspace;
-  let timestamp;
-  let path;
+  let subspace: SubspacePublicKey;
+  let timestamp: bigint;
+  let path: Path;
 
   switch (order) {
     case "subspace": {
@@ -119,9 +194,13 @@ export function decodeEntryKey<SubspacePublicKey>(
 
       const encodedSubspaceLength = subspaceEncoding.encodedLength(subspace);
 
-      path = encoded.subarray(
-        encodedSubspaceLength,
-        encodedSubspaceLength + pathLength,
+      const pathComponentPos = encodedSubspaceLength;
+
+      path = decodePathWithSeparators(
+        encoded.subarray(
+          pathComponentPos,
+          pathComponentPos + encodedPathLength,
+        ),
       );
 
       const dataView = new DataView(encoded.buffer);
@@ -130,16 +209,21 @@ export function decodeEntryKey<SubspacePublicKey>(
       break;
     }
     case "path": {
-      path = encoded.subarray(0, pathLength);
+      path = decodePathWithSeparators(
+        encoded.subarray(
+          0,
+          encodedPathLength,
+        ),
+      );
 
       const dataView = new DataView(encoded.buffer);
 
       timestamp = dataView.getBigUint64(
-        pathLength,
+        encodedPathLength,
       );
 
       subspace = subspaceEncoding.decode(encoded.subarray(
-        pathLength + 8,
+        encodedPathLength + 8,
       ));
 
       break;
@@ -156,7 +240,12 @@ export function decodeEntryKey<SubspacePublicKey>(
 
       const encodedSubspaceLength = subspaceEncoding.encodedLength(subspace);
 
-      path = encoded.subarray(8 + encodedSubspaceLength);
+      path = decodePathWithSeparators(
+        encoded.subarray(
+          encodedSubspaceLength,
+          encodedSubspaceLength + encodedPathLength,
+        ),
+      );
     }
   }
 
@@ -169,59 +258,58 @@ export function decodeEntryKey<SubspacePublicKey>(
 
 export function encodeSummarisableStorageValue<PayloadDigest>(
   {
-    authTokenHash,
-    payloadHash,
+    authTokenDigest,
+    payloadDigest,
     payloadLength,
     payloadScheme,
-    pathLength,
-    pathLengthEncoding,
+    encodedPathLength,
   }: {
-    authTokenHash: PayloadDigest;
-    payloadHash: PayloadDigest;
+    authTokenDigest: PayloadDigest;
+    payloadDigest: PayloadDigest;
     payloadLength: bigint;
     payloadScheme: PayloadScheme<PayloadDigest>;
-    pathLength: number;
-    pathLengthEncoding: EncodingScheme<number>;
+    encodedPathLength: number;
   },
 ): Uint8Array {
+  const pathLengthBytes = new Uint8Array(4);
+  const view = new DataView(pathLengthBytes.buffer);
+  view.setUint32(0, encodedPathLength);
+
   return concat(
-    pathLengthEncoding.encode(pathLength),
+    pathLengthBytes,
     bigintToBytes(payloadLength),
-    payloadScheme.encode(payloadHash),
-    payloadScheme.encode(authTokenHash),
+    payloadScheme.encode(payloadDigest),
+    payloadScheme.encode(authTokenDigest),
   );
 }
 
 export function decodeSummarisableStorageValue<PayloadDigest>(
   encoded: Uint8Array,
   payloadEncoding: EncodingScheme<PayloadDigest>,
-  pathLengthEncoding: EncodingScheme<number>,
 ): {
-  pathLength: number;
+  encodedPathLength: number;
   payloadLength: bigint;
   payloadHash: PayloadDigest;
   authTokenHash: PayloadDigest;
 } {
-  const pathLength = pathLengthEncoding.decode(encoded);
-
-  const pathLengthWidth = pathLengthEncoding.encodedLength(pathLength);
-
   const dataView = new DataView(encoded.buffer);
 
-  const payloadLength = dataView.getBigUint64(pathLengthWidth);
+  const encodedPathLength = dataView.getUint32(0);
+
+  const payloadLength = dataView.getBigUint64(4);
 
   const payloadHash = payloadEncoding.decode(
-    encoded.subarray(pathLengthWidth + 8),
+    encoded.subarray(4 + 8),
   );
 
   const payloadHashLength = payloadEncoding.encodedLength(payloadHash);
 
   const authTokenHash = payloadEncoding.decode(
-    encoded.subarray(pathLengthWidth + 8 + payloadHashLength),
+    encoded.subarray(4 + 8 + payloadHashLength),
   );
 
   return {
-    pathLength,
+    encodedPathLength,
     payloadLength,
     payloadHash,
     authTokenHash,

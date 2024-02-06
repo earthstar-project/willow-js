@@ -22,39 +22,26 @@ export class PrefixedDriver implements KvDriver {
   }
 
   async *list<ValueType>(
-    range: { start: Key; end: Key },
+    selector: { start: Key; end: Key } | { prefix: Key },
     opts?: {
-      prefix?: Key;
       reverse?: boolean;
       limit?: number;
       batchSize?: number;
     },
   ): AsyncIterable<{ key: Key; value: ValueType }> {
-    if (opts) {
-      for await (
-        const entry of this.parentDriver.list<ValueType>(
-          range,
-          {
-            prefix: opts.prefix
-              ? [...this.prefix, ...opts.prefix]
-              : opts.prefix,
-            ...opts,
-          },
-        )
-      ) {
-        yield {
-          key: entry.key.slice(this.prefix.length),
-          value: entry.value,
-        };
+    const selectorPrefixed = "start" in selector
+      ? {
+        start: [...this.prefix, ...selector.start],
+        end: [...this.prefix, ...selector.end],
       }
-    }
+      : {
+        prefix: [...this.prefix, ...selector.prefix],
+      };
 
     for await (
       const entry of this.parentDriver.list<ValueType>(
-        range,
-        {
-          prefix: this.prefix,
-        },
+        selectorPrefixed,
+        opts,
       )
     ) {
       yield {

@@ -8,7 +8,8 @@ type SimpleKvOpts<
     | string
     | number
     | bigint
-    | boolean,
+    | boolean
+    | symbol,
   LiftedType,
 > = {
   kv: KvDriver;

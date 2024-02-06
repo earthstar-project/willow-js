@@ -1,10 +1,10 @@
 import { ValidationError, WillowError } from "../../../errors.ts";
-import { EncodingScheme, Payload } from "../../types.ts";
+import { Payload } from "../../types.ts";
 import { PayloadDriver } from "../types.ts";
 import { join } from "https://deno.land/std@0.188.0/path/mod.ts";
 import { ensureDir } from "https://deno.land/std@0.188.0/fs/ensure_dir.ts";
 import { move } from "https://deno.land/std@0.188.0/fs/move.ts";
-import { encodeBase32 } from "../../../../deps.ts";
+import { encodeBase32, EncodingScheme } from "../../../../deps.ts";
 
 /** Stores and retrieves payloads from the filesystem. */
 export class PayloadDriverFilesystem<PayloadDigest>
@@ -87,7 +87,7 @@ export class PayloadDriverFilesystem<PayloadDigest>
   ): Promise<
     {
       hash: PayloadDigest;
-      length: number;
+      length: bigint;
       commit: () => Promise<Payload>;
       reject: () => Promise<void>;
     }
@@ -106,7 +106,7 @@ export class PayloadDriverFilesystem<PayloadDigest>
 
       return {
         hash,
-        length: payload.byteLength,
+        length: BigInt(payload.byteLength),
         commit: async () => {
           await this.ensureDir();
 
@@ -161,7 +161,7 @@ export class PayloadDriverFilesystem<PayloadDigest>
 
     return {
       hash,
-      length,
+      length: BigInt(length),
       commit: async () => {
         await this.ensureDir();
 

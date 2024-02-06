@@ -12,7 +12,8 @@ type SkiplistOpts<
     | string
     | number
     | bigint
-    | boolean,
+    | boolean
+    | symbol,
   LiftedType,
 > = {
   compare: (a: ValueType, b: ValueType) => number;
@@ -96,7 +97,7 @@ export class Skiplist<
 
     for (const key of map.keys()) {
       divider.push("------------");
-      line.push(`${key}`.padEnd(12));
+      line.push(`${String(key)}`.padEnd(12));
     }
 
     console.log(divider.join("-+-"));
