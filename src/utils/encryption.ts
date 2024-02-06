@@ -1,14 +1,20 @@
 import { Path } from "../../deps.ts";
 
-export async function encryptPath<EncryptionKey>(opts: {
-  key: EncryptionKey;
-  /** Output must be of size maximum component length, input ... just a path component or MORE? */
-  encryptFn: (key: EncryptionKey, bytes: Uint8Array) => Promise<Uint8Array>;
-  deriveKey: (
-    key: EncryptionKey,
-    component: Uint8Array,
-  ) => Promise<EncryptionKey>;
-}, path: Path): Promise<[Path, EncryptionKey]> {
+/** Encrypt a `Path`.
+ *
+ * https://willowprotocol.org/specs/e2e/index.html#e2e_paths
+ */
+export async function encryptPath<EncryptionKey>(
+  opts: {
+    key: EncryptionKey;
+    encryptFn: (key: EncryptionKey, bytes: Uint8Array) => Promise<Uint8Array>;
+    deriveKey: (
+      key: EncryptionKey,
+      component: Uint8Array,
+    ) => Promise<EncryptionKey>;
+  },
+  path: Path,
+): Promise<[Path, EncryptionKey]> {
   if (path.length === 0) {
     return [[], opts.key];
   }
@@ -45,7 +51,6 @@ export async function encryptPath<EncryptionKey>(opts: {
 export function encryptComponent<EncryptionKey>(
   opts: {
     key: EncryptionKey;
-    /** Output must be of size maximum component length, input ... just a path component or MORE? */
     encryptFn: (key: EncryptionKey, bytes: Uint8Array) => Promise<Uint8Array>;
   },
   component: Uint8Array,
@@ -53,9 +58,12 @@ export function encryptComponent<EncryptionKey>(
   return opts.encryptFn(opts.key, component);
 }
 
+/** Decrypt a `Path`.
+ *
+ * https://willowprotocol.org/specs/e2e/index.html#e2e_paths
+ */
 export async function decryptPath<EncryptionKey>(opts: {
   key: EncryptionKey;
-  /** Output must be of size maximum component length, input ... just a path component or MORE? */
   decryptFn: (key: EncryptionKey, bytes: Uint8Array) => Promise<Uint8Array>;
   deriveKey: (
     key: EncryptionKey,
@@ -98,10 +106,40 @@ export async function decryptPath<EncryptionKey>(opts: {
 export function decryptComponent<EncryptionKey>(
   opts: {
     key: EncryptionKey;
-    /** Output must be of size maximum component length, input ... just a path component or MORE? */
     decryptFn: (key: EncryptionKey, bytes: Uint8Array) => Promise<Uint8Array>;
   },
   component: Uint8Array,
 ): Promise<Uint8Array> {
   return opts.decryptFn(opts.key, component);
+}
+
+export function encryptPathAtOffset<EncryptionKey>(
+  opts: {
+    key: EncryptionKey;
+    encryptFn: (key: EncryptionKey, bytes: Uint8Array) => Promise<Uint8Array>;
+    deriveKey: (
+      key: EncryptionKey,
+      component: Uint8Array,
+    ) => Promise<EncryptionKey>;
+    offset: number;
+  },
+  path: Path,
+): Promise<[Path, EncryptionKey]> {
+  const offsetPath = path.slice(0, opts.offset);
+
+  return encryptPath(opts, offsetPath);
+}
+
+export function decryptPathAtOffset<EncryptionKey>(opts: {
+  key: EncryptionKey;
+  decryptFn: (key: EncryptionKey, bytes: Uint8Array) => Promise<Uint8Array>;
+  deriveKey: (
+    key: EncryptionKey,
+    component: Uint8Array,
+  ) => Promise<EncryptionKey>;
+  offset: number;
+}, path: Path): Promise<[Path, EncryptionKey]> {
+  const offsetPath = path.slice(0, opts.offset);
+
+  return decryptPath(opts, offsetPath);
 }

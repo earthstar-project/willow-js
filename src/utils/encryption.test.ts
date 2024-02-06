@@ -117,7 +117,10 @@ Deno.test("encryptPath and decryptPath", async () => {
       deriveKey,
     }, encryptedPath);
 
-    assertNotEquals(encryptedPath, path);
+    if (path.length > 0) {
+      assertNotEquals(encryptedPath, path);
+    }
+
     assertEquals(decryptedPath, path);
   }
 });
