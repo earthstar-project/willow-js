@@ -4,6 +4,8 @@ import {
   AreaOfInterest,
   bigintToBytes,
   concat,
+  encodeBase64,
+  encodeEntry,
   Entry,
   isIncludedRange,
   isPathPrefixed,
@@ -26,17 +28,24 @@ import {
   testSchemePayload,
   testSchemeSubspace,
 } from "../../../test/test_schemes.ts";
-import { randomPath, randomTimestamp } from "../../../test/utils.ts";
-import { ProtocolParameters } from "../../types.ts";
+import {
+  getSubspaces,
+  randomPath,
+  randomTimestamp,
+} from "../../../test/utils.ts";
+import { ProtocolParameters, QueryOrder } from "../../types.ts";
 import { MonoidRbTree } from "../summarisable_storage/monoid_rbtree.ts";
-import { TripleStorage } from "./triple_storage.ts";
+import { encodePathWithSeparators, TripleStorage } from "./triple_storage.ts";
 import { Storage3d } from "./types.ts";
 import { assertEquals } from "https://deno.land/std@0.202.0/assert/assert_equals.ts";
-import { encodePathWithSeparators } from "../../util.ts";
+import { sample } from "https://deno.land/std@0.202.0/collections/mod.ts";
+
+import { Store } from "../../store.ts";
+import { RadixTree } from "../prefix_iterators/radix_tree.ts";
 
 export type Storage3dScenario<
-  NamespaceKey,
-  SubspaceKey,
+  NamespaceId,
+  SubspaceId,
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
@@ -44,10 +53,10 @@ export type Storage3dScenario<
 > = {
   name: string;
   makeScenario: (
-    namespace: NamespaceKey,
+    namespace: NamespaceId,
     params: ProtocolParameters<
-      NamespaceKey,
-      SubspaceKey,
+      NamespaceId,
+      SubspaceId,
       PayloadDigest,
       AuthorisationOpts,
       AuthorisationToken,
@@ -56,8 +65,8 @@ export type Storage3dScenario<
   ) => Promise<
     {
       storage: Storage3d<
-        NamespaceKey,
-        SubspaceKey,
+        NamespaceId,
+        SubspaceId,
         PayloadDigest,
         Fingerprint
       >;
@@ -69,17 +78,17 @@ export type Storage3dScenario<
 const tripleStorageScenario = {
   name: "Triple storage",
   makeScenario: <
-    NamespaceKey,
-    SubspaceKey,
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
     AuthorisationOpts,
     AuthorisationToken,
     Fingerprint,
   >(
-    namespace: NamespaceKey,
+    namespace: NamespaceId,
     params: ProtocolParameters<
-      NamespaceKey,
-      SubspaceKey,
+      NamespaceId,
+      SubspaceId,
       PayloadDigest,
       AuthorisationOpts,
       AuthorisationToken,
@@ -263,7 +272,7 @@ Deno.test("Storage3d.summarise", async () => {
             if (a > b) return 1;
             return 0;
           },
-          minimalSubspaceKey: 0,
+          minimalSubspaceId: 0,
           successor(a: number) {
             return a + 1;
           },
@@ -537,7 +546,6 @@ Deno.test("Storage3d.summarise", async () => {
   }
 });
 
-/*
 Deno.test("Storage3d.query", async (test) => {
   for (const scenario of scenarios) {
     const namespaceKeypair = await makeNamespaceKeypair();
@@ -554,14 +562,13 @@ Deno.test("Storage3d.query", async (test) => {
       },
     );
 
-
-    const replica = new Replica({
+    const store = new Store({
       namespace: namespaceKeypair.namespace,
       protocolParameters: {
         authorisationScheme: testSchemeAuthorisation,
         namespaceScheme: testSchemeNamespace,
         subspaceScheme: testSchemeSubspace,
-        pathLengthScheme: testSchemePathLength,
+        pathScheme: testSchemePath,
         payloadScheme: testSchemePayload,
         fingerprintScheme: testSchemeFingerprint,
       },
@@ -569,7 +576,7 @@ Deno.test("Storage3d.query", async (test) => {
         makeStorage: () => {
           return storage;
         },
-        prefixIterator: new RadixishTree<Uint8Array>(),
+        prefixIterator: new RadixTree<Uint8Array>(),
         writeAheadFlag: {
           wasInserting: () => Promise.resolve(undefined),
           wasRemoving: () => Promise.resolve(undefined),
@@ -581,11 +588,32 @@ Deno.test("Storage3d.query", async (test) => {
       },
     });
 
-
     await test.step(scenario.name, async () => {
       // Generate the test queries
 
-      const areaParams: AreaOfInterest<number>[] = [];
+      const queryParams: {
+        aoi: AreaOfInterest<Uint8Array>;
+        order: QueryOrder;
+        reverse: boolean;
+      }[] = [];
+
+      const subspaces = await getSubspaces(10);
+      const bytes = [];
+      const paths = [];
+
+      for (let i = 0; i < 50; i++) {
+        paths.push(randomPath());
+      }
+
+      for (let i = 0; i < 50; i++) {
+        bytes.push(crypto.getRandomValues(new Uint8Array(4)));
+      }
+
+      const timestamps = [];
+
+      for (let i = 0; i < 25; i++) {
+        timestamps.push(randomTimestamp());
+      }
 
       for (let i = 0; i < 100; i++) {
         const randomCount = () => {
@@ -598,12 +626,6 @@ Deno.test("Storage3d.query", async (test) => {
           return Math.random() > 0.5
             ? BigInt(Math.floor(Math.random() * (64 - 16 + 1) + 16))
             : BigInt(0);
-        };
-
-        const randomSubspaceId = () => {
-          return Math.random() > 0.5
-            ? Math.floor(Math.random() * 255)
-            : ANY_SUBSPACE;
         };
 
         const randomTimeRange = () => {
@@ -623,71 +645,91 @@ Deno.test("Storage3d.query", async (test) => {
           return { start, end };
         };
 
-        areaParams.push({
-          area: {
-            includedSubspaceId: randomSubspaceId(),
-            pathPrefix: randomPath(),
-            timeRange: randomTimeRange(),
+        const orderRoll = Math.random();
+
+        queryParams.push({
+          aoi: {
+            area: {
+              includedSubspaceId: sample(subspaces)!.subspace,
+              pathPrefix: randomPath(),
+              timeRange: randomTimeRange(),
+            },
+            maxCount: randomCount(),
+            maxSize: randomSize(),
           },
-          maxCount: randomCount(),
-          maxSize: randomSize(),
+          reverse: Math.random() < 0.25 ? true : false,
+          order: orderRoll < 0.33
+            ? "subspace"
+            : orderRoll < 0.66
+            ? "path"
+            : "timestamp",
         });
       }
 
       // A function which returns all the areas a given spt is included by
       const isIncludedByAreas = (
-        subspace: number,
+        subspace: Uint8Array,
         path: Path,
         time: bigint,
-      ): AreaOfInterest<number>[] => {
-        const inclusiveAreas: AreaOfInterest<number>[] = [];
+      ): {
+        aoi: AreaOfInterest<Uint8Array>;
+        order: QueryOrder;
+        reverse: boolean;
+      }[] => {
+        const inclusiveParams: {
+          aoi: AreaOfInterest<Uint8Array>;
+          order: QueryOrder;
+          reverse: boolean;
+        }[] = [];
 
-        for (const aoi of areaParams) {
+        for (const params of queryParams) {
           if (
-            aoi.area.includedSubspaceId !== ANY_SUBSPACE &&
-            aoi.area.includedSubspaceId !== subspace
+            params.aoi.area.includedSubspaceId !== ANY_SUBSPACE &&
+            orderBytes(params.aoi.area.includedSubspaceId, subspace) !== 0
           ) {
             continue;
           }
 
           if (
-            isPathPrefixed(aoi.area.pathPrefix, path) === false
+            isPathPrefixed(params.aoi.area.pathPrefix, path) === false
           ) {
             continue;
           }
 
           if (
-            isIncludedRange(orderTimestamp, aoi.area.timeRange, time) === false
+            isIncludedRange(orderTimestamp, params.aoi.area.timeRange, time) ===
+              false
           ) {
             continue;
           }
 
-          inclusiveAreas.push(aoi);
+          inclusiveParams.push(params);
         }
 
-        return inclusiveAreas;
+        return inclusiveParams;
       };
 
-      const actualResultMap = new Map<
-        AreaOfInterest<number>,
-        Set<string>
-      >();
+      const actualResultMap = new Map<{
+        aoi: AreaOfInterest<Uint8Array>;
+        order: QueryOrder;
+        reverse: boolean;
+      }, Set<string>>();
 
-      for (const areaOfInterest of areaParams) {
-        actualResultMap.set(areaOfInterest, new Set());
+      for (const params of queryParams) {
+        actualResultMap.set(params, new Set());
       }
 
-      replica.addEventListener("entryremove", (event) => {
+      store.addEventListener("entryremove", (event) => {
         const { detail: { removed } } = event as CustomEvent<
           { removed: Entry<Uint8Array, Uint8Array, Uint8Array> }
         >;
 
-        const encodedEntry = encodeEntry(removed, {
+        const encodedEntry = encodeEntry({
           namespaceScheme: testSchemeNamespace,
           subspaceScheme: testSchemeSubspace,
-          pathLengthScheme: testSchemePathLength,
+          pathScheme: testSchemePath,
           payloadScheme: testSchemePayload,
-        });
+        }, removed);
 
         testSchemePayload.fromBytes(encodedEntry).then((hash) => {
           const b64 = encodeBase64(hash);
@@ -702,13 +744,15 @@ Deno.test("Storage3d.query", async (test) => {
 
       // Generate the entries
       for (let i = 0; i < 50; i++) {
-        const pathAndPayload = sample(bytes)!;
+        const path = sample(paths)!;
+        const payload = sample(bytes)!;
+
         const chosenSubspace = sample(subspaces)!;
         const timestamp = sample(timestamps)!;
 
-        const result = await replica.set({
-          path: pathAndPayload,
-          payload: pathAndPayload,
+        const result = await store.set({
+          path: path,
+          payload: payload,
           subspace: chosenSubspace.subspace,
           timestamp,
         }, chosenSubspace.privateKey);
@@ -718,18 +762,18 @@ Deno.test("Storage3d.query", async (test) => {
         }
 
         // See if it belongs to any of the test queries.
-        const correspondingQueries = includedByQueries(
+        const correspondingQueries = isIncludedByAreas(
           chosenSubspace.subspace,
-          pathAndPayload,
+          path,
           timestamp,
         );
 
-        const encodedEntry = encodeEntry(result.entry, {
+        const encodedEntry = encodeEntry({
           namespaceScheme: testSchemeNamespace,
           subspaceScheme: testSchemeSubspace,
-          pathLengthScheme: testSchemePathLength,
+          pathScheme: testSchemePath,
           payloadScheme: testSchemePayload,
-        });
+        }, result.entry);
 
         const entryHash = await testSchemePayload.fromBytes(encodedEntry);
 
@@ -739,6 +783,7 @@ Deno.test("Storage3d.query", async (test) => {
         const authTokenHash = await testSchemePayload.fromBytes(
           new Uint8Array(result.authToken),
         );
+
         const b64AuthHash = encodeBase64(authTokenHash);
 
         entryAuthHashMap.set(b64EntryHash, b64AuthHash);
@@ -750,10 +795,10 @@ Deno.test("Storage3d.query", async (test) => {
         }
       }
 
-      for (const query of queries) {
+      for (const params of queryParams) {
         let entriesRead = 0;
 
-        const awaiting = new Set(actualResultMap.get(query));
+        const awaiting = new Set(actualResultMap.get(params));
 
         const prevIsCorrectOrder = (
           prev: Entry<Uint8Array, Uint8Array, ArrayBuffer>,
@@ -762,48 +807,48 @@ Deno.test("Storage3d.query", async (test) => {
         ): boolean => {
           switch (ord) {
             case "path": {
-              const order = compareBytes(
-                prev.identifier.path,
-                curr.identifier.path,
+              const order = orderPath(
+                prev.path,
+                curr.path,
               );
 
               if (order === 0) {
                 return prevIsCorrectOrder(prev, curr, "timestamp");
               }
 
-              if (query.reverse) {
+              if (params.reverse) {
                 return order === 1;
               }
 
               return order === -1;
             }
             case "timestamp": {
-              const order = Products.orderTimestamps(
-                prev.record.timestamp,
-                curr.record.timestamp,
+              const order = orderTimestamp(
+                prev.timestamp,
+                curr.timestamp,
               );
 
               if (order === 0) {
                 return prevIsCorrectOrder(prev, curr, "subspace");
               }
 
-              if (query.reverse) {
+              if (params.reverse) {
                 return order === 1;
               }
 
               return order === -1;
             }
             case "subspace": {
-              const order = compareBytes(
-                prev.identifier.subspace,
-                curr.identifier.subspace,
+              const order = orderBytes(
+                prev.subspaceId,
+                curr.subspaceId,
               );
 
               if (order === 0) {
                 return prevIsCorrectOrder(prev, curr, "path");
               }
 
-              if (query.reverse) {
+              if (params.reverse) {
                 return order === 1;
               }
 
@@ -815,14 +860,18 @@ Deno.test("Storage3d.query", async (test) => {
         let prevEntry: Entry<Uint8Array, Uint8Array, ArrayBuffer> | undefined;
 
         for await (
-          const { entry, authTokenHash } of storage.entriesByQuery(query)
+          const { entry, authTokenHash } of storage.query(
+            params.aoi,
+            params.order,
+            params.reverse,
+          )
         ) {
-          const encodedEntry = encodeEntry(entry, {
+          const encodedEntry = encodeEntry({
             namespaceScheme: testSchemeNamespace,
             subspaceScheme: testSchemeSubspace,
-            pathLengthScheme: testSchemePathLength,
+            pathScheme: testSchemePath,
             payloadScheme: testSchemePayload,
-          });
+          }, entry);
 
           const entryHash = await testSchemePayload.fromBytes(encodedEntry);
 
@@ -835,27 +884,30 @@ Deno.test("Storage3d.query", async (test) => {
 
           // Test order
           if (prevEntry) {
-            assert(prevIsCorrectOrder(prevEntry, entry, query.order));
+            assert(prevIsCorrectOrder(prevEntry, entry, params.order));
           }
 
-          assert(actualResultMap.get(query)?.has(b64EntryHash));
+          assert(actualResultMap.get(params)?.has(b64EntryHash));
           entriesRead += 1;
           prevEntry = entry;
 
           awaiting.delete(b64EntryHash);
 
-          if (query.limit && entriesRead > query.limit) {
+          if (params.aoi.maxCount && entriesRead > params.aoi.maxCount) {
             assert(false, "Too many entries received for query");
           }
         }
 
-        if (query.limit) {
-          assertEquals(
-            entriesRead,
-            Math.min(query.limit, actualResultMap.get(query)!.size),
-          );
-        } else {
-          assertEquals(entriesRead, actualResultMap.get(query)!.size);
+        if (params.aoi.maxCount !== 0) {
+          assert(entriesRead <= params.aoi.maxCount);
+        }
+
+        if (params.aoi.maxSize !== BigInt(0)) {
+          assert(entriesRead * 4 <= params.aoi.maxSize);
+        }
+
+        if (params.aoi.maxCount === 0 && params.aoi.maxSize === BigInt(0)) {
+          assertEquals(entriesRead, actualResultMap.get(params)!.size);
         }
       }
     });
@@ -863,11 +915,3 @@ Deno.test("Storage3d.query", async (test) => {
     await dispose();
   }
 });
-
-*/
-
-function orderNumbers(a: number, b: number) {
-  if (a < b) return -1;
-  if (a > b) return 1;
-  return 0;
-}

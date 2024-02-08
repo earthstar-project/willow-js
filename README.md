@@ -3,6 +3,10 @@
 This is a reference implementation of the Willow protocol written in TypeScript.
 **It is a work in progress**!
 
+Want to follow along with development, ask questions, or get involved yourself?
+Come and join us on the
+[Earthstar Project Discord](https://discord.gg/6NtYzQC2G4).
+
 Here is what has been implemented:
 
 - `Store`
@@ -41,5 +45,6 @@ And here is what remains:
   - QUIC transport driver
 - IndexedDB KV driver
 
-Want to follow along with development, or get involved? Come and join us on the
-[Earthstar Project Discord](https://discord.gg/6NtYzQC2G4).
+## Dev
+
+Deno is used the development runtime. Run `deno task test` to run tests.

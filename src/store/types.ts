@@ -15,7 +15,7 @@ export type NamespaceScheme<NamespaceId> = EncodingScheme<NamespaceId> & {
 export type SubspaceScheme<SubspaceId> = EncodingScheme<SubspaceId> & {
   successor: SuccessorFn<SubspaceId>;
   order: TotalOrder<SubspaceId>;
-  minimalSubspaceKey: SubspaceId;
+  minimalSubspaceId: SubspaceId;
 };
 
 export type PayloadScheme<PayloadDigest> = EncodingScheme<PayloadDigest> & {
@@ -24,33 +24,33 @@ export type PayloadScheme<PayloadDigest> = EncodingScheme<PayloadDigest> & {
 };
 
 export type AuthorisationScheme<
-  NamespaceKey,
-  SubspaceKey,
+  NamespaceId,
+  SubspaceId,
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
 > = {
   /** Produce an authorisation token from an entry */
   authorise(
-    entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
     opts: AuthorisationOpts,
   ): Promise<AuthorisationToken>;
   /** Verify if an entry is authorised to be written */
   isAuthorisedWrite: (
-    entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
     token: AuthorisationToken,
   ) => Promise<boolean>;
   tokenEncoding: EncodingScheme<AuthorisationToken>;
 };
 
 export type FingerprintScheme<
-  NamespaceKey,
-  SubspaceKey,
+  NamespaceId,
+  SubspaceId,
   PayloadDigest,
   Fingerprint,
 > = {
   fingerprintSingleton(
-    entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
   ): Promise<Fingerprint>;
   fingerprintCombine(
     a: Fingerprint,
@@ -61,8 +61,8 @@ export type FingerprintScheme<
 
 /** Concrete parameters peculiar to a specific usage of Willow. */
 export interface ProtocolParameters<
-  NamespaceKey,
-  SubspaceKey,
+  NamespaceId,
+  SubspaceId,
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
@@ -70,56 +70,56 @@ export interface ProtocolParameters<
 > {
   pathScheme: PathScheme;
 
-  namespaceScheme: NamespaceScheme<NamespaceKey>;
+  namespaceScheme: NamespaceScheme<NamespaceId>;
 
-  subspaceScheme: SubspaceScheme<SubspaceKey>;
+  subspaceScheme: SubspaceScheme<SubspaceId>;
 
   // Learn about payloads and producing them from bytes
   payloadScheme: PayloadScheme<PayloadDigest>;
 
   authorisationScheme: AuthorisationScheme<
-    NamespaceKey,
-    SubspaceKey,
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
     AuthorisationOpts,
     AuthorisationToken
   >;
 
   fingerprintScheme: FingerprintScheme<
-    NamespaceKey,
-    SubspaceKey,
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
     Fingerprint
   >;
 }
 
-export type ReplicaOpts<
-  NamespaceKey,
-  SubspaceKey,
+export type StoreOpts<
+  NamespaceId,
+  SubspaceId,
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
   Fingerprint,
 > = {
-  /** The public key of the namespace this replica is a snapshot of. */
-  namespace: NamespaceKey;
-  /** The protocol parameters this replica should use. */
+  /** The public key of the namespace this store holds entries for. */
+  namespace: NamespaceId;
+  /** The protocol parameters this store should use. */
   protocolParameters: ProtocolParameters<
-    NamespaceKey,
-    SubspaceKey,
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
     AuthorisationOpts,
     AuthorisationToken,
     Fingerprint
   >;
-  /** An optional driver used to store and retrieve a replica's entries. */
+  /** An optional driver used to store and retrieve a store's entries. */
   entryDriver?: EntryDriver<
-    NamespaceKey,
-    SubspaceKey,
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
     Fingerprint
   >;
-  /** An option driver used to store and retrieve a replica's payloads.  */
+  /** An option driver used to store and retrieve a store's payloads.  */
   payloadDriver?: PayloadDriver<PayloadDigest>;
 };
 

@@ -12,7 +12,7 @@ import {
   NamespaceScheme,
   PayloadScheme,
   SubspaceScheme,
-} from "../replica/types.ts";
+} from "../store/types.ts";
 import { importPublicKey } from "./crypto.ts";
 
 export const testSchemeNamespace: NamespaceScheme<Uint8Array> = {
@@ -26,7 +26,7 @@ export const testSchemeSubspace: SubspaceScheme<Uint8Array> = {
   encode: (v) => v,
   decode: (v) => v.subarray(0, 65),
   encodedLength: () => 65,
-  minimalSubspaceKey: new Uint8Array(65),
+  minimalSubspaceId: new Uint8Array(65),
   order: orderBytes,
   successor: successorBytesFixedWidth,
 };

@@ -7,7 +7,7 @@ import {
   Payload,
   ProtocolParameters,
   QueryOrder,
-  ReplicaOpts,
+  StoreOpts,
 } from "./types.ts";
 import { PayloadDriverMemory } from "./storage/payload_drivers/memory.ts";
 import {
@@ -27,13 +27,13 @@ import {
 } from "../../deps.ts";
 import { Storage3d } from "./storage/storage_3d/types.ts";
 
-/** A local snapshot of a namespace to be written to, queried from, and synced with other replicas.
- *
- * Data is stored as many {@link SignedEntry} with a corresponding {@link Payload}, which the replica may or may not possess.
+/** A local set of a particular namespace's entries to be written to, read from, and synced with other `Store`s.
  *
  * Keeps data in memory unless persisted entry / payload drivers are specified.
+ *
+ * https://willowprotocol.org/specs/data-model/index.html#store
  */
-export class Replica<
+export class Store<
   NamespacePublicKey,
   SubspacePublicKey,
   PayloadDigest,
@@ -70,7 +70,7 @@ export class Replica<
   private checkedWriteAheadFlag = deferred();
 
   constructor(
-    opts: ReplicaOpts<
+    opts: StoreOpts<
       NamespacePublicKey,
       SubspacePublicKey,
       PayloadDigest,
@@ -139,7 +139,7 @@ export class Replica<
     this.checkedWriteAheadFlag.resolve();
   }
 
-  /** Create a new {@link SignedEntry} for some data and store both in the replica. */
+  /** Create a new authorised entry for a payload, and store both in the store. */
   async set(
     //
     input: EntryInput<SubspacePublicKey>,
@@ -181,11 +181,11 @@ export class Replica<
     return ingestResult;
   }
 
-  /** Attempt to store a {@link SignedEntry} in the replica.
+  /** Attempt to store an authorised entry in the `Store`.
    *
-   * An entry will not be ingested if it is found to have an invalid signature; if a newer entry with the same path and author are present; or if a newer entry with a path that is a prefix of the given entry exists.
+   * An entry will not be ingested if it is unauthorised; if a newer entry with the same path and subspace are present; or if a newer entry with a path that is a prefix of the given entry exists.
    *
-   * Additionally, if the entry's path is a prefix of already-held older entries, those entries will be removed from the replica.
+   * Additionally, if the entry's path is a prefix of already-held older entries, those entries will be removed from the `Store`.
    */
   async ingestEntry(
     entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
@@ -214,7 +214,7 @@ export class Replica<
       return {
         kind: "failure",
         reason: "invalid_entry",
-        message: "Entry's namespace did not match replica's namespace.",
+        message: "Entry's namespace did not match store's namespace.",
         err: null,
       };
     }
@@ -457,9 +457,9 @@ export class Replica<
     await this.entryDriver.writeAheadFlag.unflagInsertion();
   }
 
-  /** Attempt to store the corresponding payload for one of the replica's entries.
+  /** Attempt to store the corresponding payload for one of the store's entries.
    *
-   * A payload will not be ingested if the given entry is not stored in the replica; if the hash of the payload does not match the entry's; or if it is already held.
+   * A payload will not be ingested if the given entry is not stored in the store; if the hash of the payload does not match the entry's; or if it is already held.
    */
   async ingestPayload(
     entryDetails: {
@@ -519,7 +519,7 @@ export class Replica<
     };
   }
 
-  /** Retrieve a list of entry-payload pairs from the replica for a given {@link Query}. */
+  /** Retrieve an asynchronous iterator of entry-payload-authorisation triples from the store for a given `Area`. */
   async *query(
     areaOfInterest: AreaOfInterest<SubspacePublicKey>,
     order: QueryOrder,

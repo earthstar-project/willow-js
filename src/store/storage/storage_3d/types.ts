@@ -2,25 +2,25 @@ import { AreaOfInterest, Entry, Path } from "../../../../deps.ts";
 import { QueryOrder } from "../../types.ts";
 
 export interface Storage3d<
-  NamespaceKey,
-  SubspaceKey,
+  NamespaceId,
+  SubspaceId,
   PayloadDigest,
   Fingerprint,
 > {
   /** Retrieve a value */
   get(
-    subspace: SubspaceKey,
+    subspace: SubspaceId,
     path: Path,
   ): Promise<
     {
-      entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>;
+      entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
       authTokenHash: PayloadDigest;
     } | undefined
   >;
 
   insert(opts: {
     path: Path;
-    subspace: SubspaceKey;
+    subspace: SubspaceId;
     payloadDigest: PayloadDigest;
     timestamp: bigint;
     length: bigint;
@@ -28,23 +28,23 @@ export interface Storage3d<
   }): Promise<void>;
 
   remove(
-    entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
   ): Promise<boolean>;
 
   // Used during sync
   summarise(
-    areaOfInterest: AreaOfInterest<SubspaceKey>,
+    areaOfInterest: AreaOfInterest<SubspaceId>,
   ): Promise<{ fingerprint: Fingerprint; size: number }>;
 
   // Used to fetch entries for transfer during sync.
   // All three dimensions are defined
   query(
-    areaOfInterest: AreaOfInterest<SubspaceKey>,
+    areaOfInterest: AreaOfInterest<SubspaceId>,
     order: QueryOrder,
     reverse?: boolean,
   ): AsyncIterable<
     {
-      entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>;
+      entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
       authTokenHash: PayloadDigest;
     }
   >;
