@@ -6,47 +6,47 @@ import { PrefixIterator } from "./prefix_iterators/types.ts";
 import { Storage3d } from "./storage_3d/types.ts";
 
 export interface WriteAheadFlag<
-  NamespaceKey,
-  SubspaceKey,
+  NamespaceId,
+  SubspaceId,
   PayloadDigest,
 > {
   wasInserting(): Promise<
     {
-      entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>;
+      entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
       authTokenHash: PayloadDigest;
     } | undefined
   >;
   wasRemoving(): Promise<
-    Entry<NamespaceKey, SubspaceKey, PayloadDigest> | undefined
+    Entry<NamespaceId, SubspaceId, PayloadDigest> | undefined
   >;
   flagInsertion(
-    entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
     authTokenHash: PayloadDigest,
   ): Promise<void>;
   unflagInsertion: () => Promise<void>;
   flagRemoval(
-    entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
   ): Promise<void>;
   unflagRemoval(): Promise<void>;
 }
 
-/** Provides methods for storing and retrieving entries for a {@link Replica}. */
+/** Provides methods for storing and retrieving entries for a {@link Store}. */
 export interface EntryDriver<
-  NamespaceKey,
-  SubspaceKey,
+  NamespaceId,
+  SubspaceId,
   PayloadDigest,
   Fingerprint,
 > {
-  makeStorage: (namespace: NamespaceKey) => Storage3d<
-    NamespaceKey,
-    SubspaceKey,
+  makeStorage: (namespace: NamespaceId) => Storage3d<
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
     Fingerprint
   >;
-  /** Helps a Replica recover from unexpected shutdowns mid-write. */
+  /** Helps a Store recover from unexpected shutdowns mid-write. */
   writeAheadFlag: WriteAheadFlag<
-    NamespaceKey,
-    SubspaceKey,
+    NamespaceId,
+    SubspaceId,
     PayloadDigest
   >;
   /** Used to find paths that are prefixes of, or prefixed by, another path. */

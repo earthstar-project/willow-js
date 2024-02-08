@@ -2,9 +2,8 @@ import {
   assert,
   assertEquals,
 } from "https://deno.land/std@0.177.0/testing/asserts.ts";
-import { Replica } from "./replica.ts";
+import { Store } from "./store.ts";
 import { crypto } from "https://deno.land/std@0.188.0/crypto/crypto.ts";
-import { encodeEntryKeys, encodeSummarisableStorageValue } from "./util.ts";
 import {
   testSchemeAuthorisation,
   testSchemeFingerprint,
@@ -16,7 +15,7 @@ import {
 import { makeSubspaceKeypair } from "../test/crypto.ts";
 import { fullArea, orderBytes, orderPath } from "../../deps.ts";
 
-class TestReplica extends Replica<
+class TestStore extends Store<
   Uint8Array,
   Uint8Array,
   ArrayBuffer,
@@ -54,15 +53,15 @@ class TestReplica extends Replica<
 
 // Namespace length must equal protocol parameter pub key length
 
-Deno.test("Replica.set", async (test) => {
+Deno.test("Store.set", async (test) => {
   const authorKeypair = await makeSubspaceKeypair();
   const author2Keypair = await makeSubspaceKeypair();
 
   await test.step("Fails with invalid ingestions", async () => {
-    const replica = new TestReplica();
+    const store = new TestStore();
 
     // Returns an error and does not ingest payload if the entry is invalid
-    const badKeypairRes = await replica.set(
+    const badKeypairRes = await store.set(
       {
         path: [new Uint8Array([1, 2, 3, 4])],
         payload: new Uint8Array([1, 1, 1, 1]),
@@ -77,7 +76,7 @@ Deno.test("Replica.set", async (test) => {
     const entries = [];
 
     for await (
-      const entry of replica.query({
+      const entry of store.query({
         area: fullArea(),
         maxCount: 0,
         maxSize: BigInt(0),
@@ -90,9 +89,9 @@ Deno.test("Replica.set", async (test) => {
   });
 
   await test.step("Succeeds with valid ingestions", async () => {
-    const replica = new TestReplica();
+    const store = new TestStore();
 
-    const goodKeypairRes = await replica.set(
+    const goodKeypairRes = await store.set(
       {
         path: [new Uint8Array([1, 2, 3, 4])],
         payload: new Uint8Array([1, 1, 1, 1]),
@@ -106,7 +105,7 @@ Deno.test("Replica.set", async (test) => {
     const entries = [];
 
     for await (
-      const entry of replica.query({
+      const entry of store.query({
         area: fullArea(),
         maxCount: 0,
         maxSize: BigInt(0),
@@ -120,9 +119,9 @@ Deno.test("Replica.set", async (test) => {
   });
 
   await test.step("If a timestamp is set, it is used", async () => {
-    const replica = new TestReplica();
+    const store = new TestStore();
 
-    const res = await replica.set(
+    const res = await store.set(
       {
         path: [new Uint8Array([1, 2, 3, 4])],
         payload: new Uint8Array([1, 1, 1, 1]),
@@ -137,11 +136,11 @@ Deno.test("Replica.set", async (test) => {
   });
 
   await test.step("If no timestamp is set, and there is nothing else at the same path, use the current time.", async () => {
-    const replica = new TestReplica();
+    const store = new TestStore();
 
     const timestampBefore = BigInt(Date.now() * 1000);
 
-    const res = await replica.set(
+    const res = await store.set(
       {
         path: [new Uint8Array([1, 2, 3, 4])],
         payload: new Uint8Array([1, 1, 1, 1]),
@@ -159,16 +158,16 @@ Deno.test("Replica.set", async (test) => {
 // ==================================
 // ingestEntry
 
-Deno.test("Replica.ingestEntry", async (test) => {
+Deno.test("Store.ingestEntry", async (test) => {
   const authorKeypair = await makeSubspaceKeypair();
   const author2Keypair = await makeSubspaceKeypair();
 
   // rejects stuff from a different namespace
   await test.step("Rejects entries from a different namespace", async () => {
-    const otherReplica = new TestReplica(new Uint8Array([9, 9, 9, 9]));
-    const replica = new TestReplica();
+    const otherStore = new TestStore(new Uint8Array([9, 9, 9, 9]));
+    const store = new TestStore();
 
-    const otherReplicaRes = await otherReplica.set(
+    const otherStoreRes = await otherStore.set(
       {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array(),
@@ -177,11 +176,11 @@ Deno.test("Replica.ingestEntry", async (test) => {
       authorKeypair.privateKey,
     );
 
-    assert(otherReplicaRes.kind === "success");
+    assert(otherStoreRes.kind === "success");
 
-    const ingestRes = await replica.ingestEntry(
-      otherReplicaRes.entry,
-      otherReplicaRes.authToken,
+    const ingestRes = await store.ingestEntry(
+      otherStoreRes.entry,
+      otherStoreRes.authToken,
     );
 
     assert(ingestRes.kind === "failure");
@@ -189,10 +188,10 @@ Deno.test("Replica.ingestEntry", async (test) => {
   });
 
   await test.step("Rejects entries with bad signatures", async () => {
-    const otherReplica = new TestReplica();
-    const replica = new TestReplica();
+    const otherStore = new TestStore();
+    const store = new TestStore();
 
-    const otherReplicaRes = await otherReplica.set(
+    const otherStoreRes = await otherStore.set(
       {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array(),
@@ -201,10 +200,10 @@ Deno.test("Replica.ingestEntry", async (test) => {
       authorKeypair.privateKey,
     );
 
-    assert(otherReplicaRes.kind === "success");
+    assert(otherStoreRes.kind === "success");
 
-    const badAuthorSigRes = await replica.ingestEntry(
-      otherReplicaRes.entry,
+    const badAuthorSigRes = await store.ingestEntry(
+      otherStoreRes.entry,
       new Uint8Array([1, 2, 3]).buffer,
     );
 
@@ -214,9 +213,9 @@ Deno.test("Replica.ingestEntry", async (test) => {
 
   // no ops entries for which there are newer entries with paths that are prefixes of that entry
   await test.step("Does not ingest entries for which there are new entries with paths which are a prefix", async () => {
-    const replica = new TestReplica();
+    const store = new TestStore();
 
-    await replica.set(
+    await store.set(
       {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 1]),
@@ -226,7 +225,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
       authorKeypair.privateKey,
     );
 
-    const secondRes = await replica.set(
+    const secondRes = await store.set(
       {
         path: [new Uint8Array([0, 0, 0, 0]), new Uint8Array([1])],
         payload: new Uint8Array([0, 1, 2, 3]),
@@ -241,9 +240,9 @@ Deno.test("Replica.ingestEntry", async (test) => {
   });
 
   await test.step("Does not ingest entries for which there are newer entries with the same path and author", async () => {
-    const replica = new TestReplica();
+    const store = new TestStore();
 
-    await replica.set(
+    await store.set(
       {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 1]),
@@ -253,7 +252,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
       authorKeypair.privateKey,
     );
 
-    const secondRes = await replica.set(
+    const secondRes = await store.set(
       {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 3]),
@@ -268,9 +267,9 @@ Deno.test("Replica.ingestEntry", async (test) => {
   });
 
   await test.step("Does not ingest entries for which there are newer entries with the same path and author and timestamp but smaller hash", async () => {
-    const replica = new TestReplica();
+    const store = new TestStore();
 
-    await replica.set(
+    await store.set(
       {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 1]),
@@ -280,7 +279,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
       authorKeypair.privateKey,
     );
 
-    const secondRes = await replica.set(
+    const secondRes = await store.set(
       {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 3]),
@@ -304,9 +303,9 @@ Deno.test("Replica.ingestEntry", async (test) => {
   });
 
   await test.step("replaces older entries with same author and path", async () => {
-    const replica = new TestReplica();
+    const store = new TestStore();
 
-    await replica.set(
+    await store.set(
       {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 1]),
@@ -316,7 +315,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
       authorKeypair.privateKey,
     );
 
-    const secondRes = await replica.set(
+    const secondRes = await store.set(
       {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 3]),
@@ -331,7 +330,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
     const entries = [];
 
     for await (
-      const entry of replica.query({
+      const entry of store.query({
         area: fullArea(),
         maxCount: 0,
         maxSize: BigInt(0),
@@ -347,9 +346,9 @@ Deno.test("Replica.ingestEntry", async (test) => {
   });
 
   await test.step("replaces older entries with paths prefixed by the new one", async () => {
-    const replica = new TestReplica();
+    const store = new TestStore();
 
-    await replica.set(
+    await store.set(
       {
         path: [new Uint8Array([0]), new Uint8Array([1])],
         payload: new Uint8Array([0, 1, 2, 1]),
@@ -359,7 +358,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
       authorKeypair.privateKey,
     );
 
-    await replica.set(
+    await store.set(
       {
         path: [new Uint8Array([0]), new Uint8Array([2])],
         payload: new Uint8Array([0, 1, 2, 1]),
@@ -369,7 +368,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
       authorKeypair.privateKey,
     );
 
-    const prefixRes = await replica.set(
+    const prefixRes = await store.set(
       {
         path: [new Uint8Array([0])],
         payload: new Uint8Array([0, 1, 2, 3]),
@@ -384,7 +383,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
     const entries = [];
 
     for await (
-      const entry of replica.query({
+      const entry of store.query({
         area: fullArea(),
         maxCount: 0,
         maxSize: BigInt(0),
@@ -401,9 +400,9 @@ Deno.test("Replica.ingestEntry", async (test) => {
   });
 
   await test.step("replaces older entries with paths prefixed by the new one, EVEN when that entry was edited", async () => {
-    const replica = new TestReplica();
+    const store = new TestStore();
 
-    await replica.set(
+    await store.set(
       {
         path: [new Uint8Array([0]), new Uint8Array([1])],
         payload: new Uint8Array([0, 1, 2, 1]),
@@ -413,7 +412,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
       authorKeypair.privateKey,
     );
 
-    await replica.set(
+    await store.set(
       {
         path: [new Uint8Array([0]), new Uint8Array([1])],
         payload: new Uint8Array([0, 1, 2, 3]),
@@ -423,7 +422,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
       authorKeypair.privateKey,
     );
 
-    const prefixRes = await replica.set(
+    const prefixRes = await store.set(
       {
         path: [new Uint8Array([0])],
         payload: new Uint8Array([0, 1, 2, 3]),
@@ -438,7 +437,7 @@ Deno.test("Replica.ingestEntry", async (test) => {
     const entries = [];
 
     for await (
-      const entry of replica.query({
+      const entry of store.query({
         area: fullArea(),
         maxCount: 0,
         maxSize: BigInt(0),
@@ -458,13 +457,13 @@ Deno.test("Replica.ingestEntry", async (test) => {
 // ==================================
 // ingestPayload
 
-Deno.test("Replica.ingestPayload", async (test) => {
+Deno.test("Store.ingestPayload", async (test) => {
   const authorKeypair = await makeSubspaceKeypair();
 
   await test.step("does not ingest payload if corresponding entry is missing", async () => {
-    const replica = new TestReplica();
+    const store = new TestStore();
 
-    const res = await replica.ingestPayload({
+    const res = await store.ingestPayload({
       path: [new Uint8Array([0])],
       subspace: new Uint8Array([0]),
       timestamp: BigInt(0),
@@ -475,14 +474,14 @@ Deno.test("Replica.ingestPayload", async (test) => {
   });
 
   await test.step("does not ingest if payload is already held", async () => {
-    const replica = new TestReplica();
-    const otherReplica = new TestReplica();
+    const store = new TestStore();
+    const otherStore = new TestStore();
 
     const payload = new Uint8Array(32);
 
     crypto.getRandomValues(payload);
 
-    const res = await otherReplica.set({
+    const res = await otherStore.set({
       path: [new Uint8Array([0, 2])],
       payload,
       subspace: authorKeypair.subspace,
@@ -490,11 +489,11 @@ Deno.test("Replica.ingestPayload", async (test) => {
 
     assert(res.kind === "success");
 
-    const res2 = await replica.ingestEntry(res.entry, res.authToken);
+    const res2 = await store.ingestEntry(res.entry, res.authToken);
 
     assert(res2.kind === "success");
 
-    const res3 = await replica.ingestPayload({
+    const res3 = await store.ingestPayload({
       path: res.entry.path,
       subspace: res.entry.subspaceId,
       timestamp: res.entry.timestamp,
@@ -502,7 +501,7 @@ Deno.test("Replica.ingestPayload", async (test) => {
 
     assert(res3.kind === "success");
 
-    const res4 = await replica.ingestPayload({
+    const res4 = await store.ingestPayload({
       path: res.entry.path,
       subspace: new Uint8Array(res.entry.subspaceId),
       timestamp: res.entry.timestamp,
@@ -512,14 +511,14 @@ Deno.test("Replica.ingestPayload", async (test) => {
   });
 
   await test.step("does not ingest if the hash doesn't match the entry's", async () => {
-    const replica = new TestReplica();
-    const otherReplica = new TestReplica();
+    const store = new TestStore();
+    const otherStore = new TestStore();
 
     const payload = new Uint8Array(32);
 
     crypto.getRandomValues(payload);
 
-    const res = await otherReplica.set({
+    const res = await otherStore.set({
       path: [new Uint8Array([0, 2])],
       payload,
       subspace: authorKeypair.subspace,
@@ -527,11 +526,11 @@ Deno.test("Replica.ingestPayload", async (test) => {
 
     assert(res.kind === "success");
 
-    const res2 = await replica.ingestEntry(res.entry, res.authToken);
+    const res2 = await store.ingestEntry(res.entry, res.authToken);
 
     assert(res2.kind === "success");
 
-    const res3 = await replica.ingestPayload({
+    const res3 = await store.ingestPayload({
       path: res.entry.path,
       subspace: res.entry.subspaceId,
       timestamp: res.entry.timestamp,
@@ -542,14 +541,14 @@ Deno.test("Replica.ingestPayload", async (test) => {
   });
 
   await test.step("ingest if everything is valid", async () => {
-    const replica = new TestReplica();
-    const otherReplica = new TestReplica();
+    const store = new TestStore();
+    const otherStore = new TestStore();
 
     const payload = new Uint8Array(32);
 
     crypto.getRandomValues(payload);
 
-    const res = await otherReplica.set({
+    const res = await otherStore.set({
       path: [new Uint8Array([0, 2])],
       payload,
       subspace: authorKeypair.subspace,
@@ -557,11 +556,11 @@ Deno.test("Replica.ingestPayload", async (test) => {
 
     assert(res.kind === "success");
 
-    const res2 = await replica.ingestEntry(res.entry, res.authToken);
+    const res2 = await store.ingestEntry(res.entry, res.authToken);
 
     assert(res2.kind === "success");
 
-    const res3 = await replica.ingestPayload({
+    const res3 = await store.ingestPayload({
       path: res.entry.path,
       subspace: res.entry.subspaceId,
       timestamp: res.entry.timestamp,
@@ -572,7 +571,7 @@ Deno.test("Replica.ingestPayload", async (test) => {
     let retrievedPayload;
 
     for await (
-      const [_entry, payload] of replica.query({
+      const [_entry, payload] of store.query({
         area: fullArea(),
         maxCount: 0,
         maxSize: BigInt(0),
@@ -597,10 +596,10 @@ Deno.test("Write-ahead flags", async (test) => {
   const authorKeypair = await makeSubspaceKeypair();
 
   await test.step("Insertion flag inserts (and removes prefixes...)", async () => {
-    const replica = new TestReplica();
-    const otherReplica = new TestReplica();
+    const store = new TestStore();
+    const otherStore = new TestStore();
 
-    const res = await otherReplica.set(
+    const res = await otherStore.set(
       {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array(32),
@@ -612,35 +611,9 @@ Deno.test("Write-ahead flags", async (test) => {
 
     assert(res.kind === "success");
 
-    // Create PTA flag.
-    const keys = encodeEntryKeys(
-      {
-        path: res.entry.path,
-        timestamp: res.entry.timestamp,
-        subspace: res.entry.subspaceId,
-
-        subspaceEncoding: {
-          encode: (v) => v,
-          decode: (v) => v.subarray(0, 65),
-          encodedLength: () => 65,
-        },
-      },
-    );
-
-    // Create storage value.
-    const storageValue = encodeSummarisableStorageValue({
-      payloadDigest: res.entry.payloadDigest,
-      payloadLength: res.entry.payloadLength,
-      authTokenDigest: new Uint8Array(
-        await crypto.subtle.digest("SHA-256", res.authToken),
-      ),
-      payloadScheme: testSchemePayload,
-      encodedPathLength: keys.encodedPathLength,
-    });
-
     // Insert
 
-    const result = await replica.set(
+    const result = await store.set(
       {
         path: [new Uint8Array([0, 0, 0, 0, 1])],
         payload: new Uint8Array(32),
@@ -652,17 +625,17 @@ Deno.test("Write-ahead flags", async (test) => {
 
     assert(result.kind === "success");
 
-    await replica.writeAheadFlag().flagInsertion(
+    await store.writeAheadFlag().flagInsertion(
       result.entry,
       result.authToken,
     );
 
-    await replica.triggerWriteAheadFlag();
+    await store.triggerWriteAheadFlag();
 
     const entries = [];
 
     for await (
-      const [entry] of replica.query({
+      const [entry] of store.query({
         area: fullArea(),
         maxCount: 0,
         maxSize: BigInt(0),
@@ -683,9 +656,9 @@ Deno.test("Write-ahead flags", async (test) => {
   });
 
   await test.step("Removal flag removes", async () => {
-    const replica = new TestReplica();
+    const store = new TestStore();
 
-    const res = await replica.set(
+    const res = await store.set(
       {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array(32),
@@ -697,14 +670,14 @@ Deno.test("Write-ahead flags", async (test) => {
 
     assert(res.kind === "success");
 
-    await replica.writeAheadFlag().flagRemoval(res.entry);
+    await store.writeAheadFlag().flagRemoval(res.entry);
 
-    await replica.triggerWriteAheadFlag();
+    await store.triggerWriteAheadFlag();
 
     const entries = [];
 
     for await (
-      const [entry] of replica.query({
+      const [entry] of store.query({
         area: fullArea(),
         maxCount: 0,
         maxSize: BigInt(0),

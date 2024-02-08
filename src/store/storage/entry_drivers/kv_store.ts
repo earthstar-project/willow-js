@@ -22,19 +22,19 @@ import { Skiplist } from "../summarisable_storage/monoid_skiplist.ts";
 import { EntryDriver } from "../types.ts";
 
 type EntryDriverKvOpts<
-  NamespaceKey,
-  SubspaceKey,
+  NamespaceId,
+  SubspaceId,
   PayloadDigest,
   Fingerprint,
 > = {
   kvDriver: KvDriver;
-  namespaceScheme: NamespaceScheme<NamespaceKey>;
-  subspaceScheme: SubspaceScheme<SubspaceKey>;
+  namespaceScheme: NamespaceScheme<NamespaceId>;
+  subspaceScheme: SubspaceScheme<SubspaceId>;
   payloadScheme: PayloadScheme<PayloadDigest>;
   pathScheme: PathScheme;
   fingerprintScheme: FingerprintScheme<
-    NamespaceKey,
-    SubspaceKey,
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
     Fingerprint
   >;
@@ -42,24 +42,24 @@ type EntryDriverKvOpts<
 
 /** Store and retrieve entries in a key-value store. */
 export class EntryDriverKvStore<
-  NamespaceKey,
-  SubspaceKey,
+  NamespaceId,
+  SubspaceId,
   PayloadDigest,
   Fingerprint,
 > implements
   EntryDriver<
-    NamespaceKey,
-    SubspaceKey,
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
     Fingerprint
   > {
-  private namespaceScheme: NamespaceScheme<NamespaceKey>;
-  private subspaceScheme: SubspaceScheme<SubspaceKey>;
+  private namespaceScheme: NamespaceScheme<NamespaceId>;
+  private subspaceScheme: SubspaceScheme<SubspaceId>;
   private payloadScheme: PayloadScheme<PayloadDigest>;
   private pathScheme: PathScheme;
   private fingerprintScheme: FingerprintScheme<
-    NamespaceKey,
-    SubspaceKey,
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
     Fingerprint
   >;
@@ -69,8 +69,8 @@ export class EntryDriverKvStore<
 
   constructor(
     opts: EntryDriverKvOpts<
-      NamespaceKey,
-      SubspaceKey,
+      NamespaceId,
+      SubspaceId,
       PayloadDigest,
       Fingerprint
     >,
@@ -89,8 +89,8 @@ export class EntryDriverKvStore<
   }
 
   makeStorage(
-    namespace: NamespaceKey,
-  ): Storage3d<NamespaceKey, SubspaceKey, PayloadDigest, Fingerprint> {
+    namespace: NamespaceId,
+  ): Storage3d<NamespaceId, SubspaceId, PayloadDigest, Fingerprint> {
     const prefixedStorageDriver = new PrefixedDriver(
       ["entries"],
       this.kvDriver,
@@ -173,7 +173,7 @@ export class EntryDriverKvStore<
       return entry;
     },
     flagInsertion: async (
-      entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
+      entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
       authTokenHash: PayloadDigest,
     ) => {
       const entryEncoded = encodeEntry({
@@ -196,7 +196,7 @@ export class EntryDriverKvStore<
       );
     },
 
-    flagRemoval: (entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>) => {
+    flagRemoval: (entry: Entry<NamespaceId, SubspaceId, PayloadDigest>) => {
       const entryEncoded = encodeEntry({
         namespaceScheme: this.namespaceScheme,
         subspaceScheme: this.subspaceScheme,

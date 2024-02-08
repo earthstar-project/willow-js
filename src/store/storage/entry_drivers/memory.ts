@@ -12,17 +12,17 @@ import { Entry, orderBytes, PathScheme } from "../../../../deps.ts";
 import { RadixTree } from "../prefix_iterators/radix_tree.ts";
 
 type EntryDriverMemoryOpts<
-  NamespaceKey,
-  SubspaceKey,
+  NamespaceId,
+  SubspaceId,
   PayloadDigest,
   Fingerprint,
 > = {
-  subspaceScheme: SubspaceScheme<SubspaceKey>;
+  subspaceScheme: SubspaceScheme<SubspaceId>;
   payloadScheme: PayloadScheme<PayloadDigest>;
   pathScheme: PathScheme;
   fingerprintScheme: FingerprintScheme<
-    NamespaceKey,
-    SubspaceKey,
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
     Fingerprint
   >;
@@ -30,31 +30,30 @@ type EntryDriverMemoryOpts<
 
 /** Store and retrieve entries in memory. */
 export class EntryDriverMemory<
-  NamespaceKey,
-  SubspaceKey,
+  NamespaceId,
+  SubspaceId,
   PayloadDigest,
   Fingerprint,
-> implements
-  EntryDriver<NamespaceKey, SubspaceKey, PayloadDigest, Fingerprint> {
+> implements EntryDriver<NamespaceId, SubspaceId, PayloadDigest, Fingerprint> {
   constructor(
     readonly opts: EntryDriverMemoryOpts<
-      NamespaceKey,
-      SubspaceKey,
+      NamespaceId,
+      SubspaceId,
       PayloadDigest,
       Fingerprint
     >,
   ) {}
 
   private wafInsert:
-    | [Entry<NamespaceKey, SubspaceKey, PayloadDigest>, PayloadDigest]
+    | [Entry<NamespaceId, SubspaceId, PayloadDigest>, PayloadDigest]
     | undefined;
   private wafRemove:
-    | Entry<NamespaceKey, SubspaceKey, PayloadDigest>
+    | Entry<NamespaceId, SubspaceId, PayloadDigest>
     | undefined;
 
   makeStorage(
-    namespace: NamespaceKey,
-  ): Storage3d<NamespaceKey, SubspaceKey, PayloadDigest, Fingerprint> {
+    namespace: NamespaceId,
+  ): Storage3d<NamespaceId, SubspaceId, PayloadDigest, Fingerprint> {
     return new TripleStorage({
       namespace,
       createSummarisableStorage: (
@@ -85,14 +84,14 @@ export class EntryDriverMemory<
       return Promise.resolve(this.wafRemove);
     },
     flagInsertion: (
-      entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>,
+      entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
       authTokenHash: PayloadDigest,
     ) => {
       this.wafInsert = [entry, authTokenHash];
 
       return Promise.resolve();
     },
-    flagRemoval: (entry: Entry<NamespaceKey, SubspaceKey, PayloadDigest>) => {
+    flagRemoval: (entry: Entry<NamespaceId, SubspaceId, PayloadDigest>) => {
       this.wafRemove = entry;
 
       return Promise.resolve();

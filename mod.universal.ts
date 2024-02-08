@@ -1,15 +1,17 @@
-export * from "./src/replica/types.ts";
-export * from "./src/replica/replica.ts";
+export * from "./src/store/types.ts";
+export * from "./src/store/store.ts";
 
-export * from "./src/replica/storage/entry_drivers/memory.ts";
+export * from "./src/store/storage/entry_drivers/memory.ts";
 
-export * from "./src/replica/storage/payload_drivers/memory.ts";
+export * from "./src/store/storage/payload_drivers/memory.ts";
 
-export * from "./src/replica/storage/prefix_iterators/types.ts";
-export * from "./src/replica/storage/prefix_iterators/radixish_tree.ts";
+export * from "./src/store/storage/prefix_iterators/types.ts";
+export * from "./src/store/storage/prefix_iterators/radix_tree.ts";
 
-export * from "./src/replica/storage/summarisable_storage/types.ts";
-export * from "./src/replica/storage/summarisable_storage/monoid_rbtree.ts";
-export * from "./src/replica/storage/summarisable_storage/lifting_monoid.ts";
+export * from "./src/store/storage/summarisable_storage/types.ts";
+export * from "./src/store/storage/summarisable_storage/monoid_rbtree.ts";
+export * from "./src/store/storage/summarisable_storage/lifting_monoid.ts";
+
+export * from "./src/utils/encryption.ts";
 
 export * from "./src/errors.ts";
