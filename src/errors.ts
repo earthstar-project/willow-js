@@ -14,6 +14,14 @@ export class ValidationError extends WillowError {
   }
 }
 
+/** Validation failed on an entry, keypair, etc. */
+export class WgpsMessageValidationError extends WillowError {
+  constructor(message?: string) {
+    super(message || "WGPS Message Validation error");
+    this.name = "WgpsMessageValidationError";
+  }
+}
+
 /** Check if any value is a subclass of WillowError (return true) or not (return false) */
 export function isErr<T>(x: T | Error): x is WillowError {
   return x instanceof WillowError;

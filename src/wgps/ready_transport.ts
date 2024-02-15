@@ -7,7 +7,7 @@ import { SyncRole, Transport } from "./types.ts";
  */
 export class ReadyTransport implements Transport {
   private transport: Transport;
-  private challengeLength: number;
+  private challengeHashLength: number;
 
   role: SyncRole;
 
@@ -18,11 +18,11 @@ export class ReadyTransport implements Transport {
 
   constructor(opts: {
     transport: Transport;
-    challengeLength: 1 | 2 | 4 | 8;
+    challengeHashLength: number;
   }) {
     this.role = opts.transport.role;
     this.transport = opts.transport;
-    this.challengeLength = opts.challengeLength;
+    this.challengeHashLength = opts.challengeHashLength;
   }
 
   send(bytes: Uint8Array): Promise<void> {
@@ -49,13 +49,15 @@ export class ReadyTransport implements Transport {
 
         const rest = bytes.slice(1);
 
-        if (rest.byteLength < this.challengeLength) {
+        if (rest.byteLength < this.challengeHashLength) {
           this.commitmentAcc = rest;
-        } else if (rest.byteLength === this.challengeLength) {
+        } else if (rest.byteLength === this.challengeHashLength) {
           this.receivedCommitment.resolve(rest);
         } else {
-          this.receivedCommitment.resolve(rest.slice(0, this.challengeLength));
-          yield rest.slice(this.challengeLength);
+          this.receivedCommitment.resolve(
+            rest.slice(0, this.challengeHashLength),
+          );
+          yield rest.slice(this.challengeHashLength);
         }
 
         continue;
@@ -64,16 +66,16 @@ export class ReadyTransport implements Transport {
       if (this.receivedCommitment.state === "pending") {
         const combined = concat(this.commitmentAcc, bytes);
 
-        if (combined.byteLength === this.challengeLength) {
+        if (combined.byteLength === this.challengeHashLength) {
           this.receivedCommitment.resolve(combined);
-        } else if (combined.byteLength < this.challengeLength) {
+        } else if (combined.byteLength < this.challengeHashLength) {
           this.commitmentAcc = combined;
         } else {
           this.receivedCommitment.resolve(
-            combined.slice(0, this.challengeLength),
+            combined.slice(0, this.challengeHashLength),
           );
 
-          yield combined.slice(this.challengeLength);
+          yield combined.slice(this.challengeHashLength);
         }
       }
     }
