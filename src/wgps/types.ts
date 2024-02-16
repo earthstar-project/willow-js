@@ -15,3 +15,19 @@ export interface Transport {
   /** An async iterator of bytes received from the other peer via this transport. */
   [Symbol.asyncIterator](): AsyncIterator<Uint8Array>;
 }
+
+// Message types
+
+export const MSG_COMMITMENT_REVEAL = Symbol("msg_commitment_reveal");
+/** Complete the commitment scheme to determine the challenge for read authentication. */
+export type MsgCommitmentReveal = {
+  kind: typeof MSG_COMMITMENT_REVEAL;
+  /** The nonce of the sender, encoded as a big-endian unsigned integer. */
+  nonce: Uint8Array;
+};
+
+// Message groups
+
+export type ControlMessage = MsgCommitmentReveal;
+
+export type SyncMessage = ControlMessage;

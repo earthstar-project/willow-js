@@ -11,7 +11,7 @@ Deno.test("Ready transport receives max payload ", async () => {
 
     const readyTransport = new ReadyTransport({
       transport: alfie,
-      challengeLength: 4,
+      challengeHashLength: 4,
     });
 
     let received = new Uint8Array();
@@ -43,7 +43,7 @@ Deno.test("Ready transport receives max payload ", async () => {
 
     const readyTransport = new ReadyTransport({
       transport: alfie,
-      challengeLength: 4,
+      challengeHashLength: 4,
     });
 
     let received = new Uint8Array();
@@ -73,7 +73,7 @@ Deno.test("Ready transport receives max payload ", async () => {
 
     const readyTransport = new ReadyTransport({
       transport: alfie,
-      challengeLength: 4,
+      challengeHashLength: 4,
     });
 
     let received = new Uint8Array();
@@ -104,7 +104,7 @@ Deno.test("Ready transport receives max payload ", async () => {
 
     const readyTransport = new ReadyTransport({
       transport: alfie,
-      challengeLength: 4,
+      challengeHashLength: 4,
     });
 
     let received = new Uint8Array();
