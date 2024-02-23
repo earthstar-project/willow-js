@@ -3,14 +3,23 @@ import { ValidationError, WgpsMessageValidationError } from "../errors.ts";
 import { decodeMessages } from "./decoding/decode_messages.ts";
 import { MessageEncoder } from "./encoding/message_encoder.ts";
 import { ReadyTransport } from "./ready_transport.ts";
+import { HandleStore } from "./handle_store.ts";
+import { PaiFinder } from "./pai/pai_finder.ts";
 import {
   IS_ALFIE,
   MSG_COMMITMENT_REVEAL,
   SyncMessage,
   Transport,
 } from "./types.ts";
+import { Intersection, PaiScheme } from "./pai/types.ts";
 
-export type WgpsMessengerOpts = {
+export type WgpsMessengerOpts<
+  NamespaceId,
+  SubspaceId,
+  PsiGroup,
+  Scalar,
+  ReadCapability,
+> = {
   transport: Transport;
 
   /** Sets the maximum payload size for this peer, which is 2 to the power of the given number.
@@ -22,10 +31,27 @@ export type WgpsMessengerOpts = {
   challengeHashLength: number;
 
   challengeHash: (bytes: Uint8Array) => Promise<Uint8Array>;
+
+  paiScheme: PaiScheme<
+    NamespaceId,
+    SubspaceId,
+    PsiGroup,
+    Scalar,
+    ReadCapability
+  >;
 };
 
 /** Coordinates a complete WGPS synchronisation session. */
-export class WgpsMessenger {
+export class WgpsMessenger<
+  NamespaceId,
+  SubspaceId,
+  PsiGroup,
+  Scalar,
+  ReadCapability,
+  SubspaceReadCapability,
+  SyncSignature,
+  SyncSubspaceSignature,
+> {
   private transport: ReadyTransport;
   private encoder: MessageEncoder;
 
@@ -37,7 +63,29 @@ export class WgpsMessenger {
   private ourChallenge = deferred<Uint8Array>();
   private theirChallenge = deferred<Uint8Array>();
 
-  constructor(opts: WgpsMessengerOpts) {
+  // Private area intersection
+  private intersectionHandlesOurs = new HandleStore<Intersection<PsiGroup>>();
+  private intersectionHandlesTheirs = new HandleStore<Intersection<PsiGroup>>();
+  private paiFinder: PaiFinder<
+    NamespaceId,
+    SubspaceId,
+    PsiGroup,
+    Scalar,
+    ReadCapability,
+    SubspaceReadCapability,
+    SyncSignature,
+    SyncSubspaceSignature
+  >;
+
+  constructor(
+    opts: WgpsMessengerOpts<
+      NamespaceId,
+      SubspaceId,
+      PsiGroup,
+      Scalar,
+      ReadCapability
+    >,
+  ) {
     if (opts.maxPayloadSizePower < 0 || opts.maxPayloadSizePower > 64) {
       throw new ValidationError(
         "maxPayloadSizePower must be a natural number less than or equal to 64",
@@ -49,6 +97,13 @@ export class WgpsMessenger {
     this.transport = new ReadyTransport({
       transport: opts.transport,
       challengeHashLength: opts.challengeHashLength,
+    });
+
+    // Setup Private Area Intersection
+    this.paiFinder = new PaiFinder({
+      paiScheme: opts.paiScheme,
+      intersectionHandlesOurs: this.intersectionHandlesOurs,
+      intersectionHandlesTheirs: this.intersectionHandlesTheirs,
     });
 
     // Plug our transport into a new encoder.
@@ -96,7 +151,13 @@ export class WgpsMessenger {
     });
   }
 
-  async handleMessage(message: SyncMessage) {
+  async handleMessage(
+    message: SyncMessage<
+      PsiGroup,
+      SubspaceReadCapability,
+      SyncSubspaceSignature
+    >,
+  ) {
     switch (message.kind) {
       case MSG_COMMITMENT_REVEAL: {
         // Determine challenges.
