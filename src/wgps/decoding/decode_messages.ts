@@ -1,5 +1,5 @@
 import { SyncMessage, Transport } from "../types.ts";
-import { decodeCommitmentReveal } from "./decode_commitment_reveal.ts";
+import { decodeCommitmentReveal } from "./commitment_reveal.ts";
 import { GrowingBytes } from "./growing_bytes.ts";
 
 export type DecodeMessagesOpts = {

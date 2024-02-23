@@ -1,3 +1,5 @@
+import { GrowingBytes } from "./decoding/growing_bytes.ts";
+
 /** The peer which initiated the synchronisation session. */
 export const IS_ALFIE = Symbol("alfie");
 /** The peer which did not initiate the synchronisation session. */
@@ -48,7 +50,7 @@ export interface Transport {
 
 // Handle types
 
-enum HandleType {
+export enum HandleType {
   /** Resource handle for the private set intersection part of private area intersection. More precisely, an IntersectionHandle stores a PsiGroup member together with one of two possible states:
    * - pending (waiting for the other peer to perform scalar multiplication),
    * - completed (both peers performed scalar multiplication). */
@@ -57,7 +59,7 @@ enum HandleType {
 
 // Channels
 
-enum LogicalChannel {
+export enum LogicalChannel {
   /** Logical channel for controlling the binding of new IntersectionHandles. */
   IntersectionChannel,
 }
@@ -96,7 +98,7 @@ export const MSG_CONTROL_ANNOUNCE_DROPPING = Symbol(
   "msg_control_announce_dropping",
 );
 /** Ask the other peer to send an ControlAbsolve message such that the receiver remaining guarantees will be target. */
-export type MsgControlDropping = {
+export type MsgControlAnnounceDropping = {
   kind: typeof MSG_CONTROL_ANNOUNCE_DROPPING;
   channel: LogicalChannel;
 };
@@ -111,6 +113,8 @@ export type MsgControlApologise = {
 export const MSG_CONTROL_FREE = Symbol("msg_control_free");
 export type MsgControlFree = {
   kind: typeof MSG_CONTROL_FREE;
+  handle: bigint;
+  /** Indicates whether the peer sending this message is the one who created the handle (true) or not (false). */
   mine: boolean;
   handleType: HandleType;
 };
@@ -127,7 +131,7 @@ export type ControlMessage =
   | MsgControlIssueGuarantee
   | MsgControlAbsolve
   | MsgControlPlead
-  | MsgControlDropping
+  | MsgControlAnnounceDropping
   | MsgControlApologise
   | MsgControlFree
   | MsgCommitmentReveal;
@@ -194,3 +198,20 @@ export type IntersectionMessage<
 export type SyncMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature> =
   | ControlMessage
   | IntersectionMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature>;
+
+// Encodings
+
+export type StreamEncodingScheme<ValueType> = {
+  encode: (value: ValueType) => Uint8Array;
+  decode: (value: GrowingBytes) => Promise<ValueType>;
+};
+
+export type SyncEncodings<
+  PsiGroup,
+  SubspaceCapability,
+  SyncSubspaceSignature,
+> = {
+  groupMember: StreamEncodingScheme<PsiGroup>;
+  subspaceCapability: StreamEncodingScheme<SubspaceCapability>;
+  syncSubspaceSignature: StreamEncodingScheme<SyncSubspaceSignature>;
+};

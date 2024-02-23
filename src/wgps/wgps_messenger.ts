@@ -8,6 +8,7 @@ import { PaiFinder } from "./pai/pai_finder.ts";
 import {
   IS_ALFIE,
   MSG_COMMITMENT_REVEAL,
+  SyncEncodings,
   SyncMessage,
   Transport,
 } from "./types.ts";
@@ -18,6 +19,8 @@ export type WgpsMessengerOpts<
   SubspaceId,
   PsiGroup,
   Scalar,
+  SubspaceCapability,
+  SyncSubspaceSignature,
   ReadCapability,
 > = {
   transport: Transport;
@@ -39,6 +42,8 @@ export type WgpsMessengerOpts<
     Scalar,
     ReadCapability
   >;
+
+  encodings: SyncEncodings<PsiGroup, SubspaceCapability, SyncSubspaceSignature>;
 };
 
 /** Coordinates a complete WGPS synchronisation session. */
@@ -47,13 +52,17 @@ export class WgpsMessenger<
   SubspaceId,
   PsiGroup,
   Scalar,
-  ReadCapability,
-  SubspaceReadCapability,
-  SyncSignature,
+  SubspaceCapability,
   SyncSubspaceSignature,
+  ReadCapability,
+  SyncSignature,
 > {
   private transport: ReadyTransport;
-  private encoder: MessageEncoder;
+  private encoder: MessageEncoder<
+    PsiGroup,
+    SubspaceCapability,
+    SyncSubspaceSignature
+  >;
 
   // Commitment scheme
   private maxPayloadSizePower: number;
@@ -72,7 +81,7 @@ export class WgpsMessenger<
     PsiGroup,
     Scalar,
     ReadCapability,
-    SubspaceReadCapability,
+    SubspaceCapability,
     SyncSignature,
     SyncSubspaceSignature
   >;
@@ -83,6 +92,8 @@ export class WgpsMessenger<
       SubspaceId,
       PsiGroup,
       Scalar,
+      SubspaceCapability,
+      SyncSubspaceSignature,
       ReadCapability
     >,
   ) {
@@ -107,7 +118,7 @@ export class WgpsMessenger<
     });
 
     // Plug our transport into a new encoder.
-    this.encoder = new MessageEncoder(this.transport);
+    this.encoder = new MessageEncoder(this.transport, opts.encodings);
 
     // Start decoding incoming messages.
     const decodedMessages = decodeMessages({
@@ -154,7 +165,7 @@ export class WgpsMessenger<
   async handleMessage(
     message: SyncMessage<
       PsiGroup,
-      SubspaceReadCapability,
+      SubspaceCapability,
       SyncSubspaceSignature
     >,
   ) {
