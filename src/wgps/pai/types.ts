@@ -58,4 +58,5 @@ export type PaiScheme<
 export type Intersection<PsiGroup> = {
   group: PsiGroup;
   isComplete: boolean;
+  isSecondary: boolean;
 };

@@ -187,7 +187,7 @@ async function* intersections(
   // Set up fragment binds
   (async () => {
     for await (const bind of against.fragmentBinds()) {
-      of.receivedBind(bind.group);
+      of.receivedBind(bind.group, bind.isSecondary);
     }
   })();
 
@@ -374,6 +374,36 @@ Deno.test("PaiFinder (requesting subspace caps)", async () => {
 
   alfie.submitAuthorisation(cap);
   betty.submitAuthorisation(subspaceCap);
+
+  await delay(2);
+
+  assertEquals(intersectionsAlfie, []);
+  assertEquals(intersectionsBetty, []);
+  assertEquals(subspaceCapsAlfie, []);
+  assertEquals(subspaceCapsBetty, [subspaceCap.subspaceCapability]);
+
+  const alfieCap: TestReadAuth = {
+    capability: {
+      namespace: "project",
+      subspace: "alfie",
+      path: [new Uint8Array([7])],
+    },
+    signature: null,
+    subspaceSignature: null,
+  };
+
+  const bettyCap: TestReadAuth = {
+    capability: {
+      namespace: "project",
+      subspace: "betty",
+      path: [new Uint8Array([7])],
+    },
+    signature: null,
+    subspaceSignature: null,
+  };
+
+  alfie.submitAuthorisation(alfieCap);
+  betty.submitAuthorisation(bettyCap);
 
   await delay(2);
 

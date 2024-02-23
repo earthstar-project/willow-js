@@ -158,6 +158,7 @@ export class PaiFinder<
       const handle = this.intersectionHandlesOurs.bind({
         group: multiplied,
         isComplete: false,
+        isSecondary,
       });
       // Send the group to the bind queue.
       this.bindFragmentQueue.push([multiplied, isSecondary]);
@@ -230,12 +231,13 @@ export class PaiFinder<
     }
   }
 
-  receivedBind(groupMember: PsiGroup) {
+  receivedBind(groupMember: PsiGroup, isSecondary: boolean) {
     const multiplied = this.paiScheme.scalarMult(groupMember, this.scalar);
 
     const handle = this.intersectionHandlesTheirs.bind({
       group: multiplied,
       isComplete: true,
+      isSecondary,
     });
 
     this.replyFragmentQueue.push([handle, multiplied]);
@@ -244,9 +246,18 @@ export class PaiFinder<
   }
 
   receivedReply(handle: bigint, groupMember: PsiGroup) {
+    const intersection = this.intersectionHandlesOurs.get(handle);
+
+    if (!intersection) {
+      throw new WgpsMessageValidationError(
+        "Got a reply for a non-existent intersection handle",
+      );
+    }
+
     this.intersectionHandlesOurs.update(handle, {
       group: groupMember,
       isComplete: true,
+      isSecondary: intersection.isSecondary,
     });
 
     this.checkForIntersections(handle, true);
@@ -285,9 +296,7 @@ export class PaiFinder<
       }
 
       if (!isSubspaceReadAuthorisation(fragmentInfo.authorisation)) {
-        throw new WgpsMessageValidationError(
-          "PAI: partner requested subspace capability for intersection with only a normal read capability.",
-        );
+        continue;
       }
 
       this.subspaceCapReplyQueue.push([
@@ -322,6 +331,10 @@ export class PaiFinder<
         continue;
       }
 
+      if (intersection.isSecondary && otherIntersection.isSecondary) {
+        continue;
+      }
+
       // Check for equality.
       if (
         !this.paiScheme.isGroupEqual(
@@ -341,7 +354,9 @@ export class PaiFinder<
 
       if (fragmentInfo.onIntersection === BIND_READ_CAP) {
         this.intersectionQueue.push(fragmentInfo.authorisation);
-      } else if (fragmentInfo.onIntersection === REQUEST_SUBSPACE_CAP) {
+      } else if (
+        fragmentInfo.onIntersection === REQUEST_SUBSPACE_CAP
+      ) {
         this.subspaceCapRequestQueue.push(handle);
       }
     }
