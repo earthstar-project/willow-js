@@ -13,14 +13,14 @@ import {
 export function channelMaskStart(mask: number, channel: LogicalChannel) {
   switch (channel) {
     case LogicalChannel.IntersectionChannel:
-      return mask & 0x64;
+      return mask | 0x64;
   }
 }
 
 export function channelMaskEnd(mask: number, channel: LogicalChannel) {
   switch (channel) {
     case LogicalChannel.IntersectionChannel:
-      return mask & 0x2;
+      return mask | 0x2;
   }
 }
 
@@ -79,8 +79,8 @@ export function encodeControlPlead(
     : targetWidth === 2
     ? 0x89
     : targetWidth === 4
-    ? 0x90
-    : 0x91;
+    ? 0x8a
+    : 0x8b;
 
   return concat(
     new Uint8Array([header, channelMaskStart(0, msg.channel)]),
@@ -91,13 +91,13 @@ export function encodeControlPlead(
 export function encodeControlAnnounceDropping(
   msg: MsgControlAnnounceDropping,
 ) {
-  return new Uint8Array([channelMaskEnd(90, msg.channel)]);
+  return new Uint8Array([channelMaskEnd(0x90, msg.channel)]);
 }
 
 export function encodeControlApologise(
   msg: MsgControlApologise,
 ) {
-  return new Uint8Array([channelMaskEnd(98, msg.channel)]);
+  return new Uint8Array([channelMaskEnd(0x98, msg.channel)]);
 }
 
 export function encodeControlFree(
@@ -106,14 +106,14 @@ export function encodeControlFree(
   const handleWidth = compactWidth(msg.handle);
 
   const header = handleWidth === 1
-    ? 0x140
+    ? 0x8c
     : handleWidth === 2
-    ? 0x141
+    ? 0x8d
     : handleWidth === 4
-    ? 0x142
-    : 0x143;
+    ? 0x8e
+    : 0x8f;
 
-  const handleTypeByte = handleMask(0, msg.handleType) & (msg.mine ? 16 : 0);
+  const handleTypeByte = handleMask(0, msg.handleType) | (msg.mine ? 0x10 : 0);
 
   return concat(
     new Uint8Array([header, handleTypeByte]),

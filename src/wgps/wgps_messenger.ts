@@ -124,6 +124,7 @@ export class WgpsMessenger<
     const decodedMessages = decodeMessages({
       transport: this.transport,
       challengeLength: opts.challengeLength,
+      encodings: opts.encodings,
     });
 
     // Begin handling decoded messages

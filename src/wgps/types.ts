@@ -1,4 +1,4 @@
-import { GrowingBytes } from "./decoding/growing_bytes.ts";
+import { StreamEncodingScheme } from "../../deps.ts";
 
 /** The peer which initiated the synchronisation session. */
 export const IS_ALFIE = Symbol("alfie");
@@ -200,11 +200,6 @@ export type SyncMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature> =
   | IntersectionMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature>;
 
 // Encodings
-
-export type StreamEncodingScheme<ValueType> = {
-  encode: (value: ValueType) => Uint8Array;
-  decode: (value: GrowingBytes) => Promise<ValueType>;
-};
 
 export type SyncEncodings<
   PsiGroup,
