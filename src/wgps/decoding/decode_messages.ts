@@ -9,6 +9,12 @@ import {
   decodeControlIssueGuarantee,
   decodeControlPlead,
 } from "./control.ts";
+import {
+  decodePaiBindFragment,
+  decodePaiReplyFragment,
+  decodePaiReplySubspaceCapability,
+  decodePaiRequestSubspaceCapability,
+} from "./pai.ts";
 
 export type DecodeMessagesOpts<
   PsiGroup,
@@ -61,6 +67,28 @@ export async function* decodeMessages<
     } else if ((firstByte & 0x80) === 0x80) {
       // Control Issue Guarantee.
       yield await decodeControlIssueGuarantee(bytes);
+    } else if ((firstByte & 0x10) === 0x10) {
+      // PAI Reply Subspace Capability
+      yield await decodePaiReplySubspaceCapability(
+        bytes,
+        opts.encodings.subspaceCapability.decode,
+        opts.encodings.syncSubspaceSignature.decode,
+      );
+    } else if ((firstByte & 0xc) === 0xc) {
+      // PAI Request Subspace Capability
+      yield await decodePaiRequestSubspaceCapability(bytes);
+    } else if ((firstByte & 0x8) === 0x8) {
+      // PAI Reply Fragment
+      yield await decodePaiReplyFragment(
+        bytes,
+        opts.encodings.groupMember.decode,
+      );
+    } else if ((firstByte & 0x4) === 0x4) {
+      // PAI Bind Fragment
+      yield await decodePaiBindFragment(
+        bytes,
+        opts.encodings.groupMember.decode,
+      );
     } else {
       // Couldn't decode.
       console.warn("Could not decode!");

@@ -35,8 +35,8 @@ export function encodePaiReplyFragment<PsiGroup>(
     : handleWidth === 2
     ? 0x9
     : handleWidth === 4
-    ? 0x10
-    : 0x11;
+    ? 0xa
+    : 0xb;
 
   return concat(
     new Uint8Array([header]),
@@ -51,12 +51,12 @@ export function encodePaiRequestSubspaceCapability(
   const handleWidth = compactWidth(msg.handle);
 
   const header = handleWidth === 1
-    ? 0x12
+    ? 0xc
     : handleWidth === 2
-    ? 0x13
+    ? 0xd
     : handleWidth === 4
-    ? 0x14
-    : 0x15;
+    ? 0xe
+    : 0xf;
 
   return concat(
     new Uint8Array([header]),
@@ -75,12 +75,12 @@ export function encodePaiReplySubspaceCapability<
   const handleWidth = compactWidth(msg.handle);
 
   const header = handleWidth === 1
-    ? 0x16
+    ? 0x10
     : handleWidth === 2
-    ? 0x17
+    ? 0x11
     : handleWidth === 4
-    ? 0x18
-    : 0x19;
+    ? 0x12
+    : 0x13;
 
   return concat(
     new Uint8Array([header]),

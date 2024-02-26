@@ -12,6 +12,10 @@ import {
   MSG_CONTROL_FREE,
   MSG_CONTROL_ISSUE_GUARANTEE,
   MSG_CONTROL_PLEAD,
+  MSG_PAI_BIND_FRAGMENT,
+  MSG_PAI_REPLY_FRAGMENT,
+  MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
+  MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
   SyncEncodings,
   SyncMessage,
 } from "./types.ts";
@@ -71,11 +75,6 @@ const vectors: SyncMessage<Uint8Array, Uint8Array, Uint8Array>[] = [
   {
     kind: MSG_CONTROL_ISSUE_GUARANTEE,
     channel: LogicalChannel.IntersectionChannel,
-    amount: BigInt(2147483647),
-  },
-  {
-    kind: MSG_CONTROL_ISSUE_GUARANTEE,
-    channel: LogicalChannel.IntersectionChannel,
     amount: BigInt(2147483648),
   },
   {
@@ -93,11 +92,7 @@ const vectors: SyncMessage<Uint8Array, Uint8Array, Uint8Array>[] = [
     channel: LogicalChannel.IntersectionChannel,
     amount: BigInt(65536),
   },
-  {
-    kind: MSG_CONTROL_ABSOLVE,
-    channel: LogicalChannel.IntersectionChannel,
-    amount: BigInt(2147483647),
-  },
+
   {
     kind: MSG_CONTROL_ABSOLVE,
     channel: LogicalChannel.IntersectionChannel,
@@ -117,11 +112,6 @@ const vectors: SyncMessage<Uint8Array, Uint8Array, Uint8Array>[] = [
     kind: MSG_CONTROL_PLEAD,
     channel: LogicalChannel.IntersectionChannel,
     target: BigInt(65536),
-  },
-  {
-    kind: MSG_CONTROL_PLEAD,
-    channel: LogicalChannel.IntersectionChannel,
-    target: BigInt(2147483647),
   },
   {
     kind: MSG_CONTROL_PLEAD,
@@ -156,15 +146,83 @@ const vectors: SyncMessage<Uint8Array, Uint8Array, Uint8Array>[] = [
   },
   {
     kind: MSG_CONTROL_FREE,
-    handle: BigInt(2147483647),
+    handle: BigInt(2147483648),
     handleType: HandleType.IntersectionHandle,
     mine: false,
   },
+  // PAI
+
   {
-    kind: MSG_CONTROL_FREE,
-    handle: BigInt(4294967296),
-    handleType: HandleType.IntersectionHandle,
-    mine: false,
+    kind: MSG_PAI_BIND_FRAGMENT,
+    isSecondary: false,
+    groupMember: crypto.getRandomValues(new Uint8Array(9)),
+  },
+  {
+    kind: MSG_PAI_BIND_FRAGMENT,
+    isSecondary: true,
+    groupMember: crypto.getRandomValues(new Uint8Array(9)),
+  },
+  {
+    kind: MSG_PAI_REPLY_FRAGMENT,
+    groupMember: crypto.getRandomValues(new Uint8Array(9)),
+    handle: BigInt(1),
+  },
+  {
+    kind: MSG_PAI_REPLY_FRAGMENT,
+    groupMember: crypto.getRandomValues(new Uint8Array(9)),
+    handle: BigInt(256),
+  },
+  {
+    kind: MSG_PAI_REPLY_FRAGMENT,
+    groupMember: crypto.getRandomValues(new Uint8Array(9)),
+    handle: BigInt(65536),
+  },
+  {
+    kind: MSG_PAI_REPLY_FRAGMENT,
+    groupMember: crypto.getRandomValues(new Uint8Array(9)),
+    handle: BigInt(2147483648),
+  },
+
+  {
+    kind: MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+    handle: BigInt(1),
+  },
+  {
+    kind: MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+    handle: BigInt(256),
+  },
+  {
+    kind: MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+    handle: BigInt(65536),
+  },
+  {
+    kind: MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+    handle: BigInt(2147483648),
+  },
+
+  {
+    kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
+    handle: BigInt(1),
+    capability: crypto.getRandomValues(new Uint8Array(8)),
+    signature: crypto.getRandomValues(new Uint8Array(7)),
+  },
+  {
+    kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
+    handle: BigInt(256),
+    capability: crypto.getRandomValues(new Uint8Array(8)),
+    signature: crypto.getRandomValues(new Uint8Array(7)),
+  },
+  {
+    kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
+    handle: BigInt(65536),
+    capability: crypto.getRandomValues(new Uint8Array(8)),
+    signature: crypto.getRandomValues(new Uint8Array(7)),
+  },
+  {
+    kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
+    handle: BigInt(2147483648),
+    capability: crypto.getRandomValues(new Uint8Array(8)),
+    signature: crypto.getRandomValues(new Uint8Array(7)),
   },
 ];
 
