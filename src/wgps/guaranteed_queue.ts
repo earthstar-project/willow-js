@@ -42,29 +42,21 @@ export class GuaranteedQueue {
 
   /** Use available guarantees to send bytes. */
   private useGuarantees() {
-    if (!this.queue) {
-      return;
+    while (this.queue.length > 0) {
+      const peekedHead = this.queue.peek();
+
+      // Check if we have enough budget to send the current message.
+      if (!peekedHead || peekedHead.byteLength > this.guarantees) {
+        return;
+      }
+
+      // If so, send it out.
+      const head = this.queue.shift()!;
+
+      this.outgoingBytes.push(head);
+
+      this.guarantees -= BigInt(head.byteLength);
     }
-
-    const peekedHead = this.queue.peek();
-
-    // Check if we have enough budget to send the current message.
-    if (!peekedHead || peekedHead.byteLength > this.guarantees) {
-      return;
-    }
-
-    // If so, send it out.
-    const head = this.queue.shift()!;
-
-    this.outgoingBytes.push(head);
-
-    this.guarantees -= BigInt(head.byteLength);
-
-    if (this.queue.length === 0) {
-      return;
-    }
-
-    this.useGuarantees();
   }
 
   async *[Symbol.asyncIterator]() {
