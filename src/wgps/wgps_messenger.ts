@@ -364,7 +364,14 @@ export class WgpsMessenger<
         );
       }
       case MSG_CONTROL_PLEAD: {
-        this.intersectionChannel.plead(message.target);
+        const absolved = this.intersectionChannel.plead(message.target);
+
+        this.encoder.encode({
+          kind: MSG_CONTROL_ABSOLVE,
+          channel: message.channel,
+          amount: absolved,
+        });
+
         break;
       }
       case MSG_CONTROL_ANNOUNCE_DROPPING: {
