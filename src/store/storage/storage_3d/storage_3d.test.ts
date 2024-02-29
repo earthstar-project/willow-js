@@ -17,20 +17,20 @@ import {
   Range,
 } from "../../../../deps.ts";
 import {
-  makeNamespaceKeypair,
-  makeSubspaceKeypair,
-} from "../../../test/crypto.ts";
-import {
+  TestNamespace,
   testSchemeAuthorisation,
   testSchemeFingerprint,
   testSchemeNamespace,
   testSchemePath,
   testSchemePayload,
   testSchemeSubspace,
+  TestSubspace,
 } from "../../../test/test_schemes.ts";
 import {
-  getSubspaces,
+  ALL_SUBSPACES,
+  randomNamespace,
   randomPath,
+  randomSubspace,
   randomTimestamp,
 } from "../../../test/utils.ts";
 import { ProtocolParameters, QueryOrder } from "../../types.ts";
@@ -114,10 +114,8 @@ const scenarios = [tripleStorageScenario];
 
 Deno.test("Storage3d.insert, get, and remove", async (test) => {
   for (const scenario of scenarios) {
-    const namespaceKeypair = await makeNamespaceKeypair();
-
     const { storage, dispose } = await scenario.makeScenario(
-      namespaceKeypair.namespace,
+      randomNamespace(),
       {
         namespaceScheme: testSchemeNamespace,
         subspaceScheme: testSchemeSubspace,
@@ -129,7 +127,7 @@ Deno.test("Storage3d.insert, get, and remove", async (test) => {
     );
 
     await test.step(scenario.name, async () => {
-      const subspace = await makeSubspaceKeypair();
+      const subspace = randomSubspace();
       const path = randomPath();
 
       const payloadDigest = crypto.getRandomValues(new Uint8Array(32));
@@ -140,22 +138,22 @@ Deno.test("Storage3d.insert, get, and remove", async (test) => {
         payloadDigest,
         authTokenDigest,
         length: BigInt(8),
-        subspace: subspace.subspace,
+        subspace: subspace,
         timestamp: BigInt(1000),
       });
 
-      const res = await storage.get(subspace.subspace, path);
+      const res = await storage.get(subspace, path);
 
       assert(res);
 
-      assertEquals(res.entry.subspaceId, subspace.subspace);
+      assertEquals(res.entry.subspaceId, subspace);
       assertEquals(res.entry.path, path);
       assertEquals(res.entry.payloadDigest, payloadDigest);
       assertEquals(res.authTokenHash, authTokenDigest);
 
       await storage.remove(res.entry);
 
-      const res2 = await storage.get(subspace.subspace, path);
+      const res2 = await storage.get(subspace, path);
 
       assert(res2 === undefined);
     });
@@ -168,7 +166,7 @@ Deno.test("Storage3d.summarise", async () => {
   // A 'special' fingerprint which really just lists all the items it is made from.
   const specialFingerprintScheme = {
     fingerprintSingleton(
-      entry: Entry<null, number, Uint8Array>,
+      entry: Entry<TestNamespace, TestSubspace, ArrayBuffer>,
     ): Promise<[number, Path, bigint, bigint][]> {
       return Promise.resolve([[
         entry.subspaceId,
@@ -240,64 +238,16 @@ Deno.test("Storage3d.summarise", async () => {
   };
 
   for (const scenario of scenarios) {
+    const namespace = randomNamespace();
+
     const { storage, dispose } = await scenario.makeScenario(
-      null,
+      namespace,
       {
-        namespaceScheme: {
-          encode() {
-            return new Uint8Array();
-          },
-          decode() {
-            return null;
-          },
-          encodedLength() {
-            return 0;
-          },
-          isEqual() {
-            return true;
-          },
-        },
-        subspaceScheme: {
-          encode(value: number) {
-            return new Uint8Array([value]);
-          },
-          decode(encoded) {
-            return encoded[0];
-          },
-          encodedLength() {
-            return 1;
-          },
-          order(a: number, b: number) {
-            if (a < b) return -1;
-            if (a > b) return 1;
-            return 0;
-          },
-          minimalSubspaceId: 0,
-          successor(a: number) {
-            return a + 1;
-          },
-        },
+        namespaceScheme: testSchemeNamespace,
+        subspaceScheme: testSchemeSubspace,
         payloadScheme: testSchemePayload,
         pathScheme: testSchemePath,
-        authorisationScheme: {
-          isAuthorisedWrite() {
-            return Promise.resolve(true);
-          },
-          authorise() {
-            return Promise.resolve(null);
-          },
-          tokenEncoding: {
-            encode() {
-              return new Uint8Array();
-            },
-            decode() {
-              return null;
-            },
-            encodedLength() {
-              return 0;
-            },
-          },
-        },
+        authorisationScheme: testSchemeAuthorisation,
         fingerprintScheme: specialFingerprintScheme,
       },
     );
@@ -319,12 +269,6 @@ Deno.test("Storage3d.summarise", async () => {
           : BigInt(0);
       };
 
-      const randomSubspaceId = () => {
-        return Math.random() > 0.5
-          ? Math.floor(Math.random() * 255)
-          : ANY_SUBSPACE;
-      };
-
       const randomTimeRange = () => {
         const isOpen = Math.random() > 0.5;
 
@@ -344,7 +288,7 @@ Deno.test("Storage3d.summarise", async () => {
 
       areaParams.push({
         area: {
-          includedSubspaceId: randomSubspaceId(),
+          includedSubspaceId: randomSubspace(),
           pathPrefix: randomPath(),
           timeRange: randomTimeRange(),
         },
@@ -407,11 +351,11 @@ Deno.test("Storage3d.summarise", async () => {
 
     const occupiedPaths = new Map<number, Set<number>>();
 
-    const entries: Entry<null, number, Uint8Array>[] = [];
+    const entries: Entry<TestNamespace, TestSubspace, Uint8Array>[] = [];
 
     // Generate some entries
     for (let i = 0; i < 100; i++) {
-      const subspace = Math.floor(Math.random() * 100);
+      const subspace = randomSubspace();
 
       const pathLastByte = Math.floor(Math.random() * 256);
 
@@ -446,8 +390,8 @@ Deno.test("Storage3d.summarise", async () => {
         payloadDigest: payloadDigest,
       });
 
-      const entry: Entry<null, number, Uint8Array> = {
-        namespaceId: null,
+      const entry: Entry<TestNamespace, TestSubspace, Uint8Array> = {
+        namespaceId: namespace,
         subspaceId: subspace,
         path: path,
         payloadDigest: payloadDigest,
@@ -548,10 +492,10 @@ Deno.test("Storage3d.summarise", async () => {
 
 Deno.test("Storage3d.query", async (test) => {
   for (const scenario of scenarios) {
-    const namespaceKeypair = await makeNamespaceKeypair();
+    const namespace = randomNamespace();
 
     const { storage, dispose } = await scenario.makeScenario(
-      namespaceKeypair.namespace,
+      namespace,
       {
         namespaceScheme: testSchemeNamespace,
         subspaceScheme: testSchemeSubspace,
@@ -563,7 +507,7 @@ Deno.test("Storage3d.query", async (test) => {
     );
 
     const store = new Store({
-      namespace: namespaceKeypair.namespace,
+      namespace,
       protocolParameters: {
         authorisationScheme: testSchemeAuthorisation,
         namespaceScheme: testSchemeNamespace,
@@ -592,12 +536,11 @@ Deno.test("Storage3d.query", async (test) => {
       // Generate the test queries
 
       const queryParams: {
-        aoi: AreaOfInterest<Uint8Array>;
+        aoi: AreaOfInterest<TestSubspace>;
         order: QueryOrder;
         reverse: boolean;
       }[] = [];
 
-      const subspaces = await getSubspaces(10);
       const bytes = [];
       const paths = [];
 
@@ -650,7 +593,7 @@ Deno.test("Storage3d.query", async (test) => {
         queryParams.push({
           aoi: {
             area: {
-              includedSubspaceId: sample(subspaces)!.subspace,
+              includedSubspaceId: sample(ALL_SUBSPACES)!,
               pathPrefix: randomPath(),
               timeRange: randomTimeRange(),
             },
@@ -668,16 +611,16 @@ Deno.test("Storage3d.query", async (test) => {
 
       // A function which returns all the areas a given spt is included by
       const isIncludedByAreas = (
-        subspace: Uint8Array,
+        subspace: TestSubspace,
         path: Path,
         time: bigint,
       ): {
-        aoi: AreaOfInterest<Uint8Array>;
+        aoi: AreaOfInterest<TestSubspace>;
         order: QueryOrder;
         reverse: boolean;
       }[] => {
         const inclusiveParams: {
-          aoi: AreaOfInterest<Uint8Array>;
+          aoi: AreaOfInterest<TestSubspace>;
           order: QueryOrder;
           reverse: boolean;
         }[] = [];
@@ -685,7 +628,7 @@ Deno.test("Storage3d.query", async (test) => {
         for (const params of queryParams) {
           if (
             params.aoi.area.includedSubspaceId !== ANY_SUBSPACE &&
-            orderBytes(params.aoi.area.includedSubspaceId, subspace) !== 0
+            params.aoi.area.includedSubspaceId !== subspace
           ) {
             continue;
           }
@@ -710,7 +653,7 @@ Deno.test("Storage3d.query", async (test) => {
       };
 
       const actualResultMap = new Map<{
-        aoi: AreaOfInterest<Uint8Array>;
+        aoi: AreaOfInterest<TestSubspace>;
         order: QueryOrder;
         reverse: boolean;
       }, Set<string>>();
@@ -721,7 +664,7 @@ Deno.test("Storage3d.query", async (test) => {
 
       store.addEventListener("entryremove", (event) => {
         const { detail: { removed } } = event as CustomEvent<
-          { removed: Entry<Uint8Array, Uint8Array, Uint8Array> }
+          { removed: Entry<TestNamespace, TestSubspace, Uint8Array> }
         >;
 
         const encodedEntry = encodeEntry({
@@ -747,15 +690,15 @@ Deno.test("Storage3d.query", async (test) => {
         const path = sample(paths)!;
         const payload = sample(bytes)!;
 
-        const chosenSubspace = sample(subspaces)!;
+        const chosenSubspace = sample(ALL_SUBSPACES)!;
         const timestamp = sample(timestamps)!;
 
         const result = await store.set({
           path: path,
           payload: payload,
-          subspace: chosenSubspace.subspace,
+          subspace: chosenSubspace,
           timestamp,
-        }, chosenSubspace.privateKey);
+        }, chosenSubspace);
 
         if (result.kind !== "success") {
           continue;
@@ -763,7 +706,7 @@ Deno.test("Storage3d.query", async (test) => {
 
         // See if it belongs to any of the test queries.
         const correspondingQueries = isIncludedByAreas(
-          chosenSubspace.subspace,
+          chosenSubspace,
           path,
           timestamp,
         );
@@ -801,8 +744,8 @@ Deno.test("Storage3d.query", async (test) => {
         const awaiting = new Set(actualResultMap.get(params));
 
         const prevIsCorrectOrder = (
-          prev: Entry<Uint8Array, Uint8Array, ArrayBuffer>,
-          curr: Entry<Uint8Array, Uint8Array, ArrayBuffer>,
+          prev: Entry<TestNamespace, TestSubspace, ArrayBuffer>,
+          curr: Entry<TestNamespace, TestSubspace, ArrayBuffer>,
           ord: "path" | "timestamp" | "subspace",
         ): boolean => {
           switch (ord) {
@@ -839,25 +782,22 @@ Deno.test("Storage3d.query", async (test) => {
               return order === -1;
             }
             case "subspace": {
-              const order = orderBytes(
-                prev.subspaceId,
-                curr.subspaceId,
-              );
-
-              if (order === 0) {
+              if (prev.subspaceId === curr.subspaceId) {
                 return prevIsCorrectOrder(prev, curr, "path");
               }
 
               if (params.reverse) {
-                return order === 1;
+                return prev.subspaceId > curr.subspaceId;
               }
 
-              return order === -1;
+              return prev.subspaceId < curr.subspaceId;
             }
           }
         };
 
-        let prevEntry: Entry<Uint8Array, Uint8Array, ArrayBuffer> | undefined;
+        let prevEntry:
+          | Entry<TestNamespace, TestSubspace, ArrayBuffer>
+          | undefined;
 
         for await (
           const { entry, authTokenHash } of storage.query(

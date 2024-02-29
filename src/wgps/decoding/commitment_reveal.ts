@@ -1,5 +1,5 @@
+import { GrowingBytes } from "../../../deps.ts";
 import { MSG_COMMITMENT_REVEAL, MsgCommitmentReveal } from "../types.ts";
-import { GrowingBytes } from "./growing_bytes.ts";
 
 export async function decodeCommitmentReveal(
   bytes: GrowingBytes,
