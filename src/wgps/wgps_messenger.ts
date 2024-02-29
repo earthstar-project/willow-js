@@ -358,10 +358,8 @@ export class WgpsMessenger<
         break;
       }
       case MSG_CONTROL_ABSOLVE: {
-        // Should not happen
-        throw new WgpsMessageValidationError(
-          "Partner tried to absolve us - but we never plead.",
-        );
+        // Silently ignore.
+        break;
       }
       case MSG_CONTROL_PLEAD: {
         const absolved = this.intersectionChannel.plead(message.target);
@@ -389,14 +387,18 @@ export class WgpsMessenger<
       case MSG_CONTROL_FREE: {
         switch (message.handleType) {
           case HandleType.IntersectionHandle: {
+            // Remember: 'mine' is from the perspective of the sender.
             if (message.mine) {
               this.intersectionHandlesTheirs.markForFreeing(message.handle);
             } else {
-              if (this.intersectionHandlesOurs.canUse(message.handle)) {
-                throw new WgpsMessageValidationError(
-                  "They asked us to free a handle of ours we never asked to free.",
-                );
-              }
+              this.intersectionHandlesOurs.markForFreeing(message.handle);
+
+              this.encoder.encode({
+                kind: MSG_CONTROL_FREE,
+                handle: message.handle,
+                handleType: message.handleType,
+                mine: true,
+              });
             }
           }
         }
