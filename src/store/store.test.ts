@@ -5,25 +5,26 @@ import {
 import { Store } from "./store.ts";
 import { crypto } from "https://deno.land/std@0.188.0/crypto/crypto.ts";
 import {
+  TestNamespace,
   testSchemeAuthorisation,
   testSchemeFingerprint,
   testSchemeNamespace,
   testSchemePath,
   testSchemePayload,
   testSchemeSubspace,
+  TestSubspace,
 } from "../test/test_schemes.ts";
-import { makeSubspaceKeypair } from "../test/crypto.ts";
 import { fullArea, orderBytes, orderPath } from "../../deps.ts";
 
 class TestStore extends Store<
-  Uint8Array,
-  Uint8Array,
+  TestNamespace,
+  TestSubspace,
   ArrayBuffer,
-  CryptoKey,
-  ArrayBuffer,
+  TestSubspace,
+  Uint8Array,
   Uint8Array
 > {
-  constructor(namespace = new Uint8Array([1, 2, 3, 4])) {
+  constructor(namespace = 0) {
     super({
       namespace,
       protocolParameters: {
@@ -54,8 +55,8 @@ class TestStore extends Store<
 // Namespace length must equal protocol parameter pub key length
 
 Deno.test("Store.set", async (test) => {
-  const authorKeypair = await makeSubspaceKeypair();
-  const author2Keypair = await makeSubspaceKeypair();
+  const alfie = TestSubspace.Alfie;
+  const betty = TestSubspace.Betty;
 
   await test.step("Fails with invalid ingestions", async () => {
     const store = new TestStore();
@@ -65,9 +66,9 @@ Deno.test("Store.set", async (test) => {
       {
         path: [new Uint8Array([1, 2, 3, 4])],
         payload: new Uint8Array([1, 1, 1, 1]),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      author2Keypair.privateKey,
+      betty,
     );
 
     assert(badKeypairRes.kind === "failure");
@@ -95,9 +96,9 @@ Deno.test("Store.set", async (test) => {
       {
         path: [new Uint8Array([1, 2, 3, 4])],
         payload: new Uint8Array([1, 1, 1, 1]),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     assertEquals(goodKeypairRes.kind, "success");
@@ -126,9 +127,9 @@ Deno.test("Store.set", async (test) => {
         path: [new Uint8Array([1, 2, 3, 4])],
         payload: new Uint8Array([1, 1, 1, 1]),
         timestamp: BigInt(0),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     assert(res.kind === "success");
@@ -144,9 +145,9 @@ Deno.test("Store.set", async (test) => {
       {
         path: [new Uint8Array([1, 2, 3, 4])],
         payload: new Uint8Array([1, 1, 1, 1]),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     assert(res.kind === "success");
@@ -159,21 +160,21 @@ Deno.test("Store.set", async (test) => {
 // ingestEntry
 
 Deno.test("Store.ingestEntry", async (test) => {
-  const authorKeypair = await makeSubspaceKeypair();
-  const author2Keypair = await makeSubspaceKeypair();
+  const alfie = TestSubspace.Alfie;
+  const betty = TestSubspace.Betty;
 
   // rejects stuff from a different namespace
   await test.step("Rejects entries from a different namespace", async () => {
-    const otherStore = new TestStore(new Uint8Array([9, 9, 9, 9]));
+    const otherStore = new TestStore(4);
     const store = new TestStore();
 
     const otherStoreRes = await otherStore.set(
       {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array(),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     assert(otherStoreRes.kind === "success");
@@ -187,7 +188,7 @@ Deno.test("Store.ingestEntry", async (test) => {
     assert(ingestRes.reason === "invalid_entry");
   });
 
-  await test.step("Rejects entries with bad signatures", async () => {
+  await test.step("Rejects entries with invalid auth tokens", async () => {
     const otherStore = new TestStore();
     const store = new TestStore();
 
@@ -195,16 +196,16 @@ Deno.test("Store.ingestEntry", async (test) => {
       {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array(),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     assert(otherStoreRes.kind === "success");
 
     const badAuthorSigRes = await store.ingestEntry(
       otherStoreRes.entry,
-      new Uint8Array([1, 2, 3]).buffer,
+      new Uint8Array([1, 2, 3]),
     );
 
     assert(badAuthorSigRes.kind === "failure");
@@ -220,9 +221,9 @@ Deno.test("Store.ingestEntry", async (test) => {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 1]),
         timestamp: BigInt(2000),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     const secondRes = await store.set(
@@ -230,9 +231,9 @@ Deno.test("Store.ingestEntry", async (test) => {
         path: [new Uint8Array([0, 0, 0, 0]), new Uint8Array([1])],
         payload: new Uint8Array([0, 1, 2, 3]),
         timestamp: BigInt(1000),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     assert(secondRes.kind === "no_op");
@@ -247,9 +248,9 @@ Deno.test("Store.ingestEntry", async (test) => {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 1]),
         timestamp: BigInt(2000),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     const secondRes = await store.set(
@@ -257,9 +258,9 @@ Deno.test("Store.ingestEntry", async (test) => {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 3]),
         timestamp: BigInt(1000),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     assert(secondRes.kind === "no_op");
@@ -274,9 +275,9 @@ Deno.test("Store.ingestEntry", async (test) => {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 1]),
         timestamp: BigInt(2000),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     const secondRes = await store.set(
@@ -284,9 +285,9 @@ Deno.test("Store.ingestEntry", async (test) => {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 3]),
         timestamp: BigInt(2000),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     assert(secondRes.kind === "no_op");
@@ -310,9 +311,9 @@ Deno.test("Store.ingestEntry", async (test) => {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 1]),
         timestamp: BigInt(1000),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     const secondRes = await store.set(
@@ -320,9 +321,9 @@ Deno.test("Store.ingestEntry", async (test) => {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array([0, 1, 2, 3]),
         timestamp: BigInt(2000),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     assert(secondRes.kind === "success");
@@ -353,9 +354,9 @@ Deno.test("Store.ingestEntry", async (test) => {
         path: [new Uint8Array([0]), new Uint8Array([1])],
         payload: new Uint8Array([0, 1, 2, 1]),
         timestamp: BigInt(0),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     await store.set(
@@ -363,9 +364,9 @@ Deno.test("Store.ingestEntry", async (test) => {
         path: [new Uint8Array([0]), new Uint8Array([2])],
         payload: new Uint8Array([0, 1, 2, 1]),
         timestamp: BigInt(0),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     const prefixRes = await store.set(
@@ -373,9 +374,9 @@ Deno.test("Store.ingestEntry", async (test) => {
         path: [new Uint8Array([0])],
         payload: new Uint8Array([0, 1, 2, 3]),
         timestamp: BigInt(1),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     assert(prefixRes.kind === "success");
@@ -407,9 +408,9 @@ Deno.test("Store.ingestEntry", async (test) => {
         path: [new Uint8Array([0]), new Uint8Array([1])],
         payload: new Uint8Array([0, 1, 2, 1]),
         timestamp: BigInt(0),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     await store.set(
@@ -417,9 +418,9 @@ Deno.test("Store.ingestEntry", async (test) => {
         path: [new Uint8Array([0]), new Uint8Array([1])],
         payload: new Uint8Array([0, 1, 2, 3]),
         timestamp: BigInt(1),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     const prefixRes = await store.set(
@@ -427,9 +428,9 @@ Deno.test("Store.ingestEntry", async (test) => {
         path: [new Uint8Array([0])],
         payload: new Uint8Array([0, 1, 2, 3]),
         timestamp: BigInt(2),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     assert(prefixRes.kind === "success");
@@ -458,14 +459,15 @@ Deno.test("Store.ingestEntry", async (test) => {
 // ingestPayload
 
 Deno.test("Store.ingestPayload", async (test) => {
-  const authorKeypair = await makeSubspaceKeypair();
+  const alfie = TestSubspace.Alfie;
+  const betty = TestSubspace.Betty;
 
   await test.step("does not ingest payload if corresponding entry is missing", async () => {
     const store = new TestStore();
 
     const res = await store.ingestPayload({
       path: [new Uint8Array([0])],
-      subspace: new Uint8Array([0]),
+      subspace: TestSubspace.Gemma,
       timestamp: BigInt(0),
     }, new Uint8Array());
 
@@ -484,8 +486,8 @@ Deno.test("Store.ingestPayload", async (test) => {
     const res = await otherStore.set({
       path: [new Uint8Array([0, 2])],
       payload,
-      subspace: authorKeypair.subspace,
-    }, authorKeypair.privateKey);
+      subspace: alfie,
+    }, alfie);
 
     assert(res.kind === "success");
 
@@ -503,7 +505,7 @@ Deno.test("Store.ingestPayload", async (test) => {
 
     const res4 = await store.ingestPayload({
       path: res.entry.path,
-      subspace: new Uint8Array(res.entry.subspaceId),
+      subspace: res.entry.subspaceId,
       timestamp: res.entry.timestamp,
     }, payload);
 
@@ -521,8 +523,8 @@ Deno.test("Store.ingestPayload", async (test) => {
     const res = await otherStore.set({
       path: [new Uint8Array([0, 2])],
       payload,
-      subspace: authorKeypair.subspace,
-    }, authorKeypair.privateKey);
+      subspace: alfie,
+    }, alfie);
 
     assert(res.kind === "success");
 
@@ -551,8 +553,8 @@ Deno.test("Store.ingestPayload", async (test) => {
     const res = await otherStore.set({
       path: [new Uint8Array([0, 2])],
       payload,
-      subspace: authorKeypair.subspace,
-    }, authorKeypair.privateKey);
+      subspace: alfie,
+    }, alfie);
 
     assert(res.kind === "success");
 
@@ -593,7 +595,7 @@ Deno.test("Store.ingestPayload", async (test) => {
 // WAF
 
 Deno.test("Write-ahead flags", async (test) => {
-  const authorKeypair = await makeSubspaceKeypair();
+  const alfie = TestSubspace.Alfie;
 
   await test.step("Insertion flag inserts (and removes prefixes...)", async () => {
     const store = new TestStore();
@@ -604,9 +606,9 @@ Deno.test("Write-ahead flags", async (test) => {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array(32),
         timestamp: BigInt(1000),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     assert(res.kind === "success");
@@ -618,9 +620,9 @@ Deno.test("Write-ahead flags", async (test) => {
         path: [new Uint8Array([0, 0, 0, 0, 1])],
         payload: new Uint8Array(32),
         timestamp: BigInt(500),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     assert(result.kind === "success");
@@ -663,9 +665,9 @@ Deno.test("Write-ahead flags", async (test) => {
         path: [new Uint8Array([0, 0, 0, 0])],
         payload: new Uint8Array(32),
         timestamp: BigInt(1000),
-        subspace: authorKeypair.subspace,
+        subspace: alfie,
       },
-      authorKeypair.privateKey,
+      alfie,
     );
 
     assert(res.kind === "success");

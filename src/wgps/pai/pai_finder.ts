@@ -1,5 +1,6 @@
 import { FIFO, prefixesOf } from "../../../deps.ts";
 import { WgpsMessageValidationError, WillowError } from "../../errors.ts";
+import { NamespaceScheme } from "../../store/types.ts";
 import { HandleStore } from "../handle_store.ts";
 import { ReadAuthorisation, ReadAuthorisationSubspace } from "../types.ts";
 import { isSubspaceReadAuthorisation } from "../util.ts";
@@ -21,6 +22,7 @@ export type PaiFinderOpts<
   Scalar,
   ReadCapability,
 > = {
+  namespaceScheme: NamespaceScheme<NamespaceId>;
   paiScheme: PaiScheme<
     NamespaceId,
     SubspaceId,
@@ -108,6 +110,8 @@ export class PaiFinder<
     >
   >();
 
+  private namespaceScheme: NamespaceScheme<NamespaceId>;
+
   private paiScheme: PaiScheme<
     NamespaceId,
     SubspaceId,
@@ -118,6 +122,8 @@ export class PaiFinder<
 
   private scalar: Scalar;
 
+  private requestedSubspaceCapHandles = new Set<bigint>();
+
   constructor(
     opts: PaiFinderOpts<
       NamespaceId,
@@ -127,6 +133,7 @@ export class PaiFinder<
       ReadCapability
     >,
   ) {
+    this.namespaceScheme = opts.namespaceScheme;
     this.paiScheme = opts.paiScheme;
     this.scalar = opts.paiScheme.getScalar();
     this.intersectionHandlesOurs = opts.intersectionHandlesOurs;
@@ -306,6 +313,49 @@ export class PaiFinder<
     }
   }
 
+  receivedVerifiedSubspaceCapReply(
+    handle: bigint,
+    namespace: NamespaceId,
+  ) {
+    if (this.requestedSubspaceCapHandles.has(handle) === false) {
+      throw new WgpsMessageValidationError(
+        "PAI: Partner replied with subspace cap for handle which we never sent a request for.",
+      );
+    }
+
+    this.requestedSubspaceCapHandles.delete(handle);
+
+    const result = this.intersectionHandlesOurs.get(handle);
+
+    if (!result) {
+      throw new WgpsMessageValidationError(
+        "PAI: partner replied with subspace capability using unknown handle.",
+      );
+    }
+
+    const fragmentInfo = this.fragmentsInfo.get(handle);
+
+    if (!fragmentInfo) {
+      throw new WillowError(
+        "Couldn't dereference a known intersection handle's associated info. Whoops.",
+      );
+    }
+
+    const kit = this.paiScheme.getFragmentKit(
+      fragmentInfo.authorisation.capability,
+    );
+
+    if (
+      this.namespaceScheme.isEqual(kit.grantedNamespace, namespace) === false
+    ) {
+      throw new WgpsMessageValidationError(
+        "PAI: partner replied with subspace capability for the wrong namespace.",
+      );
+    }
+
+    this.intersectionQueue.push(fragmentInfo.authorisation);
+  }
+
   private checkForIntersections(handle: bigint, ours: boolean) {
     const storeToGetHandleFrom = ours
       ? this.intersectionHandlesOurs
@@ -357,6 +407,7 @@ export class PaiFinder<
       } else if (
         fragmentInfo.onIntersection === REQUEST_SUBSPACE_CAP
       ) {
+        this.requestedSubspaceCapHandles.add(ours ? handle : otherHandle);
         this.subspaceCapRequestQueue.push(handle);
       }
     }

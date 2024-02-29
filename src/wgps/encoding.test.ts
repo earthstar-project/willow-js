@@ -16,43 +16,21 @@ import {
   MSG_PAI_REPLY_FRAGMENT,
   MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
   MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
-  SyncEncodings,
   SyncMessage,
 } from "./types.ts";
 import { assertEquals } from "https://deno.land/std@0.202.0/assert/assert_equals.ts";
 import { shuffle } from "https://deno.land/x/proc@0.21.9/mod3.ts";
+import {
+  TestNamespace,
+  testSchemePai,
+  testSchemeSubspaceCap,
+  TestSubspace,
+  TestSubspaceReadCap,
+} from "../test/test_schemes.ts";
+import { randomPath } from "../test/utils.ts";
+import { onAsyncIterate } from "./util.ts";
 
-const encodings: SyncEncodings<Uint8Array, Uint8Array, Uint8Array> = {
-  groupMember: {
-    encode: (group) => group,
-    decode: async (bytes) => {
-      await bytes.nextAbsolute(9);
-      const group = bytes.array.slice(0, 9);
-      bytes.prune(9);
-      return group;
-    },
-  },
-  subspaceCapability: {
-    encode: (cap) => cap,
-    decode: async (bytes) => {
-      await bytes.nextAbsolute(8);
-      const cap = bytes.array.slice(0, 8);
-      bytes.prune(8);
-      return cap;
-    },
-  },
-  syncSubspaceSignature: {
-    encode: (sig) => sig,
-    decode: async (bytes) => {
-      await bytes.nextAbsolute(7);
-      const sig = bytes.array.slice(0, 7);
-      bytes.prune(7);
-      return sig;
-    },
-  },
-};
-
-const vectors: SyncMessage<Uint8Array, Uint8Array, Uint8Array>[] = [
+const vectors: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] = [
   {
     kind: MSG_COMMITMENT_REVEAL,
     nonce: crypto.getRandomValues(new Uint8Array(4)),
@@ -150,36 +128,38 @@ const vectors: SyncMessage<Uint8Array, Uint8Array, Uint8Array>[] = [
     handleType: HandleType.IntersectionHandle,
     mine: false,
   },
+
   // PAI
 
   {
     kind: MSG_PAI_BIND_FRAGMENT,
     isSecondary: false,
-    groupMember: crypto.getRandomValues(new Uint8Array(9)),
+    groupMember: crypto.getRandomValues(new Uint8Array(32)),
   },
   {
     kind: MSG_PAI_BIND_FRAGMENT,
     isSecondary: true,
-    groupMember: crypto.getRandomValues(new Uint8Array(9)),
+    groupMember: crypto.getRandomValues(new Uint8Array(32)),
   },
+
   {
     kind: MSG_PAI_REPLY_FRAGMENT,
-    groupMember: crypto.getRandomValues(new Uint8Array(9)),
+    groupMember: crypto.getRandomValues(new Uint8Array(32)),
     handle: BigInt(1),
   },
   {
     kind: MSG_PAI_REPLY_FRAGMENT,
-    groupMember: crypto.getRandomValues(new Uint8Array(9)),
+    groupMember: crypto.getRandomValues(new Uint8Array(32)),
     handle: BigInt(256),
   },
   {
     kind: MSG_PAI_REPLY_FRAGMENT,
-    groupMember: crypto.getRandomValues(new Uint8Array(9)),
+    groupMember: crypto.getRandomValues(new Uint8Array(32)),
     handle: BigInt(65536),
   },
   {
     kind: MSG_PAI_REPLY_FRAGMENT,
-    groupMember: crypto.getRandomValues(new Uint8Array(9)),
+    groupMember: crypto.getRandomValues(new Uint8Array(32)),
     handle: BigInt(2147483648),
   },
 
@@ -203,52 +183,80 @@ const vectors: SyncMessage<Uint8Array, Uint8Array, Uint8Array>[] = [
   {
     kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
     handle: BigInt(1),
-    capability: crypto.getRandomValues(new Uint8Array(8)),
-    signature: crypto.getRandomValues(new Uint8Array(7)),
+    capability: {
+      namespace: TestNamespace.Family,
+      receiver: TestSubspace.Alfie,
+      path: randomPath(),
+    },
+    signature: crypto.getRandomValues(new Uint8Array(33)),
   },
+
   {
     kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
     handle: BigInt(256),
-    capability: crypto.getRandomValues(new Uint8Array(8)),
-    signature: crypto.getRandomValues(new Uint8Array(7)),
+    capability: {
+      namespace: TestNamespace.Family,
+      receiver: TestSubspace.Alfie,
+      path: randomPath(),
+    },
+    signature: crypto.getRandomValues(new Uint8Array(33)),
   },
   {
     kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
     handle: BigInt(65536),
-    capability: crypto.getRandomValues(new Uint8Array(8)),
-    signature: crypto.getRandomValues(new Uint8Array(7)),
+    capability: {
+      namespace: TestNamespace.Family,
+      receiver: TestSubspace.Alfie,
+      path: randomPath(),
+    },
+    signature: crypto.getRandomValues(new Uint8Array(33)),
   },
   {
     kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
     handle: BigInt(2147483648),
-    capability: crypto.getRandomValues(new Uint8Array(8)),
-    signature: crypto.getRandomValues(new Uint8Array(7)),
+    capability: {
+      namespace: TestNamespace.Family,
+      receiver: TestSubspace.Alfie,
+      path: randomPath(),
+    },
+    signature: crypto.getRandomValues(new Uint8Array(33)),
   },
 ];
 
 Deno.test("Encoding roundtrip test", async () => {
   const [alfie, betty] = transportPairInMemory();
 
-  const msgEncoder = new MessageEncoder(alfie, encodings);
+  const encodings = {
+    subspaceCapability: testSchemeSubspaceCap.encodings.subspaceCapability,
+    syncSubspaceSignature:
+      testSchemeSubspaceCap.encodings.syncSubspaceSignature,
+    groupMember: testSchemePai.groupMemberEncoding,
+  };
 
-  const messages: SyncMessage<Uint8Array, Uint8Array, Uint8Array>[] = [];
+  const msgEncoder = new MessageEncoder(encodings);
 
-  (async () => {
-    for await (
-      const message of decodeMessages({
-        transport: betty,
-        challengeLength: 4,
-        encodings,
-      })
-    ) {
+  const messages: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] =
+    [];
+
+  onAsyncIterate(msgEncoder, ({ message }) => {
+    alfie.send(message);
+  });
+
+  onAsyncIterate(
+    decodeMessages({
+      transport: betty,
+      challengeLength: 4,
+      encodings,
+    }),
+    (message) => {
       messages.push(message);
-    }
-  })();
+    },
+  );
 
   shuffle(vectors);
 
   for (const message of vectors) {
-    msgEncoder.send(message);
+    msgEncoder.encode(message);
   }
 
   await delay(15);

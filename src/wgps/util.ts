@@ -24,3 +24,14 @@ export function isSubspaceReadAuthorisation<
 
   return false;
 }
+
+export function onAsyncIterate<ValueType>(
+  iterator: AsyncIterable<ValueType>,
+  callback: (value: ValueType) => void | Promise<void>,
+) {
+  (async () => {
+    for await (const value of iterator) {
+      await callback(value);
+    }
+  })();
+}

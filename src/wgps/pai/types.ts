@@ -1,4 +1,4 @@
-import { Path } from "../../../deps.ts";
+import { EncodingScheme, Path } from "../../../deps.ts";
 
 export type FragmentTriple<NamespaceId, SubspaceId> = [
   NamespaceId,
@@ -53,6 +53,7 @@ export type PaiScheme<
   scalarMult: (group: PsiGroup, scalar: Scalar) => PsiGroup;
   isGroupEqual: (a: PsiGroup, b: PsiGroup) => boolean;
   getFragmentKit: (cap: ReadCapability) => FragmentKit<NamespaceId, SubspaceId>;
+  groupMemberEncoding: EncodingScheme<PsiGroup>;
 };
 
 export type Intersection<PsiGroup> = {

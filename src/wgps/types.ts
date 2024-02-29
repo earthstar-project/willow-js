@@ -1,4 +1,4 @@
-import { StreamEncodingScheme } from "../../deps.ts";
+import { EncodingScheme, SignatureScheme } from "../../deps.ts";
 
 /** The peer which initiated the synchronisation session. */
 export const IS_ALFIE = Symbol("alfie");
@@ -206,7 +206,28 @@ export type SyncEncodings<
   SubspaceCapability,
   SyncSubspaceSignature,
 > = {
-  groupMember: StreamEncodingScheme<PsiGroup>;
-  subspaceCapability: StreamEncodingScheme<SubspaceCapability>;
-  syncSubspaceSignature: StreamEncodingScheme<SyncSubspaceSignature>;
+  groupMember: EncodingScheme<PsiGroup>;
+  subspaceCapability: EncodingScheme<SubspaceCapability>;
+  syncSubspaceSignature: EncodingScheme<SyncSubspaceSignature>;
+};
+
+export type SubspaceCapScheme<
+  NamespaceId,
+  SubspaceCapability,
+  SubspaceReceiver,
+  SubspaceSecretKey,
+  SyncSubspaceSignature,
+> = {
+  getSecretKey: (receiver: SubspaceReceiver) => SubspaceSecretKey | undefined;
+  getNamespace: (cap: SubspaceCapability) => NamespaceId;
+  getReceiver: (cap: SubspaceCapability) => SubspaceReceiver;
+  signatures: SignatureScheme<
+    SubspaceReceiver,
+    SubspaceSecretKey,
+    SyncSubspaceSignature
+  >;
+  encodings: {
+    subspaceCapability: EncodingScheme<SubspaceCapability>;
+    syncSubspaceSignature: EncodingScheme<SyncSubspaceSignature>;
+  };
 };

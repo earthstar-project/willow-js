@@ -71,8 +71,8 @@ export async function* decodeMessages<
       // PAI Reply Subspace Capability
       yield await decodePaiReplySubspaceCapability(
         bytes,
-        opts.encodings.subspaceCapability.decode,
-        opts.encodings.syncSubspaceSignature.decode,
+        opts.encodings.subspaceCapability.decodeStream,
+        opts.encodings.syncSubspaceSignature.decodeStream,
       );
     } else if ((firstByte & 0xc) === 0xc) {
       // PAI Request Subspace Capability
@@ -81,13 +81,13 @@ export async function* decodeMessages<
       // PAI Reply Fragment
       yield await decodePaiReplyFragment(
         bytes,
-        opts.encodings.groupMember.decode,
+        opts.encodings.groupMember.decodeStream,
       );
     } else if ((firstByte & 0x4) === 0x4) {
       // PAI Bind Fragment
       yield await decodePaiBindFragment(
         bytes,
-        opts.encodings.groupMember.decode,
+        opts.encodings.groupMember.decodeStream,
       );
     } else {
       // Couldn't decode.

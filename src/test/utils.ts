@@ -1,17 +1,15 @@
 import { Path } from "../../deps.ts";
-import { makeSubspaceKeypair } from "./crypto.ts";
+import { TestNamespace, TestSubspace } from "./test_schemes.ts";
 
-export async function getSubspaces(size: number) {
-  const subspaces = [];
-
-  for (let i = 0; i < size; i++) {
-    const keypair = await makeSubspaceKeypair();
-
-    subspaces.push(keypair);
-  }
-
-  return subspaces;
+export function randomNamespace(): TestNamespace {
+  return Math.floor(Math.random() * 5);
 }
+
+export function randomSubspace(): TestSubspace {
+  return Math.floor(Math.random() * 7);
+}
+
+export const ALL_SUBSPACES: TestSubspace[] = [0, 1, 2, 3, 4, 5, 6];
 
 export function randomTimestamp() {
   return BigInt(Math.floor(Math.random() * 1000));

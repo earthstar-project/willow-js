@@ -1,5 +1,6 @@
 import { FIFO } from "../../../deps.ts";
 import {
+  LogicalChannel,
   MSG_COMMITMENT_REVEAL,
   MSG_CONTROL_ABSOLVE,
   MSG_CONTROL_ANNOUNCE_DROPPING,
@@ -13,8 +14,8 @@ import {
   MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
   SyncEncodings,
   SyncMessage,
-  Transport,
 } from "../types.ts";
+import { onAsyncIterate } from "../util.ts";
 
 import {
   encodeControlAbsolve,
@@ -32,92 +33,112 @@ import {
   encodePaiRequestSubspaceCapability,
 } from "./pai.ts";
 
+export type EncodedSyncMessage = {
+  channel: LogicalChannel | null;
+  message: Uint8Array;
+};
+
 export class MessageEncoder<
   PsiGroup,
   SubspaceCapability,
   SyncSubspaceSignature,
 > {
-  private outgoing = new FIFO<Uint8Array>();
+  private messageChannel = new FIFO<EncodedSyncMessage>();
 
   constructor(
-    transport: Transport,
     readonly encodings: SyncEncodings<
       PsiGroup,
       SubspaceCapability,
       SyncSubspaceSignature
     >,
   ) {
-    (async () => {
-      for await (const bytes of this.outgoing) {
-        await transport.send(bytes);
-      }
-    })();
   }
 
-  send(
+  async *[Symbol.asyncIterator]() {
+    for await (const message of this.messageChannel) {
+      yield message;
+    }
+  }
+
+  encode(
     message: SyncMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature>,
   ) {
-    let bytes: Uint8Array;
+    const push = (channel: LogicalChannel | null, message: Uint8Array) => {
+      this.messageChannel.push({
+        channel,
+        message,
+      });
+    };
 
     switch (message.kind) {
       // Control messages
       case MSG_CONTROL_ISSUE_GUARANTEE: {
-        bytes = encodeControlIssueGuarantee(message);
+        const bytes = encodeControlIssueGuarantee(message);
+        push(null, bytes);
         break;
       }
       case MSG_CONTROL_ABSOLVE: {
-        bytes = encodeControlAbsolve(message);
+        const bytes = encodeControlAbsolve(message);
+        push(null, bytes);
         break;
       }
       case MSG_CONTROL_PLEAD: {
-        bytes = encodeControlPlead(message);
+        const bytes = encodeControlPlead(message);
+        push(null, bytes);
         break;
       }
       case MSG_CONTROL_ANNOUNCE_DROPPING: {
-        bytes = encodeControlAnnounceDropping(message);
+        const bytes = encodeControlAnnounceDropping(message);
+        push(null, bytes);
         break;
       }
       case MSG_CONTROL_APOLOGISE: {
-        bytes = encodeControlApologise(message);
+        const bytes = encodeControlApologise(message);
+        push(null, bytes);
         break;
       }
       case MSG_CONTROL_FREE: {
-        bytes = encodeControlFree(message);
+        const bytes = encodeControlFree(message);
+        push(null, bytes);
         break;
       }
 
       // Commitment scheme and PAI
       case MSG_COMMITMENT_REVEAL: {
-        bytes = encodeCommitmentReveal(message);
+        const bytes = encodeCommitmentReveal(message);
+        push(null, bytes);
         break;
       }
       case MSG_PAI_BIND_FRAGMENT: {
-        bytes = encodePaiBindFragment(
+        const bytes = encodePaiBindFragment(
           message,
           this.encodings.groupMember.encode,
         );
+        push(LogicalChannel.IntersectionChannel, bytes);
         break;
       }
       case MSG_PAI_REPLY_FRAGMENT: {
-        bytes = encodePaiReplyFragment(
+        const bytes = encodePaiReplyFragment(
           message,
           this.encodings.groupMember.encode,
         );
+        push(LogicalChannel.IntersectionChannel, bytes);
         break;
       }
       case MSG_PAI_REQUEST_SUBSPACE_CAPABILITY: {
-        bytes = encodePaiRequestSubspaceCapability(message);
+        const bytes = encodePaiRequestSubspaceCapability(message);
+        push(LogicalChannel.IntersectionChannel, bytes);
         break;
       }
       case MSG_PAI_REPLY_SUBSPACE_CAPABILITY: {
-        bytes = encodePaiReplySubspaceCapability(
+        const bytes = encodePaiReplySubspaceCapability(
           message,
           this.encodings.subspaceCapability.encode,
           this.encodings.syncSubspaceSignature.encode,
         );
+        push(LogicalChannel.IntersectionChannel, bytes);
+        break;
       }
     }
-
-    this.outgoing.push(bytes);
   }
 }
