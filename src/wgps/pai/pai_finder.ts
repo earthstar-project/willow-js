@@ -374,6 +374,9 @@ export class PaiFinder<
       return;
     }
 
+    // Here we are looping through the whole contents of the handle store because...
+    // otherwise we need to build a special handle store just for intersections.
+    // Which we might do one day, but I'm not convinced it's worth it yet.
     for (
       const [otherHandle, otherIntersection] of storeToCheckAgainst
     ) {
@@ -381,6 +384,7 @@ export class PaiFinder<
         continue;
       }
 
+      // Continue here to avoid the false positive of same namespace + path but different subspaces.
       if (intersection.isSecondary && otherIntersection.isSecondary) {
         continue;
       }
