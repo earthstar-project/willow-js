@@ -35,9 +35,9 @@ Here is what has been implemented:
 And here is what remains:
 
 - Sync
-  - Resource control
-  - Commitment scheme
-  - Private area intersection
+  - [x] Resource control
+  - [x] Commitment scheme
+  - [x] Private area intersection
   - 3d range-based set reconciliation
   - Payload transmission
   - Post-reconciliation forwarding
@@ -48,3 +48,10 @@ And here is what remains:
 ## Dev
 
 Deno is used the development runtime. Run `deno task test` to run tests.
+
+---
+
+This project was funded through the NGI Assure Fund, a fund established by NLnet
+with financial support from the European Commission’s Next Generation Internet
+programme, under the aegis of DG Communications Networks, Content and Technology
+under grant agreement № 957073.
