@@ -1,4 +1,4 @@
-import { GrowingBytes } from "../../../deps.ts";
+import { Area, GrowingBytes } from "../../../deps.ts";
 import { SyncEncodings, SyncMessage, Transport } from "../types.ts";
 import { decodeCommitmentReveal } from "./commitment_reveal.ts";
 import {
@@ -15,25 +15,48 @@ import {
   decodePaiReplySubspaceCapability,
   decodePaiRequestSubspaceCapability,
 } from "./pai.ts";
+import { decodeSetupBindReadCapability } from "./setup.ts";
 
 export type DecodeMessagesOpts<
+  ReadCapabilityPartial,
+  SyncSignature,
   PsiGroup,
   SubspaceCapability,
   SyncSubspaceSignature,
 > = {
   transport: Transport;
   challengeLength: number;
-  encodings: SyncEncodings<PsiGroup, SubspaceCapability, SyncSubspaceSignature>;
+  encodings: SyncEncodings<
+    ReadCapabilityPartial,
+    SyncSignature,
+    PsiGroup,
+    SubspaceCapability,
+    SyncSubspaceSignature
+  >;
 };
 
 export async function* decodeMessages<
+  ReadCapability,
+  SyncSignature,
   PsiGroup,
   SubspaceCapability,
   SyncSubspaceSignature,
 >(
-  opts: DecodeMessagesOpts<PsiGroup, SubspaceCapability, SyncSubspaceSignature>,
+  opts: DecodeMessagesOpts<
+    ReadCapability,
+    SyncSignature,
+    PsiGroup,
+    SubspaceCapability,
+    SyncSubspaceSignature
+  >,
 ): AsyncIterable<
-  SyncMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature>
+  SyncMessage<
+    ReadCapability,
+    SyncSignature,
+    PsiGroup,
+    SubspaceCapability,
+    SyncSubspaceSignature
+  >
 > {
   const bytes = new GrowingBytes(opts.transport);
 
@@ -67,6 +90,13 @@ export async function* decodeMessages<
     } else if ((firstByte & 0x80) === 0x80) {
       // Control Issue Guarantee.
       yield await decodeControlIssueGuarantee(bytes);
+    } else if ((firstByte & 0x20) === 0x20) {
+      // Setup Bind Read Capability
+      yield await decodeSetupBindReadCapability(
+        bytes,
+        opts.encodings.readCapabilityPartial.decodeStream,
+        opts.encodings.syncSignature.decodeStream,
+      );
     } else if ((firstByte & 0x10) === 0x10) {
       // PAI Reply Subspace Capability
       yield await decodePaiReplySubspaceCapability(

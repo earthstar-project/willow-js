@@ -12,11 +12,10 @@ import {
   MSG_PAI_REPLY_FRAGMENT,
   MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
   MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+  MSG_SETUP_BIND_READ_CAPABILITY,
   SyncEncodings,
   SyncMessage,
 } from "../types.ts";
-import { onAsyncIterate } from "../util.ts";
-
 import {
   encodeControlAbsolve,
   encodeControlAnnounceDropping,
@@ -32,6 +31,7 @@ import {
   encodePaiReplySubspaceCapability,
   encodePaiRequestSubspaceCapability,
 } from "./pai.ts";
+import { encodeSetupBindReadCapability } from "./setup.ts";
 
 export type EncodedSyncMessage = {
   channel: LogicalChannel | null;
@@ -39,6 +39,8 @@ export type EncodedSyncMessage = {
 };
 
 export class MessageEncoder<
+  ReadCapabilityPartial,
+  SyncSignature,
   PsiGroup,
   SubspaceCapability,
   SyncSubspaceSignature,
@@ -47,6 +49,8 @@ export class MessageEncoder<
 
   constructor(
     readonly encodings: SyncEncodings<
+      ReadCapabilityPartial,
+      SyncSignature,
       PsiGroup,
       SubspaceCapability,
       SyncSubspaceSignature
@@ -61,7 +65,13 @@ export class MessageEncoder<
   }
 
   encode(
-    message: SyncMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature>,
+    message: SyncMessage<
+      ReadCapabilityPartial,
+      SyncSignature,
+      PsiGroup,
+      SubspaceCapability,
+      SyncSubspaceSignature
+    >,
   ) {
     const push = (channel: LogicalChannel | null, message: Uint8Array) => {
       this.messageChannel.push({
@@ -138,6 +148,17 @@ export class MessageEncoder<
         );
         push(LogicalChannel.IntersectionChannel, bytes);
         break;
+      }
+
+      // Setup
+      case MSG_SETUP_BIND_READ_CAPABILITY: {
+        const bytes = encodeSetupBindReadCapability(
+          message,
+          this.encodings.readCapabilityPartial.encode,
+          this.encodings.syncSignature.encode,
+        );
+
+        push(LogicalChannel.CapabilityChannel, bytes);
       }
     }
   }

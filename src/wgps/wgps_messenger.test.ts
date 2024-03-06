@@ -3,12 +3,14 @@ import { transportPairInMemory } from "./transports/in_memory.ts";
 import { WgpsMessenger } from "./wgps_messenger.ts";
 import {
   TestNamespace,
+  testSchemeAccessControl,
   testSchemeNamespace,
   testSchemePai,
   testSchemeSubspaceCap,
   TestSubspace,
 } from "../test/test_schemes.ts";
 import { delay } from "https://deno.land/std@0.202.0/async/delay.ts";
+import { OPEN_END } from "../../deps.ts";
 
 Deno.test("WgpsMessenger establishes challenge", async () => {
   const [alfie, betty] = transportPairInMemory();
@@ -23,9 +25,12 @@ Deno.test("WgpsMessenger establishes challenge", async () => {
     challengeHashLength: 32,
     maxPayloadSizePower: 8,
     transport: alfie,
-    subspaceCapScheme: testSchemeSubspaceCap,
-    namespaceScheme: testSchemeNamespace,
-    paiScheme: testSchemePai,
+    schemes: {
+      subspaceCap: testSchemeSubspaceCap,
+      namespace: testSchemeNamespace,
+      accessControl: testSchemeAccessControl,
+      pai: testSchemePai,
+    },
     readAuthorisations: [
       {
         capability: {
@@ -33,8 +38,12 @@ Deno.test("WgpsMessenger establishes challenge", async () => {
           subspace: TestSubspace.Gemma,
           path: [new Uint8Array([1])],
           receiver: TestSubspace.Alfie,
+          time: {
+            start: BigInt(0),
+            end: OPEN_END,
+          },
         },
-        signature: TestSubspace.Alfie,
+        signature: new Uint8Array(),
       },
     ],
   });
@@ -45,9 +54,12 @@ Deno.test("WgpsMessenger establishes challenge", async () => {
     challengeHashLength: 32,
     maxPayloadSizePower: 8,
     transport: betty,
-    subspaceCapScheme: testSchemeSubspaceCap,
-    namespaceScheme: testSchemeNamespace,
-    paiScheme: testSchemePai,
+    schemes: {
+      subspaceCap: testSchemeSubspaceCap,
+      namespace: testSchemeNamespace,
+      accessControl: testSchemeAccessControl,
+      pai: testSchemePai,
+    },
     readAuthorisations: [
       {
         capability: {
@@ -55,8 +67,12 @@ Deno.test("WgpsMessenger establishes challenge", async () => {
           subspace: TestSubspace.Gemma,
           path: [new Uint8Array([1]), new Uint8Array([2])],
           receiver: TestSubspace.Betty,
+          time: {
+            start: BigInt(0),
+            end: OPEN_END,
+          },
         },
-        signature: TestSubspace.Betty,
+        signature: new Uint8Array(),
       },
     ],
   });

@@ -16,21 +16,34 @@ import {
   MSG_PAI_REPLY_FRAGMENT,
   MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
   MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+  MSG_SETUP_BIND_READ_CAPABILITY,
+  SyncEncodings,
   SyncMessage,
 } from "./types.ts";
 import { assertEquals } from "https://deno.land/std@0.202.0/assert/assert_equals.ts";
 import { shuffle } from "https://deno.land/x/proc@0.21.9/mod3.ts";
 import {
   TestNamespace,
+  TestReadCapPartial,
+  testSchemeAccessControl,
   testSchemePai,
+  testSchemePath,
+  testSchemeSubspace,
   testSchemeSubspaceCap,
   TestSubspace,
   TestSubspaceReadCap,
 } from "../test/test_schemes.ts";
 import { randomPath } from "../test/utils.ts";
 import { onAsyncIterate } from "./util.ts";
+import { encodeAreaInArea, OPEN_END } from "../../deps.ts";
 
-const vectors: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] = [
+const vectors: SyncMessage<
+  TestReadCapPartial,
+  Uint8Array,
+  Uint8Array,
+  TestSubspaceReadCap,
+  Uint8Array
+>[] = [
   {
     kind: MSG_COMMITMENT_REVEAL,
     nonce: crypto.getRandomValues(new Uint8Array(4)),
@@ -42,7 +55,7 @@ const vectors: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] = [
   },
   {
     kind: MSG_CONTROL_ISSUE_GUARANTEE,
-    channel: LogicalChannel.IntersectionChannel,
+    channel: LogicalChannel.CapabilityChannel,
     amount: BigInt(256),
   },
   {
@@ -52,7 +65,7 @@ const vectors: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] = [
   },
   {
     kind: MSG_CONTROL_ISSUE_GUARANTEE,
-    channel: LogicalChannel.IntersectionChannel,
+    channel: LogicalChannel.CapabilityChannel,
     amount: BigInt(2147483648),
   },
   {
@@ -62,7 +75,7 @@ const vectors: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] = [
   },
   {
     kind: MSG_CONTROL_ABSOLVE,
-    channel: LogicalChannel.IntersectionChannel,
+    channel: LogicalChannel.CapabilityChannel,
     amount: BigInt(256),
   },
   {
@@ -78,7 +91,7 @@ const vectors: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] = [
   },
   {
     kind: MSG_CONTROL_PLEAD,
-    channel: LogicalChannel.IntersectionChannel,
+    channel: LogicalChannel.CapabilityChannel,
     target: BigInt(1),
   },
   {
@@ -88,7 +101,7 @@ const vectors: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] = [
   },
   {
     kind: MSG_CONTROL_PLEAD,
-    channel: LogicalChannel.IntersectionChannel,
+    channel: LogicalChannel.CapabilityChannel,
     target: BigInt(65536),
   },
   {
@@ -98,7 +111,7 @@ const vectors: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] = [
   },
   {
     kind: MSG_CONTROL_ANNOUNCE_DROPPING,
-    channel: LogicalChannel.IntersectionChannel,
+    channel: LogicalChannel.CapabilityChannel,
   },
   {
     kind: MSG_CONTROL_APOLOGISE,
@@ -113,7 +126,7 @@ const vectors: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] = [
   {
     kind: MSG_CONTROL_FREE,
     handle: BigInt(256),
-    handleType: HandleType.IntersectionHandle,
+    handleType: HandleType.CapabilityHandle,
     mine: false,
   },
   {
@@ -186,6 +199,10 @@ const vectors: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] = [
     capability: {
       namespace: TestNamespace.Family,
       receiver: TestSubspace.Alfie,
+      time: {
+        start: BigInt(7),
+        end: OPEN_END,
+      },
       path: randomPath(),
     },
     signature: crypto.getRandomValues(new Uint8Array(33)),
@@ -197,6 +214,10 @@ const vectors: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] = [
     capability: {
       namespace: TestNamespace.Family,
       receiver: TestSubspace.Alfie,
+      time: {
+        start: BigInt(7),
+        end: OPEN_END,
+      },
       path: randomPath(),
     },
     signature: crypto.getRandomValues(new Uint8Array(33)),
@@ -207,6 +228,10 @@ const vectors: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] = [
     capability: {
       namespace: TestNamespace.Family,
       receiver: TestSubspace.Alfie,
+      time: {
+        start: BigInt(7),
+        end: OPEN_END,
+      },
       path: randomPath(),
     },
     signature: crypto.getRandomValues(new Uint8Array(33)),
@@ -217,8 +242,42 @@ const vectors: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] = [
     capability: {
       namespace: TestNamespace.Family,
       receiver: TestSubspace.Alfie,
+      time: {
+        start: BigInt(7),
+        end: OPEN_END,
+      },
       path: randomPath(),
     },
+    signature: crypto.getRandomValues(new Uint8Array(33)),
+  },
+
+  // Setup
+
+  {
+    kind: MSG_SETUP_BIND_READ_CAPABILITY,
+    capability: {
+      receiver: TestSubspace.Alfie,
+      areaInArea: encodeAreaInArea({
+        orderSubspace: testSchemeSubspace.order,
+        pathScheme: testSchemePath,
+        subspaceIdEncodingScheme: testSchemeSubspace,
+      }, {
+        includedSubspaceId: TestSubspace.Betty,
+        pathPrefix: [new Uint8Array(2), new Uint8Array(1)],
+        timeRange: {
+          start: BigInt(20),
+          end: OPEN_END,
+        },
+      }, {
+        includedSubspaceId: TestSubspace.Betty,
+        pathPrefix: [new Uint8Array(2)],
+        timeRange: {
+          start: BigInt(10),
+          end: OPEN_END,
+        },
+      }),
+    },
+    handle: BigInt(64),
     signature: crypto.getRandomValues(new Uint8Array(33)),
   },
 ];
@@ -226,17 +285,31 @@ const vectors: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] = [
 Deno.test("Encoding roundtrip test", async () => {
   const [alfie, betty] = transportPairInMemory();
 
-  const encodings = {
+  const encodings: SyncEncodings<
+    TestReadCapPartial,
+    Uint8Array,
+    Uint8Array,
+    TestSubspaceReadCap,
+    Uint8Array
+  > = {
     subspaceCapability: testSchemeSubspaceCap.encodings.subspaceCapability,
     syncSubspaceSignature:
       testSchemeSubspaceCap.encodings.syncSubspaceSignature,
     groupMember: testSchemePai.groupMemberEncoding,
+    readCapabilityPartial:
+      testSchemeAccessControl.encodings.readCapabilityPartial,
+    syncSignature: testSchemeAccessControl.encodings.syncSignature,
   };
 
   const msgEncoder = new MessageEncoder(encodings);
 
-  const messages: SyncMessage<Uint8Array, TestSubspaceReadCap, Uint8Array>[] =
-    [];
+  const messages: SyncMessage<
+    TestReadCapPartial,
+    Uint8Array,
+    Uint8Array,
+    TestSubspaceReadCap,
+    Uint8Array
+  >[] = [];
 
   onAsyncIterate(msgEncoder, ({ message }) => {
     alfie.send(message);

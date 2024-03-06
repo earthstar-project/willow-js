@@ -1,4 +1,11 @@
-import { FIFO, prefixesOf } from "../../../deps.ts";
+import {
+  ANY_SUBSPACE,
+  Area,
+  FIFO,
+  OPEN_END,
+  Path,
+  prefixesOf,
+} from "../../../deps.ts";
 import { WgpsMessageValidationError, WillowError } from "../../errors.ts";
 import { NamespaceScheme } from "../../store/types.ts";
 import { HandleStore } from "../handle_store.ts";
@@ -16,19 +23,19 @@ import {
 } from "./types.ts";
 
 export type PaiFinderOpts<
+  ReadCapability,
+  PsiGroup,
+  PsiScalar,
   NamespaceId,
   SubspaceId,
-  PsiGroup,
-  Scalar,
-  ReadCapability,
 > = {
   namespaceScheme: NamespaceScheme<NamespaceId>;
   paiScheme: PaiScheme<
-    NamespaceId,
-    SubspaceId,
+    ReadCapability,
     PsiGroup,
-    Scalar,
-    ReadCapability
+    PsiScalar,
+    NamespaceId,
+    SubspaceId
   >;
   intersectionHandlesOurs: HandleStore<Intersection<PsiGroup>>;
   intersectionHandlesTheirs: HandleStore<Intersection<PsiGroup>>;
@@ -44,6 +51,8 @@ type LocalFragmentInfo<
   SubspaceReadCapability,
   SyncSignature,
   SyncSubspaceSignature,
+  NamespaceId,
+  SubspaceId,
 > = {
   onIntersection: typeof DO_NOTHING;
   authorisation: ReadAuthorisation<
@@ -52,12 +61,18 @@ type LocalFragmentInfo<
     SyncSignature,
     SyncSubspaceSignature
   >;
+  path: Path;
+  namespace: NamespaceId;
+  subspace: SubspaceId | typeof ANY_SUBSPACE;
 } | {
   onIntersection: typeof BIND_READ_CAP;
   authorisation: {
     capability: ReadCapability;
     signature: SyncSignature;
   };
+  path: Path;
+  namespace: NamespaceId;
+  subspace: SubspaceId | typeof ANY_SUBSPACE;
 } | {
   onIntersection: typeof REQUEST_SUBSPACE_CAP;
   authorisation: {
@@ -66,29 +81,37 @@ type LocalFragmentInfo<
     signature: SyncSignature;
     subspaceSignature: SyncSubspaceSignature;
   };
+  path: Path;
+  namespace: NamespaceId;
+  subspace: typeof ANY_SUBSPACE;
 };
 
 /** Given `ReadAuthorisation`s, emits intersected  */
 export class PaiFinder<
+  ReadCapability,
+  SyncSignature,
+  PsiGroup,
+  PsiScalar,
+  SubspaceReadCapability,
+  SyncSubspaceSignature,
   NamespaceId,
   SubspaceId,
-  PsiGroup,
-  Scalar,
-  ReadCapability,
-  SubspaceReadCapability,
-  SyncSignature,
-  SyncSubspaceSignature,
 > {
   private intersectionHandlesOurs: HandleStore<Intersection<PsiGroup>>;
   private intersectionHandlesTheirs: HandleStore<Intersection<PsiGroup>>;
 
+  /** Queue of: a read capability to bind, and a handle of our own intersection this is related to, and the outer area to encode against.  */
   private intersectionQueue = new FIFO<
-    ReadAuthorisation<
-      ReadCapability,
-      SubspaceReadCapability,
-      SyncSignature,
-      SyncSubspaceSignature
-    >
+    [
+      ReadAuthorisation<
+        ReadCapability,
+        SubspaceReadCapability,
+        SyncSignature,
+        SyncSubspaceSignature
+      >,
+      bigint,
+      Area<SubspaceId>,
+    ]
   >();
 
   /** Queue of: a fragment group to bind, and whether it was derived from a secondary fragment. */
@@ -106,31 +129,33 @@ export class PaiFinder<
       ReadCapability,
       SubspaceReadCapability,
       SyncSignature,
-      SyncSubspaceSignature
+      SyncSubspaceSignature,
+      NamespaceId,
+      SubspaceId
     >
   >();
 
   private namespaceScheme: NamespaceScheme<NamespaceId>;
 
   private paiScheme: PaiScheme<
-    NamespaceId,
-    SubspaceId,
+    ReadCapability,
     PsiGroup,
-    Scalar,
-    ReadCapability
+    PsiScalar,
+    NamespaceId,
+    SubspaceId
   >;
 
-  private scalar: Scalar;
+  private scalar: PsiScalar;
 
   private requestedSubspaceCapHandles = new Set<bigint>();
 
   constructor(
     opts: PaiFinderOpts<
-      NamespaceId,
-      SubspaceId,
+      ReadCapability,
       PsiGroup,
-      Scalar,
-      ReadCapability
+      PsiScalar,
+      NamespaceId,
+      SubspaceId
     >,
   ) {
     this.namespaceScheme = opts.namespaceScheme;
@@ -176,6 +201,7 @@ export class PaiFinder<
     if (!isSelectiveFragmentKit(fragments)) {
       for (let i = 0; i < fragments.length; i++) {
         const fragment = fragments[i];
+        const [namespace, path] = fragment;
         const isMostSpecific = i === fragments.length - 1;
 
         const groupHandle = await submitFragment(fragment, false);
@@ -184,17 +210,24 @@ export class PaiFinder<
           this.fragmentsInfo.set(groupHandle, {
             onIntersection: BIND_READ_CAP,
             authorisation: authorisation,
+            namespace,
+            path,
+            subspace: ANY_SUBSPACE,
           });
         } else {
           this.fragmentsInfo.set(groupHandle, {
             onIntersection: DO_NOTHING,
             authorisation: authorisation,
+            namespace,
+            path,
+            subspace: ANY_SUBSPACE,
           });
         }
       }
     } else {
       for (let i = 0; i < fragments.primary.length; i++) {
         const fragment = fragments.primary[i];
+        const [namespace, subspace, path] = fragment;
         const isMostSpecific = i === fragments.primary.length - 1;
 
         const groupHandle = await submitFragment(fragment, false);
@@ -203,17 +236,24 @@ export class PaiFinder<
           this.fragmentsInfo.set(groupHandle, {
             onIntersection: BIND_READ_CAP,
             authorisation: authorisation,
+            namespace,
+            path,
+            subspace,
           });
         } else {
           this.fragmentsInfo.set(groupHandle, {
             onIntersection: DO_NOTHING,
             authorisation: authorisation,
+            namespace,
+            path,
+            subspace,
           });
         }
       }
 
       for (let i = 0; i < fragments.secondary.length; i++) {
         const fragment = fragments.secondary[i];
+        const [namespace, path] = fragment;
         const isMostSpecific = i === fragments.secondary.length - 1;
 
         const groupHandle = await submitFragment(fragment, true);
@@ -227,11 +267,17 @@ export class PaiFinder<
               SyncSignature,
               SyncSubspaceSignature
             >,
+            namespace,
+            path,
+            subspace: ANY_SUBSPACE,
           });
         } else {
           this.fragmentsInfo.set(groupHandle, {
             onIntersection: DO_NOTHING,
             authorisation: authorisation,
+            namespace,
+            path,
+            subspace: ANY_SUBSPACE,
           });
         }
       }
@@ -341,19 +387,21 @@ export class PaiFinder<
       );
     }
 
-    const kit = this.paiScheme.getFragmentKit(
-      fragmentInfo.authorisation.capability,
-    );
-
     if (
-      this.namespaceScheme.isEqual(kit.grantedNamespace, namespace) === false
+      this.namespaceScheme.isEqual(fragmentInfo.namespace, namespace) === false
     ) {
       throw new WgpsMessageValidationError(
         "PAI: partner replied with subspace capability for the wrong namespace.",
       );
     }
 
-    this.intersectionQueue.push(fragmentInfo.authorisation);
+    const outer = this.getHandleOuterArea(handle);
+
+    this.intersectionQueue.push([
+      fragmentInfo.authorisation,
+      handle,
+      outer,
+    ]);
   }
 
   private checkForIntersections(handle: bigint, ours: boolean) {
@@ -400,21 +448,99 @@ export class PaiFinder<
       }
 
       // If there is an intersection, check what we have to do!
-      const fragmentInfo = this.fragmentsInfo.get(ours ? handle : otherHandle);
+      const ourHandle = ours ? handle : otherHandle;
+
+      const fragmentInfo = this.fragmentsInfo.get(ourHandle);
 
       if (!fragmentInfo) {
         throw new WillowError("Had no fragment info!");
       }
 
+      const outer = this.getHandleOuterArea(ourHandle);
+
       if (fragmentInfo.onIntersection === BIND_READ_CAP) {
-        this.intersectionQueue.push(fragmentInfo.authorisation);
+        this.intersectionQueue.push([
+          fragmentInfo.authorisation,
+          ourHandle,
+          outer,
+        ]);
       } else if (
         fragmentInfo.onIntersection === REQUEST_SUBSPACE_CAP
       ) {
-        this.requestedSubspaceCapHandles.add(ours ? handle : otherHandle);
+        this.requestedSubspaceCapHandles.add(ourHandle);
         this.subspaceCapRequestQueue.push(handle);
       }
     }
+  }
+
+  private getHandleOuterArea(handle: bigint): Area<SubspaceId> {
+    const fragmentInfo = this.fragmentsInfo.get(handle);
+
+    if (!fragmentInfo) {
+      throw new WillowError("Had no fragment info!");
+    }
+
+    return {
+      includedSubspaceId: fragmentInfo.subspace,
+      pathPrefix: fragmentInfo.path,
+      timeRange: {
+        start: BigInt(0),
+        end: OPEN_END,
+      },
+    };
+  }
+
+  getIntersectionPrivy(
+    handle: bigint,
+  ): { namespace: NamespaceId; outer: Area<SubspaceId> } {
+    // This handle is theirs.
+    // Find which one of ours it intersects.
+    // Return the namespace and outer area.
+    const theirIntersection = this.intersectionHandlesTheirs.get(handle);
+
+    if (theirIntersection === undefined) {
+      throw new WgpsMessageValidationError(
+        "Partner tried to bind read capability for unknown intersection handle",
+      );
+    }
+
+    for (const [ourHandle, ourIntersection] of this.intersectionHandlesOurs) {
+      if (!ourIntersection.isComplete) {
+        continue;
+      }
+
+      // Continue here to avoid the false positive of same namespace + path but different subspaces.
+      if (ourIntersection.isSecondary && theirIntersection.isSecondary) {
+        continue;
+      }
+
+      // Check for equality.
+      if (
+        !this.paiScheme.isGroupEqual(
+          ourIntersection.group,
+          theirIntersection.group,
+        )
+      ) {
+        continue;
+      }
+
+      const fragmentInfo = this.fragmentsInfo.get(ourHandle);
+
+      if (!fragmentInfo) {
+        throw new WillowError("Had no fragment info!");
+      }
+
+      const outer = this.getHandleOuterArea(ourHandle);
+
+      return {
+        namespace: fragmentInfo.namespace,
+        outer,
+      };
+    }
+
+    throw new WgpsMessageValidationError(
+      "Partner tried to bind read capability for a handle with no intersection to ours",
+    );
   }
 
   async *fragmentBinds() {
@@ -436,8 +562,15 @@ export class PaiFinder<
   }
 
   async *intersections() {
-    for await (const readAuth of this.intersectionQueue) {
-      yield readAuth;
+    for await (
+      const [authorisation, handle, outer] of this
+        .intersectionQueue
+    ) {
+      yield {
+        authorisation,
+        handle,
+        outer,
+      };
     }
   }
 
