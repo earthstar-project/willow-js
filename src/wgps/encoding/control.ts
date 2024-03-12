@@ -19,6 +19,8 @@ export function channelMaskStart(
       return mask | 0x40;
     case LogicalChannel.CapabilityChannel:
       return mask | 0x60;
+    case LogicalChannel.AreaOfInterestChannel:
+      return mask | 0x80;
   }
 }
 
@@ -28,6 +30,8 @@ export function channelMaskEnd(mask: number, channel: LogicalChannel): number {
       return mask | 0x2;
     case LogicalChannel.CapabilityChannel:
       return mask | 0x3;
+    case LogicalChannel.AreaOfInterestChannel:
+      return mask | 0x4;
   }
 }
 
@@ -37,6 +41,8 @@ export function handleMask(mask: number, handleType: HandleType): number {
       return mask;
     case HandleType.CapabilityHandle:
       return mask | 0x20;
+    case HandleType.AreaOfInterestHandle:
+      return mask | 0x40;
   }
 }
 

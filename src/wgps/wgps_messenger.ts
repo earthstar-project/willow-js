@@ -1,4 +1,9 @@
-import { deferred, orderBytes } from "../../deps.ts";
+import {
+  areaIsIncluded,
+  AreaOfInterest,
+  deferred,
+  orderBytes,
+} from "../../deps.ts";
 import { ValidationError, WgpsMessageValidationError } from "../errors.ts";
 import { decodeMessages } from "./decoding/decode_messages.ts";
 import { MessageEncoder } from "./encoding/message_encoder.ts";
@@ -20,6 +25,7 @@ import {
   MSG_PAI_REPLY_FRAGMENT,
   MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
   MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+  MSG_SETUP_BIND_AREA_OF_INTEREST,
   MSG_SETUP_BIND_READ_CAPABILITY,
   ReadAuthorisation,
   SyncEncodings,
@@ -34,7 +40,6 @@ import { GuaranteedQueue } from "./guaranteed_queue.ts";
 
 export type WgpsMessengerOpts<
   ReadCapability,
-  ReadCapabilityPartial,
   Receiver,
   SyncSignature,
   ReceiverSecretKey,
@@ -61,7 +66,6 @@ export type WgpsMessengerOpts<
 
   schemes: SyncSchemes<
     ReadCapability,
-    ReadCapabilityPartial,
     Receiver,
     SyncSignature,
     ReceiverSecretKey,
@@ -75,18 +79,18 @@ export type WgpsMessengerOpts<
     SubspaceId
   >;
 
-  readAuthorisations: ReadAuthorisation<
-    ReadCapability,
-    SubspaceCapability,
-    SyncSignature,
-    SyncSubspaceSignature
-  >[];
+  interests: Map<
+    ReadAuthorisation<
+      ReadCapability,
+      SubspaceCapability
+    >,
+    AreaOfInterest<SubspaceId>[]
+  >;
 };
 
 /** Coordinates a complete WGPS synchronisation session. */
 export class WgpsMessenger<
   ReadCapability,
-  ReadCapabilityPartial,
   Receiver,
   SyncSignature,
   ReceiverSecretKey,
@@ -99,16 +103,32 @@ export class WgpsMessenger<
   NamespaceId,
   SubspaceId,
 > {
+  private interests: Map<
+    ReadAuthorisation<
+      ReadCapability,
+      SubspaceCapability
+    >,
+    AreaOfInterest<SubspaceId>[]
+  >;
+
   private transport: ReadyTransport;
   private encoder: MessageEncoder<
-    ReadCapabilityPartial,
+    ReadCapability,
+    Receiver,
     SyncSignature,
+    ReceiverSecretKey,
     PsiGroup,
+    PsiScalar,
     SubspaceCapability,
-    SyncSubspaceSignature
+    SubspaceReceiver,
+    SyncSubspaceSignature,
+    SubspaceSecretKey,
+    NamespaceId,
+    SubspaceId
   >;
   private intersectionChannel = new GuaranteedQueue();
   private capabilityChannel = new GuaranteedQueue();
+  private areaOfInterestChannel = new GuaranteedQueue();
 
   // Commitment scheme
   private maxPayloadSizePower: number;
@@ -120,7 +140,6 @@ export class WgpsMessenger<
 
   private schemes: SyncSchemes<
     ReadCapability,
-    ReadCapabilityPartial,
     Receiver,
     SyncSignature,
     ReceiverSecretKey,
@@ -135,15 +154,15 @@ export class WgpsMessenger<
   >;
 
   // Private area intersection
-  private intersectionHandlesOurs = new HandleStore<Intersection<PsiGroup>>();
-  private intersectionHandlesTheirs = new HandleStore<Intersection<PsiGroup>>();
+  private handlesIntersectionsOurs = new HandleStore<Intersection<PsiGroup>>();
+  private handlesIntersectionsTheirs = new HandleStore<
+    Intersection<PsiGroup>
+  >();
   private paiFinder: PaiFinder<
     ReadCapability,
-    SyncSignature,
     PsiGroup,
     PsiScalar,
     SubspaceCapability,
-    SyncSubspaceSignature,
     NamespaceId,
     SubspaceId
   >;
@@ -155,7 +174,6 @@ export class WgpsMessenger<
   constructor(
     opts: WgpsMessengerOpts<
       ReadCapability,
-      ReadCapabilityPartial,
       Receiver,
       SyncSignature,
       ReceiverSecretKey,
@@ -175,6 +193,34 @@ export class WgpsMessenger<
       );
     }
 
+    for (const [authorisation, areas] of opts.interests) {
+      if (areas.length === 0) {
+        throw new WillowError("No Areas of Interest given for authorisation");
+      }
+
+      // Get granted area of authorisation
+      const grantedArea = opts.schemes.accessControl.getGrantedArea(
+        authorisation.capability,
+      );
+
+      for (const aoi of areas) {
+        // Check that granted area is in granted area.
+        const isWithin = areaIsIncluded(
+          opts.schemes.subspace.order,
+          aoi.area,
+          grantedArea,
+        );
+
+        if (!isWithin) {
+          throw new WillowError(
+            "Given authorisation is not within authorisation's granted area",
+          );
+        }
+      }
+    }
+
+    this.interests = opts.interests;
+
     this.schemes = opts.schemes;
 
     this.nonce = crypto.getRandomValues(new Uint8Array(opts.challengeLength));
@@ -190,28 +236,43 @@ export class WgpsMessenger<
     this.paiFinder = new PaiFinder({
       namespaceScheme: opts.schemes.namespace,
       paiScheme: opts.schemes.pai,
-      intersectionHandlesOurs: this.intersectionHandlesOurs,
-      intersectionHandlesTheirs: this.intersectionHandlesTheirs,
+      intersectionHandlesOurs: this.handlesIntersectionsOurs,
+      intersectionHandlesTheirs: this.handlesIntersectionsTheirs,
     });
 
     const encodings: SyncEncodings<
-      ReadCapabilityPartial,
+      ReadCapability,
       SyncSignature,
       PsiGroup,
       SubspaceCapability,
-      SyncSubspaceSignature
+      SyncSubspaceSignature,
+      NamespaceId,
+      SubspaceId
     > = {
-      readCapabilityPartial:
-        opts.schemes.accessControl.encodings.readCapabilityPartial,
+      readCapability: opts.schemes.accessControl.encodings.readCapability,
       syncSignature: opts.schemes.accessControl.encodings.syncSignature,
       groupMember: opts.schemes.pai.groupMemberEncoding,
       subspaceCapability: opts.schemes.subspaceCap.encodings.subspaceCapability,
       syncSubspaceSignature:
         opts.schemes.subspaceCap.encodings.syncSubspaceSignature,
+      subspace: opts.schemes.subspace,
     };
 
     // Send encoded messages
-    this.encoder = new MessageEncoder(encodings);
+    this.encoder = new MessageEncoder(encodings, opts.schemes, {
+      getIntersectionPrivy: (handle) => {
+        return this.paiFinder.getIntersectionPrivy(handle);
+      },
+      getCap: (handle) => {
+        const cap = this.handlesCapsOurs.get(handle);
+
+        if (!cap) {
+          throw new WillowError("Tried to get a cap with an unknown handle.");
+        }
+
+        return cap;
+      },
+    });
 
     onAsyncIterate(this.intersectionChannel, async (message) => {
       await this.transport.send(message);
@@ -231,8 +292,15 @@ export class WgpsMessenger<
           this.capabilityChannel.push(message);
           break;
         }
+        case LogicalChannel.AreaOfInterestChannel: {
+          this.areaOfInterestChannel.push(message);
+          break;
+        }
         case null:
           await this.transport.send(message);
+          break;
+        default:
+          throw new WillowError("Didn't handle an encoded message");
       }
     });
 
@@ -241,6 +309,13 @@ export class WgpsMessenger<
       transport: this.transport,
       challengeLength: opts.challengeLength,
       encodings: encodings,
+      schemes: this.schemes,
+      getCap: (handle) => {
+        return this.handlesCapsOurs.getEventually(handle);
+      },
+      getIntersectionPrivy: (handle) => {
+        return this.paiFinder.getIntersectionPrivy(handle);
+      },
     });
 
     // Begin handling decoded messages
@@ -254,7 +329,7 @@ export class WgpsMessenger<
 
     // Initiate commitment scheme.
     this.initiate();
-    this.setupPai(opts.readAuthorisations);
+    this.setupPai(Array.from(opts.interests.keys()));
   }
 
   private async initiate() {
@@ -292,9 +367,7 @@ export class WgpsMessenger<
 
   private setupPai(authorisations: ReadAuthorisation<
     ReadCapability,
-    SubspaceCapability,
-    SyncSignature,
-    SyncSubspaceSignature
+    SubspaceCapability
   >[]) {
     // Hook up the PAI finder
     onAsyncIterate(this.paiFinder.fragmentBinds(), (bind) => {
@@ -345,7 +418,7 @@ export class WgpsMessenger<
 
     onAsyncIterate(
       this.paiFinder.intersections(),
-      async ({ authorisation, handle, outer }) => {
+      async ({ authorisation, handle }) => {
         // Encode and sign the challenge using the receiver of the read cap.
         const receiver = this.schemes.accessControl.getReceiver(
           authorisation.capability,
@@ -360,21 +433,30 @@ export class WgpsMessenger<
           await this.ourChallenge,
         );
 
-        // Create a partial capability.
-        const partial = this.schemes.accessControl.getPartial(
-          authorisation.capability,
-          outer,
-        );
+        const capHandle = this.handlesCapsOurs.bind(authorisation.capability);
 
-        this.handlesCapsOurs.bind(authorisation.capability);
-
-        // Send.
+        // Send capability
         this.encoder.encode({
           kind: MSG_SETUP_BIND_READ_CAPABILITY,
-          capability: partial,
+          capability: authorisation.capability,
           handle,
           signature,
         });
+
+        const aois = this.interests.get(authorisation);
+
+        if (!aois) {
+          throw new WillowError("No interests known for a given authorisation");
+        }
+
+        // And areas of interest.
+        for (const aoi of aois) {
+          this.encoder.encode({
+            kind: MSG_SETUP_BIND_AREA_OF_INTEREST,
+            areaOfInterest: aoi,
+            authorisation: capHandle,
+          });
+        }
       },
     );
 
@@ -385,11 +467,12 @@ export class WgpsMessenger<
 
   private async handleMessage(
     message: SyncMessage<
-      ReadCapabilityPartial,
+      ReadCapability,
       SyncSignature,
       PsiGroup,
       SubspaceCapability,
-      SyncSubspaceSignature
+      SyncSubspaceSignature,
+      SubspaceId
     >,
   ) {
     switch (message.kind) {
@@ -472,9 +555,9 @@ export class WgpsMessenger<
           case HandleType.IntersectionHandle: {
             // Remember: 'mine' is from the perspective of the sender.
             if (message.mine) {
-              this.intersectionHandlesTheirs.markForFreeing(message.handle);
+              this.handlesIntersectionsTheirs.markForFreeing(message.handle);
             } else {
-              this.intersectionHandlesOurs.markForFreeing(message.handle);
+              this.handlesIntersectionsOurs.markForFreeing(message.handle);
 
               this.encoder.encode({
                 kind: MSG_CONTROL_FREE,
@@ -495,19 +578,24 @@ export class WgpsMessenger<
         break;
       }
       case MSG_PAI_REPLY_FRAGMENT: {
-        this.intersectionHandlesOurs.incrementHandleReference(message.handle);
+        this.handlesIntersectionsOurs.incrementHandleReference(message.handle);
         this.paiFinder.receivedReply(message.handle, message.groupMember);
-        this.intersectionHandlesOurs.decrementHandleReference(message.handle);
+        this.handlesIntersectionsOurs.decrementHandleReference(message.handle);
         break;
       }
       case MSG_PAI_REQUEST_SUBSPACE_CAPABILITY: {
-        this.intersectionHandlesTheirs.incrementHandleReference(message.handle);
+        this.handlesIntersectionsTheirs.incrementHandleReference(
+          message.handle,
+        );
         this.paiFinder.receivedSubspaceCapRequest(message.handle);
-        this.intersectionHandlesTheirs.decrementHandleReference(message.handle);
+        this.handlesIntersectionsTheirs.decrementHandleReference(
+          message.handle,
+        );
         break;
       }
       case MSG_PAI_REPLY_SUBSPACE_CAPABILITY: {
-        this.intersectionHandlesOurs.incrementHandleReference(message.handle);
+        this.handlesIntersectionsOurs.incrementHandleReference(message.handle);
+
         const isValid = await this.schemes.subspaceCap.signatures.verify(
           this.schemes.subspaceCap.getReceiver(message.capability),
           message.signature,
@@ -528,23 +616,16 @@ export class WgpsMessenger<
           message.handle,
           namespace,
         );
-        this.intersectionHandlesOurs.decrementHandleReference(message.handle);
+        this.handlesIntersectionsOurs.decrementHandleReference(message.handle);
         break;
       }
 
       // Setup
       case MSG_SETUP_BIND_READ_CAPABILITY: {
         // Rehydrate the capability.
-        const privy = this.paiFinder.getIntersectionPrivy(message.handle);
-
-        const capability = this.schemes.accessControl.getCap(
-          message.capability,
-          privy.namespace,
-          privy.outer,
-        );
 
         const isAuthentic = await this.schemes.accessControl.signatures.verify(
-          this.schemes.accessControl.getReceiver(capability),
+          this.schemes.accessControl.getReceiver(message.capability),
           message.signature,
           await this.theirChallenge,
         );
@@ -555,7 +636,7 @@ export class WgpsMessenger<
           );
         }
 
-        this.handlesCapsTheirs.bind(capability);
+        this.handlesCapsTheirs.bind(message.capability);
 
         break;
       }

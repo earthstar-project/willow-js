@@ -3,9 +3,12 @@ import { transportPairInMemory } from "./transports/in_memory.ts";
 import { WgpsMessenger } from "./wgps_messenger.ts";
 import {
   TestNamespace,
+  TestReadCap,
   testSchemeAccessControl,
   testSchemeNamespace,
   testSchemePai,
+  testSchemePath,
+  testSchemeSubspace,
   testSchemeSubspaceCap,
   TestSubspace,
 } from "../test/test_schemes.ts";
@@ -30,8 +33,10 @@ Deno.test("WgpsMessenger establishes challenge", async () => {
       namespace: testSchemeNamespace,
       accessControl: testSchemeAccessControl,
       pai: testSchemePai,
+      path: testSchemePath,
+      subspace: testSchemeSubspace,
     },
-    readAuthorisations: [
+    interests: new Map([[
       {
         capability: {
           namespace: TestNamespace.Family,
@@ -42,10 +47,21 @@ Deno.test("WgpsMessenger establishes challenge", async () => {
             start: BigInt(0),
             end: OPEN_END,
           },
-        },
-        signature: new Uint8Array(),
+        } as TestReadCap,
       },
-    ],
+      [{
+        area: {
+          includedSubspaceId: TestSubspace.Gemma,
+          pathPrefix: [new Uint8Array([1])],
+          timeRange: {
+            start: BigInt(0),
+            end: OPEN_END,
+          },
+        },
+        maxCount: 0,
+        maxSize: BigInt(0),
+      }],
+    ]]),
   });
 
   const messengerBetty = new WgpsMessenger({
@@ -59,22 +75,35 @@ Deno.test("WgpsMessenger establishes challenge", async () => {
       namespace: testSchemeNamespace,
       accessControl: testSchemeAccessControl,
       pai: testSchemePai,
+      path: testSchemePath,
+      subspace: testSchemeSubspace,
     },
-    readAuthorisations: [
+    interests: new Map([[
       {
         capability: {
           namespace: TestNamespace.Family,
           subspace: TestSubspace.Gemma,
-          path: [new Uint8Array([1]), new Uint8Array([2])],
+          path: [new Uint8Array([1])],
           receiver: TestSubspace.Betty,
           time: {
             start: BigInt(0),
             end: OPEN_END,
           },
-        },
-        signature: new Uint8Array(),
+        } as TestReadCap,
       },
-    ],
+      [{
+        area: {
+          includedSubspaceId: TestSubspace.Gemma,
+          pathPrefix: [new Uint8Array([1]), new Uint8Array([2])],
+          timeRange: {
+            start: BigInt(0),
+            end: OPEN_END,
+          },
+        },
+        maxCount: 0,
+        maxSize: BigInt(0),
+      }],
+    ]]),
   });
 
   // @ts-ignore looking at private values is fine

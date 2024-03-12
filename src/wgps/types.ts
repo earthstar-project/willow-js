@@ -1,5 +1,12 @@
-import { Area, EncodingScheme, SignatureScheme } from "../../deps.ts";
-import { NamespaceScheme } from "../store/types.ts";
+import {
+  Area,
+  AreaOfInterest,
+  EncodingScheme,
+  PathScheme,
+  PrivyEncodingScheme,
+  SignatureScheme,
+} from "../../deps.ts";
+import { NamespaceScheme, SubspaceScheme } from "../store/types.ts";
 import { PaiScheme } from "./pai/types.ts";
 
 /** The peer which initiated the synchronisation session. */
@@ -10,35 +17,16 @@ export const IS_BETTY = Symbol("betty");
 /** we refer to the peer that initiated the synchronisation session as Alfie, and the other peer as Betty. */
 export type SyncRole = typeof IS_ALFIE | typeof IS_BETTY;
 
-export type ReadAuthorisationSubspace<
-  ReadCapability,
-  SubspaceReadCapability,
-  SyncSignature,
-  SyncSubspaceSignature,
-> = {
-  capability: ReadCapability;
-  subspaceCapability: SubspaceReadCapability;
-  signature: SyncSignature;
-  subspaceSignature: SyncSubspaceSignature;
-};
-
 /** Represents an authorisation to read an area of data in a Namespace */
 export type ReadAuthorisation<
   ReadCapability,
   SubspaceReadCapability,
-  SyncSignature,
-  SyncSubspaceSignature,
-> =
-  | {
-    capability: ReadCapability;
-    signature: SyncSignature;
-  }
-  | ReadAuthorisationSubspace<
-    ReadCapability,
-    SubspaceReadCapability,
-    SyncSignature,
-    SyncSubspaceSignature
-  >;
+> = {
+  capability: ReadCapability;
+} | {
+  capability: ReadCapability;
+  subspaceCapability: SubspaceReadCapability;
+};
 
 /** A transport for receiving and sending data to with another peer */
 export interface Transport {
@@ -59,6 +47,8 @@ export enum HandleType {
   IntersectionHandle,
   /** Logical channel for controlling the binding of new CapabilityHandles. */
   CapabilityHandle,
+  /** Resource handle for AreaOfInterests that peers wish to sync. */
+  AreaOfInterestHandle,
 }
 
 // Channels
@@ -68,6 +58,8 @@ export enum LogicalChannel {
   IntersectionChannel,
   /** Logical channel for controlling the binding of new CapabilityHandles. */
   CapabilityChannel,
+  /** Logical channel for controlling the binding of new AreaOfInterestHandles. */
+  AreaOfInterestChannel,
 }
 
 // Message types
@@ -205,63 +197,79 @@ export type IntersectionMessage<
 export const MSG_SETUP_BIND_READ_CAPABILITY = Symbol(
   "msg_setup_bind_read_capability",
 );
-export type MsgSetupBindReadCapability<ReadCapabilityPartial, SyncSignature> = {
+export type MsgSetupBindReadCapability<ReadCapability, SyncSignature> = {
   kind: typeof MSG_SETUP_BIND_READ_CAPABILITY;
   /** A ReadCapability that the peer wishes to reference in future messages. */
-  capability: ReadCapabilityPartial;
+  capability: ReadCapability;
   /** The IntersectionHandle, bound by the sender, of the capability’s fragment with the longest Path in the intersection of the fragments. If both a primary and secondary such fragment exist, choose the primary one. */
   handle: bigint;
   /** The SyncSignature issued by the Receiver of the capability over the sender’s challenge. */
   signature: SyncSignature;
 };
 
-export type SetupMessage<ReadCapability, SyncSignature> =
-  MsgSetupBindReadCapability<ReadCapability, SyncSignature>;
+export const MSG_SETUP_BIND_AREA_OF_INTEREST = Symbol(
+  "msg_setup_bind_area_of_interest",
+);
+export type MsgSetupBindAreaOfInterest<SubspaceId> = {
+  kind: typeof MSG_SETUP_BIND_AREA_OF_INTEREST;
+  /** An AreaOfInterest that the peer wishes to reference in future messages. */
+  areaOfInterest: AreaOfInterest<SubspaceId>;
+  /** A CapabilityHandle bound by the sender that grants access to all entries in the message’s area_of_interest. */
+  authorisation: bigint;
+};
+
+export type SetupMessage<ReadCapability, SyncSignature, SubspaceId> =
+  | MsgSetupBindReadCapability<ReadCapability, SyncSignature>
+  | MsgSetupBindAreaOfInterest<SubspaceId>;
 
 export type SyncMessage<
-  ReadCapabilityPartial,
+  ReadCapability,
   SyncSignature,
   PsiGroup,
   SubspaceCapability,
   SyncSubspaceSignature,
+  SubspaceId,
 > =
   | ControlMessage
   | IntersectionMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature>
-  | SetupMessage<ReadCapabilityPartial, SyncSignature>;
-
-export type SyncMessageKinds<
-  ReadCapability,
-  SyncSignature,
-  PsiGroup,
-  SubspaceCapability,
-  SyncSubspaceSignature,
-> = SyncMessage<
-  ReadCapability,
-  SyncSignature,
-  PsiGroup,
-  SubspaceCapability,
-  SyncSubspaceSignature
->["kind"];
+  | SetupMessage<ReadCapability, SyncSignature, SubspaceId>;
 
 // Encodings
 
+export type ReadCapPrivy<NamespaceId, SubspaceId> = {
+  outer: Area<SubspaceId>;
+  namespace: NamespaceId;
+};
+
+export type ReadCapEncodingScheme<ReadCapability, NamespaceId, SubspaceId> =
+  PrivyEncodingScheme<
+    ReadCapability,
+    ReadCapPrivy<NamespaceId, SubspaceId>
+  >;
+
 export type SyncEncodings<
-  ReadCapabilityPartial,
+  ReadCapability,
   SyncSignature,
   PsiGroup,
   SubspaceCapability,
   SyncSubspaceSignature,
+  NamespaceId,
+  SubspaceId,
 > = {
-  readCapabilityPartial: EncodingScheme<ReadCapabilityPartial>;
+  readCapability: ReadCapEncodingScheme<
+    ReadCapability,
+    NamespaceId,
+    SubspaceId
+  >;
   syncSignature: EncodingScheme<SyncSignature>;
   groupMember: EncodingScheme<PsiGroup>;
   subspaceCapability: EncodingScheme<SubspaceCapability>;
   syncSubspaceSignature: EncodingScheme<SyncSubspaceSignature>;
+  subspace: EncodingScheme<SubspaceId>;
 };
 
 export type SyncSchemes<
   ReadCapability,
-  ReadCapabilityPartial,
   Receiver,
   SyncSignature,
   ReceiverSecretKey,
@@ -276,7 +284,6 @@ export type SyncSchemes<
 > = {
   accessControl: AccessControlScheme<
     ReadCapability,
-    ReadCapabilityPartial,
     Receiver,
     SyncSignature,
     ReceiverSecretKey,
@@ -298,11 +305,12 @@ export type SyncSchemes<
     SubspaceId
   >;
   namespace: NamespaceScheme<NamespaceId>;
+  subspace: SubspaceScheme<SubspaceId>;
+  path: PathScheme;
 };
 
 export type AccessControlScheme<
   ReadCapability,
-  ReadCapabilityPartial,
   Receiver,
   SyncSignature,
   ReceiverSecretKey,
@@ -311,19 +319,14 @@ export type AccessControlScheme<
 > = {
   getReceiver: (cap: ReadCapability) => Receiver;
   getSecretKey: (receiver: Receiver) => ReceiverSecretKey;
+  getGrantedArea: (cap: ReadCapability) => Area<SubspaceId>;
   signatures: SignatureScheme<Receiver, ReceiverSecretKey, SyncSignature>;
-  getPartial: (
-    cap: ReadCapability,
-    outer: Area<SubspaceId>,
-  ) => ReadCapabilityPartial;
-  getCap: (
-    partial: ReadCapabilityPartial,
-    namespace: NamespaceId,
-    outer: Area<SubspaceId>,
-  ) => ReadCapability;
+
   encodings: {
-    readCapabilityPartial: EncodingScheme<
-      ReadCapabilityPartial
+    readCapability: ReadCapEncodingScheme<
+      ReadCapability,
+      NamespaceId,
+      SubspaceId
     >;
     syncSignature: EncodingScheme<SyncSignature>;
   };

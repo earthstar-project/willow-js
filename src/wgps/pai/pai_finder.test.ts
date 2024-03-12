@@ -1,4 +1,4 @@
-import { ANY_SUBSPACE, Area, OPEN_END } from "../../../deps.ts";
+import { ANY_SUBSPACE, OPEN_END } from "../../../deps.ts";
 import { Intersection } from "./types.ts";
 import { PaiFinder } from "./pai_finder.ts";
 import { HandleStore } from "../handle_store.ts";
@@ -20,9 +20,7 @@ function setupFinders(): {
     TestReadCap,
     Uint8Array,
     Uint8Array,
-    Uint8Array,
     TestSubspaceReadCap,
-    Uint8Array,
     TestNamespace,
     TestSubspace
   >;
@@ -31,9 +29,7 @@ function setupFinders(): {
     TestReadCap,
     Uint8Array,
     Uint8Array,
-    Uint8Array,
     TestSubspaceReadCap,
-    Uint8Array,
     TestNamespace,
     TestSubspace
   >;
@@ -42,9 +38,7 @@ function setupFinders(): {
     TestReadCap,
     Uint8Array,
     Uint8Array,
-    Uint8Array,
     TestSubspaceReadCap,
-    Uint8Array,
     TestNamespace,
     TestSubspace
   >({
@@ -58,9 +52,7 @@ function setupFinders(): {
     TestReadCap,
     Uint8Array,
     Uint8Array,
-    Uint8Array,
     TestSubspaceReadCap,
-    Uint8Array,
     TestNamespace,
     TestSubspace
   >({
@@ -76,24 +68,12 @@ function setupFinders(): {
   };
 }
 
-type IntersectionResType = {
-  authorisation: ReadAuthorisation<
-    TestReadCap,
-    TestSubspaceReadCap,
-    Uint8Array,
-    Uint8Array
-  >;
-  outer: Area<TestSubspace>;
-};
-
 async function* intersections(
   of: PaiFinder<
     TestReadCap,
     Uint8Array,
     Uint8Array,
-    Uint8Array,
     TestSubspaceReadCap,
-    Uint8Array,
     TestNamespace,
     TestSubspace
   >,
@@ -101,13 +81,16 @@ async function* intersections(
     TestReadCap,
     Uint8Array,
     Uint8Array,
-    Uint8Array,
     TestSubspaceReadCap,
-    Uint8Array,
     TestNamespace,
     TestSubspace
   >,
-): AsyncIterable<Omit<IntersectionResType, "handle">> {
+): AsyncIterable<
+  ReadAuthorisation<
+    TestReadCap,
+    TestSubspaceReadCap
+  >
+> {
   // Set up fragment binds
   (async () => {
     for await (const bind of against.fragmentBinds()) {
@@ -138,16 +121,22 @@ async function* intersections(
     }
   })();
 
-  for await (const { authorisation, outer } of of.intersections()) {
-    yield { authorisation, outer };
+  for await (const { authorisation } of of.intersections()) {
+    yield authorisation;
   }
 }
 
 Deno.test("PaiFinder (standard intersection)", async () => {
   const { alfie, betty } = setupFinders();
 
-  const intersectionsAlfie: IntersectionResType[] = [];
-  const intersectionsBetty: IntersectionResType[] = [];
+  const intersectionsAlfie: ReadAuthorisation<
+    TestReadCap,
+    TestSubspaceReadCap
+  >[] = [];
+  const intersectionsBetty: ReadAuthorisation<
+    TestReadCap,
+    TestSubspaceReadCap
+  >[] = [];
 
   (async () => {
     for await (const int of intersections(alfie, betty)) {
@@ -172,7 +161,6 @@ Deno.test("PaiFinder (standard intersection)", async () => {
         end: OPEN_END,
       },
     },
-    signature: new Uint8Array(),
   };
 
   const disjointAuth: TestReadAuth = {
@@ -186,7 +174,6 @@ Deno.test("PaiFinder (standard intersection)", async () => {
         end: OPEN_END,
       },
     },
-    signature: new Uint8Array(),
   };
 
   alfie.submitAuthorisation(intersectingAuth);
@@ -201,27 +188,8 @@ Deno.test("PaiFinder (standard intersection)", async () => {
 
   await delay(1);
 
-  const expectedOuter: Area<TestSubspace> = {
-    includedSubspaceId: TestSubspace.Alfie,
-    pathPrefix: [
-      new Uint8Array([0]),
-      new Uint8Array([1]),
-      new Uint8Array([2]),
-    ],
-    timeRange: {
-      start: BigInt(0),
-      end: OPEN_END,
-    },
-  };
-
-  assertEquals(intersectionsAlfie, [{
-    authorisation: intersectingAuth,
-    outer: expectedOuter,
-  }]);
-  assertEquals(intersectionsBetty, [{
-    authorisation: intersectingAuth,
-    outer: expectedOuter,
-  }]);
+  assertEquals(intersectionsAlfie, [intersectingAuth]);
+  assertEquals(intersectionsBetty, [intersectingAuth]);
 
   const moreSpecificAuth: TestReadAuth = {
     capability: {
@@ -234,7 +202,6 @@ Deno.test("PaiFinder (standard intersection)", async () => {
         end: OPEN_END,
       },
     },
-    signature: new Uint8Array(0),
   };
 
   const lessSpecificAuth: TestReadAuth = {
@@ -248,7 +215,6 @@ Deno.test("PaiFinder (standard intersection)", async () => {
         end: OPEN_END,
       },
     },
-    signature: new Uint8Array(0),
   };
 
   alfie.submitAuthorisation(moreSpecificAuth);
@@ -256,31 +222,21 @@ Deno.test("PaiFinder (standard intersection)", async () => {
 
   await delay(1);
 
-  assertEquals(intersectionsAlfie, [{
-    authorisation: intersectingAuth,
-    outer: expectedOuter,
-  }]);
-  assertEquals(intersectionsBetty, [{
-    authorisation: intersectingAuth,
-    outer: expectedOuter,
-  }, {
-    authorisation: lessSpecificAuth,
-    outer: {
-      includedSubspaceId: TestSubspace.Gemma,
-      pathPrefix: [new Uint8Array([9])],
-      timeRange: {
-        start: BigInt(0),
-        end: OPEN_END,
-      },
-    },
-  }]);
+  assertEquals(intersectionsAlfie, [intersectingAuth]);
+  assertEquals(intersectionsBetty, [intersectingAuth, lessSpecificAuth]);
 });
 
 Deno.test("PaiFinder (requesting subspace caps)", async () => {
   const { alfie, betty } = setupFinders();
 
-  const intersectionsAlfie: IntersectionResType[] = [];
-  const intersectionsBetty: IntersectionResType[] = [];
+  const intersectionsAlfie: ReadAuthorisation<
+    TestReadCap,
+    TestSubspaceReadCap
+  >[] = [];
+  const intersectionsBetty: ReadAuthorisation<
+    TestReadCap,
+    TestSubspaceReadCap
+  >[] = [];
 
   (async () => {
     for await (const auth of intersections(alfie, betty)) {
@@ -305,8 +261,6 @@ Deno.test("PaiFinder (requesting subspace caps)", async () => {
         end: OPEN_END,
       },
     },
-    signature: new Uint8Array(),
-    subspaceSignature: new Uint8Array(),
   };
 
   const subspaceCap: TestReadAuth = {
@@ -329,8 +283,6 @@ Deno.test("PaiFinder (requesting subspace caps)", async () => {
         end: OPEN_END,
       },
     },
-    signature: new Uint8Array(),
-    subspaceSignature: new Uint8Array(),
   };
 
   alfie.submitAuthorisation(cap);
@@ -338,17 +290,7 @@ Deno.test("PaiFinder (requesting subspace caps)", async () => {
 
   await delay(2);
 
-  assertEquals(intersectionsAlfie, [{
-    authorisation: cap,
-    outer: {
-      includedSubspaceId: ANY_SUBSPACE,
-      pathPrefix: [],
-      timeRange: {
-        start: BigInt(0),
-        end: OPEN_END,
-      },
-    },
-  }]);
+  assertEquals(intersectionsAlfie, [cap]);
   assertEquals(intersectionsBetty, []);
 
   const alfieCap: TestReadAuth = {
@@ -362,8 +304,6 @@ Deno.test("PaiFinder (requesting subspace caps)", async () => {
         end: OPEN_END,
       },
     },
-    signature: new Uint8Array(),
-    subspaceSignature: new Uint8Array(),
   };
 
   const bettyCap: TestReadAuth = {
@@ -377,8 +317,6 @@ Deno.test("PaiFinder (requesting subspace caps)", async () => {
         end: OPEN_END,
       },
     },
-    signature: new Uint8Array(),
-    subspaceSignature: new Uint8Array(),
   };
 
   alfie.submitAuthorisation(alfieCap);
@@ -386,36 +324,6 @@ Deno.test("PaiFinder (requesting subspace caps)", async () => {
 
   await delay(2);
 
-  assertEquals(intersectionsAlfie, [{
-    authorisation: cap,
-    outer: {
-      includedSubspaceId: ANY_SUBSPACE,
-      pathPrefix: [],
-      timeRange: {
-        start: BigInt(0),
-        end: OPEN_END,
-      },
-    },
-  }, {
-    authorisation: alfieCap,
-    outer: {
-      includedSubspaceId: TestSubspace.Alfie,
-      pathPrefix: [new Uint8Array([7])],
-      timeRange: {
-        start: BigInt(0),
-        end: OPEN_END,
-      },
-    },
-  }]);
-  assertEquals(intersectionsBetty, [{
-    authorisation: bettyCap,
-    outer: {
-      includedSubspaceId: TestSubspace.Alfie,
-      pathPrefix: [new Uint8Array([7])],
-      timeRange: {
-        start: BigInt(0),
-        end: OPEN_END,
-      },
-    },
-  }]);
+  assertEquals(intersectionsAlfie, [cap, alfieCap]);
+  assertEquals(intersectionsBetty, [bettyCap]);
 });

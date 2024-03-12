@@ -9,7 +9,7 @@ import {
 import { WgpsMessageValidationError, WillowError } from "../../errors.ts";
 import { NamespaceScheme } from "../../store/types.ts";
 import { HandleStore } from "../handle_store.ts";
-import { ReadAuthorisation, ReadAuthorisationSubspace } from "../types.ts";
+import { ReadAuthorisation, ReadCapPrivy } from "../types.ts";
 import { isSubspaceReadAuthorisation } from "../util.ts";
 import {
   Fragment,
@@ -49,17 +49,13 @@ const REQUEST_SUBSPACE_CAP = Symbol("req_subspace_cap");
 type LocalFragmentInfo<
   ReadCapability,
   SubspaceReadCapability,
-  SyncSignature,
-  SyncSubspaceSignature,
   NamespaceId,
   SubspaceId,
 > = {
   onIntersection: typeof DO_NOTHING;
   authorisation: ReadAuthorisation<
     ReadCapability,
-    SubspaceReadCapability,
-    SyncSignature,
-    SyncSubspaceSignature
+    SubspaceReadCapability
   >;
   path: Path;
   namespace: NamespaceId;
@@ -68,19 +64,16 @@ type LocalFragmentInfo<
   onIntersection: typeof BIND_READ_CAP;
   authorisation: {
     capability: ReadCapability;
-    signature: SyncSignature;
   };
   path: Path;
   namespace: NamespaceId;
   subspace: SubspaceId | typeof ANY_SUBSPACE;
 } | {
   onIntersection: typeof REQUEST_SUBSPACE_CAP;
-  authorisation: {
-    capability: ReadCapability;
-    subspaceCapability: SubspaceReadCapability;
-    signature: SyncSignature;
-    subspaceSignature: SyncSubspaceSignature;
-  };
+  authorisation: ReadAuthorisation<
+    ReadCapability,
+    SubspaceReadCapability
+  >;
   path: Path;
   namespace: NamespaceId;
   subspace: typeof ANY_SUBSPACE;
@@ -89,11 +82,9 @@ type LocalFragmentInfo<
 /** Given `ReadAuthorisation`s, emits intersected  */
 export class PaiFinder<
   ReadCapability,
-  SyncSignature,
   PsiGroup,
   PsiScalar,
   SubspaceReadCapability,
-  SyncSubspaceSignature,
   NamespaceId,
   SubspaceId,
 > {
@@ -105,12 +96,9 @@ export class PaiFinder<
     [
       ReadAuthorisation<
         ReadCapability,
-        SubspaceReadCapability,
-        SyncSignature,
-        SyncSubspaceSignature
+        SubspaceReadCapability
       >,
       bigint,
-      Area<SubspaceId>,
     ]
   >();
 
@@ -128,8 +116,6 @@ export class PaiFinder<
     LocalFragmentInfo<
       ReadCapability,
       SubspaceReadCapability,
-      SyncSignature,
-      SyncSubspaceSignature,
       NamespaceId,
       SubspaceId
     >
@@ -169,9 +155,7 @@ export class PaiFinder<
   async submitAuthorisation(
     authorisation: ReadAuthorisation<
       ReadCapability,
-      SubspaceReadCapability,
-      SyncSignature,
-      SyncSubspaceSignature
+      SubspaceReadCapability
     >,
   ) {
     const fragmentKit = this.paiScheme.getFragmentKit(authorisation.capability);
@@ -261,12 +245,7 @@ export class PaiFinder<
         if (isMostSpecific) {
           this.fragmentsInfo.set(groupHandle, {
             onIntersection: REQUEST_SUBSPACE_CAP,
-            authorisation: authorisation as ReadAuthorisationSubspace<
-              ReadCapability,
-              SubspaceReadCapability,
-              SyncSignature,
-              SyncSubspaceSignature
-            >,
+            authorisation: authorisation,
             namespace,
             path,
             subspace: ANY_SUBSPACE,
@@ -395,12 +374,9 @@ export class PaiFinder<
       );
     }
 
-    const outer = this.getHandleOuterArea(handle);
-
     this.intersectionQueue.push([
       fragmentInfo.authorisation,
       handle,
-      outer,
     ]);
   }
 
@@ -456,13 +432,10 @@ export class PaiFinder<
         throw new WillowError("Had no fragment info!");
       }
 
-      const outer = this.getHandleOuterArea(ourHandle);
-
       if (fragmentInfo.onIntersection === BIND_READ_CAP) {
         this.intersectionQueue.push([
           fragmentInfo.authorisation,
           ourHandle,
-          outer,
         ]);
       } else if (
         fragmentInfo.onIntersection === REQUEST_SUBSPACE_CAP
@@ -492,7 +465,7 @@ export class PaiFinder<
 
   getIntersectionPrivy(
     handle: bigint,
-  ): { namespace: NamespaceId; outer: Area<SubspaceId> } {
+  ): ReadCapPrivy<NamespaceId, SubspaceId> {
     // This handle is theirs.
     // Find which one of ours it intersects.
     // Return the namespace and outer area.
@@ -563,13 +536,12 @@ export class PaiFinder<
 
   async *intersections() {
     for await (
-      const [authorisation, handle, outer] of this
+      const [authorisation, handle] of this
         .intersectionQueue
     ) {
       yield {
         authorisation,
         handle,
-        outer,
       };
     }
   }

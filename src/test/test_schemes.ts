@@ -1,10 +1,10 @@
 import {
   ANY_SUBSPACE,
-  Area,
   bigintToBytes,
   concat,
   decodeAreaInArea,
   decodePath,
+  decodeStreamAreaInArea,
   decodeStreamPath,
   encodeAreaInArea,
   encodeEntry,
@@ -196,9 +196,7 @@ export type TestSubspaceReadCap = {
 
 export type TestReadAuth = ReadAuthorisation<
   TestReadCap,
-  TestSubspaceReadCap,
-  Uint8Array,
-  Uint8Array
+  TestSubspaceReadCap
 >;
 
 // Subspace caps
@@ -345,9 +343,9 @@ export const testSchemeSubspaceCap: SubspaceCapScheme<
 };
 
 export const testSchemePath: PathScheme = {
-  maxPathLength: 8,
+  maxPathLength: 64,
   maxComponentCount: 4,
-  maxComponentLength: 3,
+  maxComponentLength: 16,
 };
 
 export const testSchemePayload: PayloadScheme<ArrayBuffer> = {
@@ -552,104 +550,109 @@ export const testSchemePai: PaiScheme<
   },
 };
 
-export type TestReadCapPartial = {
-  areaInArea: Uint8Array;
-  receiver: TestSubspace;
-};
-
 export const testSchemeAccessControl: AccessControlScheme<
   TestReadCap,
-  TestReadCapPartial,
   TestSubspace,
   Uint8Array,
   TestSubspace,
   TestNamespace,
   TestSubspace
 > = {
-  getReceiver: (cap) => cap.receiver,
-  getSecretKey: (receiver) => receiver,
-  getPartial: (cap, outer) => {
-    const inner: Area<TestSubspace> = {
+  getGrantedArea: (cap) => {
+    return {
       includedSubspaceId: cap.subspace,
       pathPrefix: cap.path,
       timeRange: cap.time,
     };
-
-    return {
-      areaInArea: encodeAreaInArea(
-        {
-          orderSubspace: testSchemeSubspace.order,
-          pathScheme: testSchemePath,
-          subspaceIdEncodingScheme: testSchemeSubspace,
-        },
-        inner,
-        outer,
-      ),
-      receiver: cap.receiver,
-    };
   },
-  getCap: (partial, namespace, outer) => {
-    const area = decodeAreaInArea(
-      {
-        pathScheme: testSchemePath,
-        subspaceIdEncodingScheme: testSchemeSubspace,
-      },
-      partial.areaInArea,
-      outer,
-    );
-
-    return {
-      namespace,
-      receiver: partial.receiver,
-      path: area.pathPrefix,
-      subspace: area.includedSubspaceId,
-      time: area.timeRange,
-    };
-  },
+  getReceiver: (cap) => cap.receiver,
+  getSecretKey: (receiver) => receiver,
   encodings: {
-    readCapabilityPartial: {
-      encode: (partial) => {
+    readCapability: {
+      encode: (cap, privy) => {
+        const capGrantedArea = testSchemeAccessControl.getGrantedArea(cap);
+
+        const areaInAreaEnc = encodeAreaInArea(
+          {
+            encodeSubspace: testSchemeSubspace.encode,
+            orderSubspace: testSchemeSubspace.order,
+            pathScheme: testSchemePath,
+          },
+          capGrantedArea,
+          privy.outer,
+        );
+
         const areaInAreaLength = bigintToBytes(
-          BigInt(partial.areaInArea.byteLength),
+          BigInt(areaInAreaEnc.byteLength),
         );
 
         return concat(
-          new Uint8Array([partial.receiver]),
+          new Uint8Array([cap.receiver]),
           areaInAreaLength,
-          partial.areaInArea,
+          areaInAreaEnc,
         );
       },
-      encodedLength: (partial) => 1 + partial.areaInArea.byteLength,
-      decode: (encoded) => {
-        const [receiver] = encoded;
+      encodedLength: (cap, privy) => {
+        const capGrantedArea = testSchemeAccessControl.getGrantedArea(cap);
+
+        const areaInAreaEnc = encodeAreaInArea(
+          {
+            encodeSubspace: testSchemeSubspace.encode,
+            orderSubspace: testSchemeSubspace.order,
+            pathScheme: testSchemePath,
+          },
+          capGrantedArea,
+          privy.outer,
+        );
+
+        return 1 + 8 + areaInAreaEnc.byteLength;
+      },
+      decode: (cap, privy) => {
+        const [receiver] = cap;
+
+        const view = new DataView(cap.buffer);
+
+        const aInALength = view.getBigUint64(1);
+
+        const area = decodeAreaInArea(
+          {
+            pathScheme: testSchemePath,
+            decodeSubspaceId: testSchemeSubspace.decode,
+          },
+          cap.subarray(1, Number(aInALength) + 1),
+          privy.outer,
+        );
 
         return {
+          namespace: privy.namespace,
           receiver,
-          areaInArea: encoded.subarray(1),
+          path: area.pathPrefix,
+          subspace: area.includedSubspaceId,
+          time: area.timeRange,
         };
       },
-      decodeStream: async (bytes) => {
-        await bytes.nextAbsolute(1);
+      decodeStream: async (bytes, privy) => {
+        await bytes.nextAbsolute(1 + 8);
 
         const [receiver] = bytes.array;
 
-        bytes.prune(1);
+        bytes.prune(1 + 8);
 
-        await bytes.nextAbsolute(8);
-
-        const aInALength = new DataView(bytes.array.buffer).getBigUint64(0);
-
-        bytes.prune(8);
-
-        await bytes.nextAbsolute(Number(aInALength));
-
-        const areaInArea = bytes.array.slice(0, Number(aInALength));
-
-        bytes.prune(Number(aInALength));
+        const area = await decodeStreamAreaInArea(
+          {
+            pathScheme: testSchemePath,
+            decodeStreamSubspace: testSchemeSubspace.decodeStream,
+          },
+          bytes,
+          privy.outer,
+        );
 
         return {
+          namespace: privy.namespace,
           receiver,
-          areaInArea,
+          path: area.pathPrefix,
+          subspace: area.includedSubspaceId,
+          time: area.timeRange,
         };
       },
     },
