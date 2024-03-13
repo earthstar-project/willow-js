@@ -27,6 +27,7 @@ import {
   MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
   MSG_SETUP_BIND_AREA_OF_INTEREST,
   MSG_SETUP_BIND_READ_CAPABILITY,
+  MSG_SETUP_BIND_STATIC_TOKEN,
   ReadAuthorisation,
   SyncEncodings,
   SyncMessage,
@@ -49,6 +50,7 @@ export type WgpsMessengerOpts<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  StaticToken,
   NamespaceId,
   SubspaceId,
 > = {
@@ -75,6 +77,7 @@ export type WgpsMessengerOpts<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    StaticToken,
     NamespaceId,
     SubspaceId
   >;
@@ -100,6 +103,7 @@ export class WgpsMessenger<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  StaticToken,
   NamespaceId,
   SubspaceId,
 > {
@@ -123,6 +127,7 @@ export class WgpsMessenger<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    StaticToken,
     NamespaceId,
     SubspaceId
   >;
@@ -149,6 +154,7 @@ export class WgpsMessenger<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    StaticToken,
     NamespaceId,
     SubspaceId
   >;
@@ -171,6 +177,12 @@ export class WgpsMessenger<
   private handlesCapsOurs = new HandleStore<ReadCapability>();
   private handlesCapsTheirs = new HandleStore<ReadCapability>();
 
+  private handlesAoisOurs = new HandleStore<AreaOfInterest<SubspaceId>>();
+  private handlesAoisTheirs = new HandleStore<AreaOfInterest<SubspaceId>>();
+
+  private handlesStaticTokensOurs = new HandleStore<StaticToken>();
+  private handlesStaticTokensTheirs = new HandleStore<StaticToken>();
+
   constructor(
     opts: WgpsMessengerOpts<
       ReadCapability,
@@ -183,6 +195,7 @@ export class WgpsMessenger<
       SubspaceReceiver,
       SyncSubspaceSignature,
       SubspaceSecretKey,
+      StaticToken,
       NamespaceId,
       SubspaceId
     >,
@@ -246,6 +259,7 @@ export class WgpsMessenger<
       PsiGroup,
       SubspaceCapability,
       SyncSubspaceSignature,
+      StaticToken,
       NamespaceId,
       SubspaceId
     > = {
@@ -256,6 +270,7 @@ export class WgpsMessenger<
       syncSubspaceSignature:
         opts.schemes.subspaceCap.encodings.syncSubspaceSignature,
       subspace: opts.schemes.subspace,
+      staticToken: opts.schemes.authorisationToken.encodings.staticToken,
     };
 
     // Send encoded messages
@@ -451,6 +466,8 @@ export class WgpsMessenger<
 
         // And areas of interest.
         for (const aoi of aois) {
+          this.handlesAoisOurs.bind(aoi);
+
           this.encoder.encode({
             kind: MSG_SETUP_BIND_AREA_OF_INTEREST,
             areaOfInterest: aoi,
@@ -472,6 +489,7 @@ export class WgpsMessenger<
       PsiGroup,
       SubspaceCapability,
       SyncSubspaceSignature,
+      StaticToken,
       SubspaceId
     >,
   ) {
@@ -594,6 +612,16 @@ export class WgpsMessenger<
         break;
       }
       case MSG_PAI_REPLY_SUBSPACE_CAPABILITY: {
+        const isSubspaceCapValid = await this.schemes.subspaceCap.isValidCap(
+          message.capability,
+        );
+
+        if (!isSubspaceCapValid) {
+          throw new WgpsMessageValidationError(
+            "PAI: Partner sent invalid cap",
+          );
+        }
+
         this.handlesIntersectionsOurs.incrementHandleReference(message.handle);
 
         const isValid = await this.schemes.subspaceCap.signatures.verify(
@@ -622,7 +650,15 @@ export class WgpsMessenger<
 
       // Setup
       case MSG_SETUP_BIND_READ_CAPABILITY: {
-        // Rehydrate the capability.
+        const isValidCap = await this.schemes.accessControl.isValidCap(
+          message.capability,
+        );
+
+        if (!isValidCap) {
+          throw new WgpsMessageValidationError(
+            "Received SetupBindReadCapability with invalid capability",
+          );
+        }
 
         const isAuthentic = await this.schemes.accessControl.signatures.verify(
           this.schemes.accessControl.getReceiver(message.capability),
@@ -637,6 +673,40 @@ export class WgpsMessenger<
         }
 
         this.handlesCapsTheirs.bind(message.capability);
+
+        break;
+      }
+
+      case MSG_SETUP_BIND_AREA_OF_INTEREST: {
+        const cap = this.handlesCapsTheirs.get(message.authorisation);
+
+        if (!cap) {
+          throw new WgpsMessageValidationError(
+            "Received SetupBindAreaOfInterest referring to non-existent handle.",
+          );
+        }
+
+        const grantedArea = this.schemes.accessControl.getGrantedArea(cap);
+
+        const isContained = areaIsIncluded(
+          this.schemes.subspace.order,
+          message.areaOfInterest.area,
+          grantedArea,
+        );
+
+        if (!isContained) {
+          throw new WgpsMessageValidationError(
+            "Received SetupBindAreaOfInterest with AOI outside the read cap it is for.",
+          );
+        }
+
+        this.handlesAoisTheirs.bind(message.areaOfInterest);
+
+        break;
+      }
+
+      case MSG_SETUP_BIND_STATIC_TOKEN: {
+        this.handlesStaticTokensTheirs.bind(message.staticToken);
 
         break;
       }

@@ -9,8 +9,10 @@ import {
 import {
   MSG_SETUP_BIND_AREA_OF_INTEREST,
   MSG_SETUP_BIND_READ_CAPABILITY,
+  MSG_SETUP_BIND_STATIC_TOKEN,
   MsgSetupBindAreaOfInterest,
   MsgSetupBindReadCapability,
+  MsgSetupBindStaticToken,
   ReadCapEncodingScheme,
   ReadCapPrivy,
 } from "../types.ts";
@@ -127,5 +129,21 @@ export async function decodeSetupBindAreaOfInterest<SubspaceId>(
       maxSize: BigInt(maxSize),
     },
     authorisation: BigInt(authHandle),
+  };
+}
+
+export async function decodeSetupBindStaticToken<StaticToken>(
+  bytes: GrowingBytes,
+  decodeStaticToken: (bytes: GrowingBytes) => Promise<StaticToken>,
+): Promise<MsgSetupBindStaticToken<StaticToken>> {
+  await bytes.nextAbsolute(1);
+
+  bytes.prune(1);
+
+  const staticToken = await decodeStaticToken(bytes);
+
+  return {
+    kind: MSG_SETUP_BIND_STATIC_TOKEN,
+    staticToken,
   };
 }

@@ -5,6 +5,7 @@ import {
   TestNamespace,
   TestReadCap,
   testSchemeAccessControl,
+  testSchemeAuthorisationToken,
   testSchemeNamespace,
   testSchemePai,
   testSchemePath,
@@ -35,6 +36,7 @@ Deno.test("WgpsMessenger establishes challenge", async () => {
       pai: testSchemePai,
       path: testSchemePath,
       subspace: testSchemeSubspace,
+      authorisationToken: testSchemeAuthorisationToken,
     },
     interests: new Map([[
       {
@@ -77,6 +79,7 @@ Deno.test("WgpsMessenger establishes challenge", async () => {
       pai: testSchemePai,
       path: testSchemePath,
       subspace: testSchemeSubspace,
+      authorisationToken: testSchemeAuthorisationToken,
     },
     interests: new Map([[
       {
@@ -120,4 +123,35 @@ Deno.test("WgpsMessenger establishes challenge", async () => {
   assertEquals(bettyChallengeAlfie, bettyChallengeBetty);
 
   await delay(10);
+
+  // @ts-ignore looking at private values is fine
+  const receivedCapsAlfie = Array.from(messengerAlfie.handlesCapsTheirs).map((
+    [, cap],
+  ) => cap);
+  // @ts-ignore looking at private values is fine
+  const receivedCapsBetty = Array.from(messengerBetty.handlesCapsTheirs).map((
+    [, cap],
+  ) => cap);
+
+  assertEquals(receivedCapsAlfie, [{
+    namespace: TestNamespace.Family,
+    subspace: TestSubspace.Gemma,
+    path: [new Uint8Array([1])],
+    receiver: TestSubspace.Betty,
+    time: {
+      start: BigInt(0),
+      end: OPEN_END,
+    },
+  }]);
+
+  assertEquals(receivedCapsBetty, [{
+    namespace: TestNamespace.Family,
+    subspace: TestSubspace.Gemma,
+    path: [new Uint8Array([1])],
+    receiver: TestSubspace.Alfie,
+    time: {
+      start: BigInt(0),
+      end: OPEN_END,
+    },
+  }]);
 });

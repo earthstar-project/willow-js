@@ -18,6 +18,7 @@ import {
 } from "../../deps.ts";
 import {
   AccessControlScheme,
+  AuthorisationTokenScheme,
   ReadAuthorisation,
   SubspaceCapScheme,
 } from "../wgps/types.ts";
@@ -211,6 +212,7 @@ export const testSchemeSubspaceCap: SubspaceCapScheme<
   getNamespace: (cap) => cap.namespace,
   getReceiver: (cap) => cap.receiver,
   getSecretKey: (receiver) => receiver,
+  isValidCap: () => Promise.resolve(true),
   signatures: {
     sign: async (secret, msg) => {
       const hash = await crypto.subtle.digest("SHA-256", msg);
@@ -567,6 +569,7 @@ export const testSchemeAccessControl: AccessControlScheme<
   },
   getReceiver: (cap) => cap.receiver,
   getSecretKey: (receiver) => receiver,
+  isValidCap: () => Promise.resolve(true),
   encodings: {
     readCapability: {
       encode: (cap, privy) => {
@@ -687,6 +690,31 @@ export const testSchemeAccessControl: AccessControlScheme<
         ),
         sig,
       );
+    },
+  },
+};
+
+export const testSchemeAuthorisationToken: AuthorisationTokenScheme<
+  TestSubspace
+> = {
+  encodings: {
+    staticToken: {
+      encode: (subspace) => {
+        return new Uint8Array([subspace]);
+      },
+      encodedLength: () => 1,
+      decode: (encoded) => {
+        return encoded[0];
+      },
+      decodeStream: async (bytes) => {
+        await bytes.nextAbsolute(1);
+
+        const [subspace] = bytes.array;
+
+        bytes.prune(1);
+
+        return subspace;
+      },
     },
   },
 };

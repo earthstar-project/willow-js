@@ -24,6 +24,7 @@ import {
 import {
   decodeSetupBindAreaOfInterest,
   decodeSetupBindReadCapability,
+  decodeSetupBindStaticToken,
 } from "./setup.ts";
 
 export type DecodeMessagesOpts<
@@ -37,6 +38,7 @@ export type DecodeMessagesOpts<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  StaticToken,
   NamespaceId,
   SubspaceId,
 > = {
@@ -51,6 +53,7 @@ export type DecodeMessagesOpts<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    StaticToken,
     NamespaceId,
     SubspaceId
   >;
@@ -62,6 +65,7 @@ export type DecodeMessagesOpts<
     PsiGroup,
     SubspaceCapability,
     SyncSubspaceSignature,
+    StaticToken,
     NamespaceId,
     SubspaceId
   >;
@@ -82,6 +86,7 @@ export async function* decodeMessages<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  StaticToken,
   NamespaceId,
   SubspaceId,
 >(
@@ -96,6 +101,7 @@ export async function* decodeMessages<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    StaticToken,
     NamespaceId,
     SubspaceId
   >,
@@ -106,6 +112,7 @@ export async function* decodeMessages<
     PsiGroup,
     SubspaceCapability,
     SyncSubspaceSignature,
+    StaticToken,
     SubspaceId
   >
 > {
@@ -141,6 +148,12 @@ export async function* decodeMessages<
     } else if ((firstByte & 0x80) === 0x80) {
       // Control Issue Guarantee.
       yield await decodeControlIssueGuarantee(bytes);
+    } else if ((firstByte & 0x30) === 0x30) {
+      // Setup Bind Static Token
+      yield await decodeSetupBindStaticToken(
+        bytes,
+        opts.encodings.staticToken.decodeStream,
+      );
     } else if ((firstByte & 0x28) === 0x28) {
       // Setup Bind Area of Interest
       yield await decodeSetupBindAreaOfInterest(

@@ -18,6 +18,7 @@ import {
   MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
   MSG_SETUP_BIND_AREA_OF_INTEREST,
   MSG_SETUP_BIND_READ_CAPABILITY,
+  MSG_SETUP_BIND_STATIC_TOKEN,
   SyncEncodings,
   SyncMessage,
   SyncSchemes,
@@ -28,6 +29,7 @@ import {
   TestNamespace,
   TestReadCap,
   testSchemeAccessControl,
+  testSchemeAuthorisationToken,
   testSchemeNamespace,
   testSchemePai,
   testSchemePath,
@@ -46,6 +48,7 @@ const vectors: SyncMessage<
   Uint8Array,
   TestSubspaceReadCap,
   Uint8Array,
+  TestSubspace,
   TestSubspace
 >[] = [
   {
@@ -322,6 +325,11 @@ const vectors: SyncMessage<
       maxSize: BigInt(3400),
     },
   },
+
+  {
+    kind: MSG_SETUP_BIND_STATIC_TOKEN,
+    staticToken: TestSubspace.Epson,
+  },
 ];
 
 Deno.test("Encoding roundtrip test", async () => {
@@ -333,6 +341,7 @@ Deno.test("Encoding roundtrip test", async () => {
     Uint8Array,
     TestSubspaceReadCap,
     Uint8Array,
+    TestSubspace,
     TestNamespace,
     TestSubspace
   > = {
@@ -343,6 +352,7 @@ Deno.test("Encoding roundtrip test", async () => {
     readCapability: testSchemeAccessControl.encodings.readCapability,
     subspace: testSchemeSubspace,
     syncSignature: testSchemeAccessControl.encodings.syncSignature,
+    staticToken: testSchemeAuthorisationToken.encodings.staticToken,
   };
 
   const schemes: SyncSchemes<
@@ -356,6 +366,7 @@ Deno.test("Encoding roundtrip test", async () => {
     TestSubspace,
     Uint8Array,
     TestSubspace,
+    TestSubspace,
     TestNamespace,
     TestSubspace
   > = {
@@ -365,6 +376,7 @@ Deno.test("Encoding roundtrip test", async () => {
     path: testSchemePath,
     subspace: testSchemeSubspace,
     subspaceCap: testSchemeSubspaceCap,
+    authorisationToken: testSchemeAuthorisationToken,
   };
 
   const msgEncoder = new MessageEncoder(encodings, schemes, {
@@ -428,6 +440,7 @@ Deno.test("Encoding roundtrip test", async () => {
     Uint8Array,
     TestSubspaceReadCap,
     Uint8Array,
+    TestSubspace,
     TestSubspace
   >[] = [];
 

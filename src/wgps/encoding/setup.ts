@@ -10,6 +10,7 @@ import {
 import {
   MsgSetupBindAreaOfInterest,
   MsgSetupBindReadCapability,
+  MsgSetupBindStaticToken,
   ReadCapEncodingScheme,
   ReadCapPrivy,
 } from "../types.ts";
@@ -100,5 +101,15 @@ export function encodeSetupBindAreaOfInterest<SubspaceId>(
     new Uint8Array([lengthBytes]),
     encodeCompactWidth(msg.areaOfInterest.maxCount),
     encodeCompactWidth(msg.areaOfInterest.maxSize),
+  );
+}
+
+export function encodeSetupBindStaticToken<StaticToken>(
+  msg: MsgSetupBindStaticToken<StaticToken>,
+  encodeStaticToken: (token: StaticToken) => Uint8Array,
+) {
+  return concat(
+    new Uint8Array([0x30]),
+    encodeStaticToken(msg.staticToken),
   );
 }

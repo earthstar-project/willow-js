@@ -49,6 +49,8 @@ export enum HandleType {
   CapabilityHandle,
   /** Resource handle for AreaOfInterests that peers wish to sync. */
   AreaOfInterestHandle,
+  /** Resource handle for StaticTokens that peers need to transmit. */
+  StaticTokenHandle,
 }
 
 // Channels
@@ -60,6 +62,8 @@ export enum LogicalChannel {
   CapabilityChannel,
   /** Logical channel for controlling the binding of new AreaOfInterestHandles. */
   AreaOfInterestChannel,
+  /** Logical channel for controlling the binding of new StaticTokenHandles. */
+  StaticTokenChannel,
 }
 
 // Message types
@@ -218,9 +222,23 @@ export type MsgSetupBindAreaOfInterest<SubspaceId> = {
   authorisation: bigint;
 };
 
-export type SetupMessage<ReadCapability, SyncSignature, SubspaceId> =
+export const MSG_SETUP_BIND_STATIC_TOKEN = Symbol(
+  "msg_setup_static_token",
+);
+export type MsgSetupBindStaticToken<StaticToken> = {
+  kind: typeof MSG_SETUP_BIND_STATIC_TOKEN;
+  staticToken: StaticToken;
+};
+
+export type SetupMessage<
+  ReadCapability,
+  SyncSignature,
+  StaticToken,
+  SubspaceId,
+> =
   | MsgSetupBindReadCapability<ReadCapability, SyncSignature>
-  | MsgSetupBindAreaOfInterest<SubspaceId>;
+  | MsgSetupBindAreaOfInterest<SubspaceId>
+  | MsgSetupBindStaticToken<StaticToken>;
 
 export type SyncMessage<
   ReadCapability,
@@ -228,11 +246,12 @@ export type SyncMessage<
   PsiGroup,
   SubspaceCapability,
   SyncSubspaceSignature,
+  StaticToken,
   SubspaceId,
 > =
   | ControlMessage
   | IntersectionMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature>
-  | SetupMessage<ReadCapability, SyncSignature, SubspaceId>;
+  | SetupMessage<ReadCapability, SyncSignature, StaticToken, SubspaceId>;
 
 // Encodings
 
@@ -253,6 +272,7 @@ export type SyncEncodings<
   PsiGroup,
   SubspaceCapability,
   SyncSubspaceSignature,
+  StaticToken,
   NamespaceId,
   SubspaceId,
 > = {
@@ -266,6 +286,7 @@ export type SyncEncodings<
   subspaceCapability: EncodingScheme<SubspaceCapability>;
   syncSubspaceSignature: EncodingScheme<SyncSubspaceSignature>;
   subspace: EncodingScheme<SubspaceId>;
+  staticToken: EncodingScheme<StaticToken>;
 };
 
 export type SyncSchemes<
@@ -279,6 +300,7 @@ export type SyncSchemes<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  StaticToken,
   NamespaceId,
   SubspaceId,
 > = {
@@ -307,6 +329,7 @@ export type SyncSchemes<
   namespace: NamespaceScheme<NamespaceId>;
   subspace: SubspaceScheme<SubspaceId>;
   path: PathScheme;
+  authorisationToken: AuthorisationTokenScheme<StaticToken>;
 };
 
 export type AccessControlScheme<
@@ -321,7 +344,7 @@ export type AccessControlScheme<
   getSecretKey: (receiver: Receiver) => ReceiverSecretKey;
   getGrantedArea: (cap: ReadCapability) => Area<SubspaceId>;
   signatures: SignatureScheme<Receiver, ReceiverSecretKey, SyncSignature>;
-
+  isValidCap: (cap: ReadCapability) => Promise<boolean>;
   encodings: {
     readCapability: ReadCapEncodingScheme<
       ReadCapability,
@@ -342,6 +365,7 @@ export type SubspaceCapScheme<
   getSecretKey: (receiver: SubspaceReceiver) => SubspaceSecretKey | undefined;
   getNamespace: (cap: SubspaceCapability) => NamespaceId;
   getReceiver: (cap: SubspaceCapability) => SubspaceReceiver;
+  isValidCap: (cap: SubspaceCapability) => Promise<boolean>;
   signatures: SignatureScheme<
     SubspaceReceiver,
     SubspaceSecretKey,
@@ -350,5 +374,12 @@ export type SubspaceCapScheme<
   encodings: {
     subspaceCapability: EncodingScheme<SubspaceCapability>;
     syncSubspaceSignature: EncodingScheme<SyncSubspaceSignature>;
+  };
+};
+
+export type AuthorisationTokenScheme<StaticToken> = {
+  encodings: {
+    staticToken: EncodingScheme<StaticToken>;
+    // TODO: Dynamic token
   };
 };

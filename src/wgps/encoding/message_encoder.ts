@@ -15,6 +15,7 @@ import {
   MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
   MSG_SETUP_BIND_AREA_OF_INTEREST,
   MSG_SETUP_BIND_READ_CAPABILITY,
+  MSG_SETUP_BIND_STATIC_TOKEN,
   ReadCapPrivy,
   SyncEncodings,
   SyncMessage,
@@ -38,6 +39,7 @@ import {
 import {
   encodeSetupBindAreaOfInterest,
   encodeSetupBindReadCapability,
+  encodeSetupBindStaticToken,
 } from "./setup.ts";
 
 export type EncodedSyncMessage = {
@@ -56,6 +58,7 @@ export class MessageEncoder<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  StaticToken,
   NamespaceId,
   SubspaceId,
 > {
@@ -68,6 +71,7 @@ export class MessageEncoder<
       PsiGroup,
       SubspaceCapability,
       SyncSubspaceSignature,
+      StaticToken,
       NamespaceId,
       SubspaceId
     >,
@@ -82,6 +86,7 @@ export class MessageEncoder<
       SubspaceReceiver,
       SyncSubspaceSignature,
       SubspaceSecretKey,
+      StaticToken,
       NamespaceId,
       SubspaceId
     >,
@@ -107,6 +112,7 @@ export class MessageEncoder<
       PsiGroup,
       SubspaceCapability,
       SyncSubspaceSignature,
+      StaticToken,
       SubspaceId
     >,
   ) {
@@ -218,6 +224,16 @@ export class MessageEncoder<
         );
 
         push(LogicalChannel.AreaOfInterestChannel, bytes);
+        break;
+      }
+
+      case MSG_SETUP_BIND_STATIC_TOKEN: {
+        const bytes = encodeSetupBindStaticToken(
+          message,
+          this.encodings.staticToken.encode,
+        );
+
+        push(LogicalChannel.StaticTokenChannel, bytes);
         break;
       }
 
