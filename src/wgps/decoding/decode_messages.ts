@@ -1,5 +1,11 @@
 import { GrowingBytes } from "../../../deps.ts";
-import { SyncEncodings, SyncMessage, Transport } from "../types.ts";
+import {
+  ReadCapPrivy,
+  SyncEncodings,
+  SyncMessage,
+  SyncSchemes,
+  Transport,
+} from "../types.ts";
 import { decodeCommitmentReveal } from "./commitment_reveal.ts";
 import {
   decodeControlAbsolve,
@@ -15,25 +21,100 @@ import {
   decodePaiReplySubspaceCapability,
   decodePaiRequestSubspaceCapability,
 } from "./pai.ts";
+import {
+  decodeSetupBindAreaOfInterest,
+  decodeSetupBindReadCapability,
+  decodeSetupBindStaticToken,
+} from "./setup.ts";
 
 export type DecodeMessagesOpts<
+  ReadCapability,
+  Receiver,
+  SyncSignature,
+  ReceiverSecretKey,
   PsiGroup,
+  PsiScalar,
   SubspaceCapability,
+  SubspaceReceiver,
   SyncSubspaceSignature,
+  SubspaceSecretKey,
+  StaticToken,
+  NamespaceId,
+  SubspaceId,
 > = {
+  schemes: SyncSchemes<
+    ReadCapability,
+    Receiver,
+    SyncSignature,
+    ReceiverSecretKey,
+    PsiGroup,
+    PsiScalar,
+    SubspaceCapability,
+    SubspaceReceiver,
+    SyncSubspaceSignature,
+    SubspaceSecretKey,
+    StaticToken,
+    NamespaceId,
+    SubspaceId
+  >;
   transport: Transport;
   challengeLength: number;
-  encodings: SyncEncodings<PsiGroup, SubspaceCapability, SyncSubspaceSignature>;
+  encodings: SyncEncodings<
+    ReadCapability,
+    SyncSignature,
+    PsiGroup,
+    SubspaceCapability,
+    SyncSubspaceSignature,
+    StaticToken,
+    NamespaceId,
+    SubspaceId
+  >;
+  getIntersectionPrivy: (
+    handle: bigint,
+  ) => ReadCapPrivy<NamespaceId, SubspaceId>;
+  getCap: (handle: bigint) => Promise<ReadCapability>;
 };
 
 export async function* decodeMessages<
+  ReadCapability,
+  Receiver,
+  SyncSignature,
+  ReceiverSecretKey,
   PsiGroup,
+  PsiScalar,
   SubspaceCapability,
+  SubspaceReceiver,
   SyncSubspaceSignature,
+  SubspaceSecretKey,
+  StaticToken,
+  NamespaceId,
+  SubspaceId,
 >(
-  opts: DecodeMessagesOpts<PsiGroup, SubspaceCapability, SyncSubspaceSignature>,
+  opts: DecodeMessagesOpts<
+    ReadCapability,
+    Receiver,
+    SyncSignature,
+    ReceiverSecretKey,
+    PsiGroup,
+    PsiScalar,
+    SubspaceCapability,
+    SubspaceReceiver,
+    SyncSubspaceSignature,
+    SubspaceSecretKey,
+    StaticToken,
+    NamespaceId,
+    SubspaceId
+  >,
 ): AsyncIterable<
-  SyncMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature>
+  SyncMessage<
+    ReadCapability,
+    SyncSignature,
+    PsiGroup,
+    SubspaceCapability,
+    SyncSubspaceSignature,
+    StaticToken,
+    SubspaceId
+  >
 > {
   const bytes = new GrowingBytes(opts.transport);
 
@@ -67,6 +148,31 @@ export async function* decodeMessages<
     } else if ((firstByte & 0x80) === 0x80) {
       // Control Issue Guarantee.
       yield await decodeControlIssueGuarantee(bytes);
+    } else if ((firstByte & 0x30) === 0x30) {
+      // Setup Bind Static Token
+      yield await decodeSetupBindStaticToken(
+        bytes,
+        opts.encodings.staticToken.decodeStream,
+      );
+    } else if ((firstByte & 0x28) === 0x28) {
+      // Setup Bind Area of Interest
+      yield await decodeSetupBindAreaOfInterest(
+        bytes,
+        async (authHandle) => {
+          const cap = await opts.getCap(authHandle);
+          return opts.schemes.accessControl.getGrantedArea(cap);
+        },
+        opts.encodings.subspace.decodeStream,
+        opts.schemes.path,
+      );
+    } else if ((firstByte & 0x20) === 0x20) {
+      // Setup Bind Read Capability
+      yield await decodeSetupBindReadCapability(
+        bytes,
+        opts.encodings.readCapability,
+        opts.getIntersectionPrivy,
+        opts.encodings.syncSignature.decodeStream,
+      );
     } else if ((firstByte & 0x10) === 0x10) {
       // PAI Reply Subspace Capability
       yield await decodePaiReplySubspaceCapability(

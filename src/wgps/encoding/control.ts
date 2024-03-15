@@ -10,24 +10,45 @@ import {
   MsgControlPlead,
 } from "../types.ts";
 
-export function channelMaskStart(mask: number, channel: LogicalChannel) {
+export function channelMaskStart(
+  mask: number,
+  channel: LogicalChannel,
+): number {
   switch (channel) {
     case LogicalChannel.IntersectionChannel:
-      return mask | 0x64;
+      return mask | 0x40;
+    case LogicalChannel.CapabilityChannel:
+      return mask | 0x60;
+    case LogicalChannel.AreaOfInterestChannel:
+      return mask | 0x80;
+    case LogicalChannel.StaticTokenChannel:
+      return mask | 0xc0;
   }
 }
 
-export function channelMaskEnd(mask: number, channel: LogicalChannel) {
+export function channelMaskEnd(mask: number, channel: LogicalChannel): number {
   switch (channel) {
     case LogicalChannel.IntersectionChannel:
       return mask | 0x2;
+    case LogicalChannel.CapabilityChannel:
+      return mask | 0x3;
+    case LogicalChannel.AreaOfInterestChannel:
+      return mask | 0x4;
+    case LogicalChannel.StaticTokenChannel:
+      return mask | 0x6;
   }
 }
 
-export function handleMask(mask: number, handleType: HandleType) {
+export function handleMask(mask: number, handleType: HandleType): number {
   switch (handleType) {
     case HandleType.IntersectionHandle:
       return mask;
+    case HandleType.CapabilityHandle:
+      return mask | 0x20;
+    case HandleType.AreaOfInterestHandle:
+      return mask | 0x40;
+    case HandleType.StaticTokenHandle:
+      return mask | 0x80;
   }
 }
 

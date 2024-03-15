@@ -1,3 +1,4 @@
+import { Deferred, deferred } from "../../deps.ts";
 import { ValidationError } from "../errors.ts";
 
 /** A mapping of handles to data */
@@ -9,6 +10,8 @@ export class HandleStore<ValueType> {
    * - Whether we've asked to free that data (and in doing so committing to no longer using it)
    * - The number of unprocessed messages which refer to this handle. */
   private map = new Map<bigint, [ValueType, boolean, number]>();
+
+  private eventuallyMap = new Map<bigint, Deferred<ValueType>>();
 
   /** Indicates whether this a store of handles we have bound, or a store of handles bound by another peer. */
   // private isOurs: boolean;
@@ -25,9 +28,37 @@ export class HandleStore<ValueType> {
     return info;
   }
 
+  getEventually(handle: bigint): Promise<ValueType> {
+    const result = this.map.get(handle);
+
+    if (result) {
+      const [info] = result;
+
+      return Promise.resolve(info);
+    }
+
+    const existingPromise = this.eventuallyMap.get(handle);
+
+    if (existingPromise) {
+      return existingPromise;
+    }
+
+    const newPromise = deferred<ValueType>();
+
+    this.eventuallyMap.set(handle, newPromise);
+
+    return newPromise;
+  }
+
   /** Bind some data to a handle. */
   bind(data: ValueType) {
     const handle = this.leastUnassignedHandle;
+
+    const eventuallyPromise = this.eventuallyMap.get(handle);
+
+    if (eventuallyPromise) {
+      eventuallyPromise.resolve(data);
+    }
 
     this.map.set(handle, [data, false, 0]);
 

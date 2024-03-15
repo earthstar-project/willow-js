@@ -1,16 +1,27 @@
 import {
   ANY_SUBSPACE,
+  bigintToBytes,
   concat,
+  decodeAreaInArea,
   decodePath,
+  decodeStreamAreaInArea,
   decodeStreamPath,
+  encodeAreaInArea,
   encodeEntry,
   encodePath,
   equalsBytes,
+  OPEN_END,
   orderBytes,
   Path,
   PathScheme,
+  Range,
 } from "../../deps.ts";
-import { ReadAuthorisation, SubspaceCapScheme } from "../wgps/types.ts";
+import {
+  AccessControlScheme,
+  AuthorisationTokenScheme,
+  ReadAuthorisation,
+  SubspaceCapScheme,
+} from "../wgps/types.ts";
 import { crypto } from "https://deno.land/std@0.188.0/crypto/crypto.ts";
 import {
   AuthorisationScheme,
@@ -172,6 +183,7 @@ export const testSchemeSubspace: SubspaceScheme<TestSubspace> = {
 export type TestReadCap = {
   namespace: TestNamespace;
   subspace: TestSubspace | typeof ANY_SUBSPACE;
+  time: Range<bigint>;
   path: Path;
   receiver: TestSubspace;
 };
@@ -179,28 +191,28 @@ export type TestReadCap = {
 export type TestSubspaceReadCap = {
   namespace: TestNamespace;
   path: Path;
+  time: Range<bigint>;
   receiver: TestSubspace;
 };
 
 export type TestReadAuth = ReadAuthorisation<
   TestReadCap,
-  TestSubspaceReadCap,
-  null,
-  Uint8Array
+  TestSubspaceReadCap
 >;
 
 // Subspace caps
 
 export const testSchemeSubspaceCap: SubspaceCapScheme<
-  TestNamespace,
   TestSubspaceReadCap,
   TestSubspace,
+  Uint8Array,
   TestSubspace,
-  Uint8Array
+  TestNamespace
 > = {
   getNamespace: (cap) => cap.namespace,
   getReceiver: (cap) => cap.receiver,
   getSecretKey: (receiver) => receiver,
+  isValidCap: () => Promise.resolve(true),
   signatures: {
     sign: async (secret, msg) => {
       const hash = await crypto.subtle.digest("SHA-256", msg);
@@ -235,18 +247,47 @@ export const testSchemeSubspaceCap: SubspaceCapScheme<
       encode: (cap) => {
         return concat(
           new Uint8Array([cap.namespace, cap.receiver]),
+          cap.time.end === OPEN_END
+            ? concat(new Uint8Array([0]), bigintToBytes(cap.time.start))
+            : concat(
+              new Uint8Array([1]),
+              bigintToBytes(cap.time.start),
+              bigintToBytes(cap.time.end),
+            ),
           encodePath(testSchemePath, cap.path),
         );
       },
       decode: (enc) => {
-        const [namespace, receiver] = enc;
+        const [namespace, receiver, isOpenByte] = enc;
 
-        const path = decodePath(testSchemePath, enc.subarray(2));
+        const isOpen = isOpenByte === 0;
+
+        let time: Range<bigint>;
+
+        const dataView = new DataView(enc.buffer);
+
+        if (isOpen) {
+          time = {
+            start: dataView.getBigUint64(4),
+            end: OPEN_END,
+          };
+        } else {
+          time = {
+            start: dataView.getBigUint64(4),
+            end: dataView.getBigUint64(4 + 8),
+          };
+        }
+
+        const path = decodePath(
+          testSchemePath,
+          enc.subarray(isOpen ? 3 + 8 : 3 + 8 + 8),
+        );
 
         return {
           namespace,
           receiver,
           path,
+          time,
         };
       },
       encodedLength: (cap) => {
@@ -259,12 +300,44 @@ export const testSchemeSubspaceCap: SubspaceCapScheme<
 
         bytes.prune(2);
 
+        await bytes.nextAbsolute(1);
+
+        const [isOpenByte] = bytes.array;
+
+        let time: Range<bigint>;
+
+        const dataView = new DataView(
+          bytes.array.buffer,
+          bytes.array.byteOffset,
+        );
+
+        if (isOpenByte === 0) {
+          await bytes.nextAbsolute(8);
+
+          time = {
+            start: dataView.getBigUint64(1),
+            end: OPEN_END,
+          };
+
+          bytes.prune(1 + 8);
+        } else {
+          await bytes.nextAbsolute(8 + 8);
+
+          time = {
+            start: dataView.getBigUint64(1),
+            end: dataView.getBigUint64(1 + 8),
+          };
+
+          bytes.prune(1 + 8 + 8);
+        }
+
         const path = await decodeStreamPath(testSchemePath, bytes);
 
         return {
           namespace,
           receiver,
           path,
+          time,
         };
       },
     },
@@ -272,9 +345,9 @@ export const testSchemeSubspaceCap: SubspaceCapScheme<
 };
 
 export const testSchemePath: PathScheme = {
-  maxPathLength: 8,
+  maxPathLength: 64,
   maxComponentCount: 4,
-  maxComponentLength: 3,
+  maxComponentLength: 16,
 };
 
 export const testSchemePayload: PayloadScheme<ArrayBuffer> = {
@@ -389,11 +462,11 @@ export const testSchemeAuthorisation: AuthorisationScheme<
 };
 
 export const testSchemePai: PaiScheme<
+  TestReadCap,
+  Uint8Array,
+  Uint8Array,
   TestNamespace,
-  TestSubspace,
-  Uint8Array,
-  Uint8Array,
-  TestReadCap
+  TestSubspace
 > = {
   isGroupEqual: (a, b) => {
     return equalsBytes(a, b);
@@ -475,6 +548,173 @@ export const testSchemePai: PaiScheme<
       bytes.prune(32);
 
       return group;
+    },
+  },
+};
+
+export const testSchemeAccessControl: AccessControlScheme<
+  TestReadCap,
+  TestSubspace,
+  Uint8Array,
+  TestSubspace,
+  TestNamespace,
+  TestSubspace
+> = {
+  getGrantedArea: (cap) => {
+    return {
+      includedSubspaceId: cap.subspace,
+      pathPrefix: cap.path,
+      timeRange: cap.time,
+    };
+  },
+  getReceiver: (cap) => cap.receiver,
+  getSecretKey: (receiver) => receiver,
+  isValidCap: () => Promise.resolve(true),
+  encodings: {
+    readCapability: {
+      encode: (cap, privy) => {
+        const capGrantedArea = testSchemeAccessControl.getGrantedArea(cap);
+
+        const areaInAreaEnc = encodeAreaInArea(
+          {
+            encodeSubspace: testSchemeSubspace.encode,
+            orderSubspace: testSchemeSubspace.order,
+            pathScheme: testSchemePath,
+          },
+          capGrantedArea,
+          privy.outer,
+        );
+
+        const areaInAreaLength = bigintToBytes(
+          BigInt(areaInAreaEnc.byteLength),
+        );
+
+        return concat(
+          new Uint8Array([cap.receiver]),
+          areaInAreaLength,
+          areaInAreaEnc,
+        );
+      },
+      encodedLength: (cap, privy) => {
+        const capGrantedArea = testSchemeAccessControl.getGrantedArea(cap);
+
+        const areaInAreaEnc = encodeAreaInArea(
+          {
+            encodeSubspace: testSchemeSubspace.encode,
+            orderSubspace: testSchemeSubspace.order,
+            pathScheme: testSchemePath,
+          },
+          capGrantedArea,
+          privy.outer,
+        );
+
+        return 1 + 8 + areaInAreaEnc.byteLength;
+      },
+      decode: (cap, privy) => {
+        const [receiver] = cap;
+
+        const view = new DataView(cap.buffer);
+
+        const aInALength = view.getBigUint64(1);
+
+        const area = decodeAreaInArea(
+          {
+            pathScheme: testSchemePath,
+            decodeSubspaceId: testSchemeSubspace.decode,
+          },
+          cap.subarray(1, Number(aInALength) + 1),
+          privy.outer,
+        );
+
+        return {
+          namespace: privy.namespace,
+          receiver,
+          path: area.pathPrefix,
+          subspace: area.includedSubspaceId,
+          time: area.timeRange,
+        };
+      },
+      decodeStream: async (bytes, privy) => {
+        await bytes.nextAbsolute(1 + 8);
+
+        const [receiver] = bytes.array;
+
+        bytes.prune(1 + 8);
+
+        const area = await decodeStreamAreaInArea(
+          {
+            pathScheme: testSchemePath,
+            decodeStreamSubspace: testSchemeSubspace.decodeStream,
+          },
+          bytes,
+          privy.outer,
+        );
+
+        return {
+          namespace: privy.namespace,
+          receiver,
+          path: area.pathPrefix,
+          subspace: area.includedSubspaceId,
+          time: area.timeRange,
+        };
+      },
+    },
+    syncSignature: {
+      encode: (sig) => sig,
+      decode: (sig) => sig.subarray(0, 33),
+      encodedLength: () => 33,
+      decodeStream: async (bytes) => {
+        await bytes.nextAbsolute(33);
+
+        const sig = bytes.array.slice(0, 33);
+
+        bytes.prune(33);
+
+        return sig;
+      },
+    },
+  },
+  signatures: {
+    sign: async (key, bytestring) => {
+      const hash = await crypto.subtle.digest("SHA-256", bytestring);
+
+      return concat(new Uint8Array([key]), new Uint8Array(hash));
+    },
+    verify: async (pubKey, sig, bytestring) => {
+      const hash = await crypto.subtle.digest("SHA-256", bytestring);
+
+      return equalsBytes(
+        concat(
+          new Uint8Array([pubKey]),
+          new Uint8Array(hash),
+        ),
+        sig,
+      );
+    },
+  },
+};
+
+export const testSchemeAuthorisationToken: AuthorisationTokenScheme<
+  TestSubspace
+> = {
+  encodings: {
+    staticToken: {
+      encode: (subspace) => {
+        return new Uint8Array([subspace]);
+      },
+      encodedLength: () => 1,
+      decode: (encoded) => {
+        return encoded[0];
+      },
+      decodeStream: async (bytes) => {
+        await bytes.nextAbsolute(1);
+
+        const [subspace] = bytes.array;
+
+        bytes.prune(1);
+
+        return subspace;
+      },
     },
   },
 };

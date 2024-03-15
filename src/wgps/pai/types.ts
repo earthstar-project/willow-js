@@ -40,17 +40,17 @@ export type FragmentKit<NamespaceId, SubspaceId> =
   | FragmentKitSelective<NamespaceId, SubspaceId>;
 
 export type PaiScheme<
+  ReadCapability,
+  PsiGroup,
+  PsiScalar,
   NamespaceId,
   SubspaceId,
-  PsiGroup,
-  Scalar,
-  ReadCapability,
 > = {
   fragmentToGroup: (
     fragment: Fragment<NamespaceId, SubspaceId>,
   ) => Promise<PsiGroup>;
-  getScalar: () => Scalar;
-  scalarMult: (group: PsiGroup, scalar: Scalar) => PsiGroup;
+  getScalar: () => PsiScalar;
+  scalarMult: (group: PsiGroup, scalar: PsiScalar) => PsiGroup;
   isGroupEqual: (a: PsiGroup, b: PsiGroup) => boolean;
   getFragmentKit: (cap: ReadCapability) => FragmentKit<NamespaceId, SubspaceId>;
   groupMemberEncoding: EncodingScheme<PsiGroup>;

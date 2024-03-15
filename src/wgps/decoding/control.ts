@@ -1,4 +1,5 @@
 import { decodeCompactWidth, GrowingBytes } from "../../../deps.ts";
+import { WillowError } from "../../errors.ts";
 import {
   HandleType,
   LogicalChannel,
@@ -18,30 +19,33 @@ import {
 import { compactWidthFromEndOfByte } from "./util.ts";
 
 export function decodeChannelFromBeginningOfByte(byte: number): LogicalChannel {
-  if ((byte & 0x28) === 0x28) {
+  if ((byte & 0x60) === 0x60) {
+    return LogicalChannel.CapabilityChannel;
+  } else if ((byte & 0x40) === 0x40) {
     return LogicalChannel.IntersectionChannel;
   }
 
-  // TODO: Remove this when we have more logical channels worked in.
-  return LogicalChannel.IntersectionChannel;
+  throw new WillowError("Couldn't decode logical channel");
 }
 
 export function decodeChannelFromEndOfByte(byte: number): LogicalChannel {
-  if ((byte & 0x2) === 0x2) {
+  if ((byte & 0x3) === 0x3) {
+    return LogicalChannel.CapabilityChannel;
+  } else if ((byte & 0x2) === 0x2) {
     return LogicalChannel.IntersectionChannel;
   }
 
-  // TODO: Remove this when we have more logical channels worked in.
-  return LogicalChannel.IntersectionChannel;
+  throw new WillowError("Couldn't decode logical channel");
 }
 
 export function decodeHandleTypeFromBeginningOfByte(byte: number): HandleType {
-  if ((byte & 0x0) === 0x0) {
+  if ((byte & 0x20) === 0x20) {
+    return HandleType.CapabilityHandle;
+  } else if ((byte & 0x0) === 0x0) {
     return HandleType.IntersectionHandle;
   }
 
-  // TODO: Remove this when we have more handle types worked in.
-  return HandleType.IntersectionHandle;
+  throw new WillowError("Couldn't decode handle type");
 }
 
 export async function decodeControlIssueGuarantee(

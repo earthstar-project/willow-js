@@ -1,4 +1,5 @@
 import { FIFO } from "../../../deps.ts";
+import { WillowError } from "../../errors.ts";
 import {
   LogicalChannel,
   MSG_COMMITMENT_REVEAL,
@@ -12,11 +13,14 @@ import {
   MSG_PAI_REPLY_FRAGMENT,
   MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
   MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+  MSG_SETUP_BIND_AREA_OF_INTEREST,
+  MSG_SETUP_BIND_READ_CAPABILITY,
+  MSG_SETUP_BIND_STATIC_TOKEN,
+  ReadCapPrivy,
   SyncEncodings,
   SyncMessage,
+  SyncSchemes,
 } from "../types.ts";
-import { onAsyncIterate } from "../util.ts";
-
 import {
   encodeControlAbsolve,
   encodeControlAnnounceDropping,
@@ -32,6 +36,11 @@ import {
   encodePaiReplySubspaceCapability,
   encodePaiRequestSubspaceCapability,
 } from "./pai.ts";
+import {
+  encodeSetupBindAreaOfInterest,
+  encodeSetupBindReadCapability,
+  encodeSetupBindStaticToken,
+} from "./setup.ts";
 
 export type EncodedSyncMessage = {
   channel: LogicalChannel | null;
@@ -39,18 +48,54 @@ export type EncodedSyncMessage = {
 };
 
 export class MessageEncoder<
+  ReadCapability,
+  Receiver,
+  SyncSignature,
+  ReceiverSecretKey,
   PsiGroup,
+  PsiScalar,
   SubspaceCapability,
+  SubspaceReceiver,
   SyncSubspaceSignature,
+  SubspaceSecretKey,
+  StaticToken,
+  NamespaceId,
+  SubspaceId,
 > {
   private messageChannel = new FIFO<EncodedSyncMessage>();
 
   constructor(
     readonly encodings: SyncEncodings<
+      ReadCapability,
+      SyncSignature,
       PsiGroup,
       SubspaceCapability,
-      SyncSubspaceSignature
+      SyncSubspaceSignature,
+      StaticToken,
+      NamespaceId,
+      SubspaceId
     >,
+    readonly schemes: SyncSchemes<
+      ReadCapability,
+      Receiver,
+      SyncSignature,
+      ReceiverSecretKey,
+      PsiGroup,
+      PsiScalar,
+      SubspaceCapability,
+      SubspaceReceiver,
+      SyncSubspaceSignature,
+      SubspaceSecretKey,
+      StaticToken,
+      NamespaceId,
+      SubspaceId
+    >,
+    readonly opts: {
+      getIntersectionPrivy: (
+        handle: bigint,
+      ) => ReadCapPrivy<NamespaceId, SubspaceId>;
+      getCap: (handle: bigint) => ReadCapability;
+    },
   ) {
   }
 
@@ -61,7 +106,15 @@ export class MessageEncoder<
   }
 
   encode(
-    message: SyncMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature>,
+    message: SyncMessage<
+      ReadCapability,
+      SyncSignature,
+      PsiGroup,
+      SubspaceCapability,
+      SyncSubspaceSignature,
+      StaticToken,
+      SubspaceId
+    >,
   ) {
     const push = (channel: LogicalChannel | null, message: Uint8Array) => {
       this.messageChannel.push({
@@ -139,6 +192,55 @@ export class MessageEncoder<
         push(LogicalChannel.IntersectionChannel, bytes);
         break;
       }
+
+      // Setup
+      case MSG_SETUP_BIND_READ_CAPABILITY: {
+        const privy = this.opts.getIntersectionPrivy(message.handle);
+
+        const bytes = encodeSetupBindReadCapability(
+          message,
+          this.encodings.readCapability.encode,
+          this.encodings.syncSignature.encode,
+          privy,
+        );
+
+        push(LogicalChannel.CapabilityChannel, bytes);
+        break;
+      }
+
+      case MSG_SETUP_BIND_AREA_OF_INTEREST: {
+        const cap = this.opts.getCap(message.authorisation);
+
+        const outer = this.schemes.accessControl.getGrantedArea(cap);
+
+        const bytes = encodeSetupBindAreaOfInterest(
+          message,
+          {
+            encodeSubspace: this.encodings.subspace.encode,
+            orderSubspace: this.schemes.subspace.order,
+            pathScheme: this.schemes.path,
+            outer,
+          },
+        );
+
+        push(LogicalChannel.AreaOfInterestChannel, bytes);
+        break;
+      }
+
+      case MSG_SETUP_BIND_STATIC_TOKEN: {
+        const bytes = encodeSetupBindStaticToken(
+          message,
+          this.encodings.staticToken.encode,
+        );
+
+        push(LogicalChannel.StaticTokenChannel, bytes);
+        break;
+      }
+
+      default:
+        new WillowError(
+          `Did not know how to encode a message: ${message}`,
+        );
     }
   }
 }

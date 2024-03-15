@@ -1,4 +1,13 @@
-import { EncodingScheme, SignatureScheme } from "../../deps.ts";
+import {
+  Area,
+  AreaOfInterest,
+  EncodingScheme,
+  PathScheme,
+  PrivyEncodingScheme,
+  SignatureScheme,
+} from "../../deps.ts";
+import { NamespaceScheme, SubspaceScheme } from "../store/types.ts";
+import { PaiScheme } from "./pai/types.ts";
 
 /** The peer which initiated the synchronisation session. */
 export const IS_ALFIE = Symbol("alfie");
@@ -8,35 +17,16 @@ export const IS_BETTY = Symbol("betty");
 /** we refer to the peer that initiated the synchronisation session as Alfie, and the other peer as Betty. */
 export type SyncRole = typeof IS_ALFIE | typeof IS_BETTY;
 
-export type ReadAuthorisationSubspace<
-  ReadCapability,
-  SubspaceReadCapability,
-  SyncSignature,
-  SyncSubspaceSignature,
-> = {
-  capability: ReadCapability;
-  subspaceCapability: SubspaceReadCapability;
-  signature: SyncSignature;
-  subspaceSignature: SyncSubspaceSignature;
-};
-
 /** Represents an authorisation to read an area of data in a Namespace */
 export type ReadAuthorisation<
   ReadCapability,
   SubspaceReadCapability,
-  SyncSignature,
-  SyncSubspaceSignature,
-> =
-  | {
-    capability: ReadCapability;
-    signature: SyncSignature;
-  }
-  | ReadAuthorisationSubspace<
-    ReadCapability,
-    SubspaceReadCapability,
-    SyncSignature,
-    SyncSubspaceSignature
-  >;
+> = {
+  capability: ReadCapability;
+} | {
+  capability: ReadCapability;
+  subspaceCapability: SubspaceReadCapability;
+};
 
 /** A transport for receiving and sending data to with another peer */
 export interface Transport {
@@ -55,6 +45,12 @@ export enum HandleType {
    * - pending (waiting for the other peer to perform scalar multiplication),
    * - completed (both peers performed scalar multiplication). */
   IntersectionHandle,
+  /** Logical channel for controlling the binding of new CapabilityHandles. */
+  CapabilityHandle,
+  /** Resource handle for AreaOfInterests that peers wish to sync. */
+  AreaOfInterestHandle,
+  /** Resource handle for StaticTokens that peers need to transmit. */
+  StaticTokenHandle,
 }
 
 // Channels
@@ -62,6 +58,12 @@ export enum HandleType {
 export enum LogicalChannel {
   /** Logical channel for controlling the binding of new IntersectionHandles. */
   IntersectionChannel,
+  /** Logical channel for controlling the binding of new CapabilityHandles. */
+  CapabilityChannel,
+  /** Logical channel for controlling the binding of new AreaOfInterestHandles. */
+  AreaOfInterestChannel,
+  /** Logical channel for controlling the binding of new StaticTokenHandles. */
+  StaticTokenChannel,
 }
 
 // Message types
@@ -195,32 +197,175 @@ export type IntersectionMessage<
   | MsgPaiRequestSubspaceCapability
   | MsgPaiReplySubspaceCapability<SubspaceCapability, SyncSubspaceSignature>;
 
-export type SyncMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature> =
-  | ControlMessage
-  | IntersectionMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature>;
+// Setup
+export const MSG_SETUP_BIND_READ_CAPABILITY = Symbol(
+  "msg_setup_bind_read_capability",
+);
+export type MsgSetupBindReadCapability<ReadCapability, SyncSignature> = {
+  kind: typeof MSG_SETUP_BIND_READ_CAPABILITY;
+  /** A ReadCapability that the peer wishes to reference in future messages. */
+  capability: ReadCapability;
+  /** The IntersectionHandle, bound by the sender, of the capability’s fragment with the longest Path in the intersection of the fragments. If both a primary and secondary such fragment exist, choose the primary one. */
+  handle: bigint;
+  /** The SyncSignature issued by the Receiver of the capability over the sender’s challenge. */
+  signature: SyncSignature;
+};
 
-// Encodings
+export const MSG_SETUP_BIND_AREA_OF_INTEREST = Symbol(
+  "msg_setup_bind_area_of_interest",
+);
+export type MsgSetupBindAreaOfInterest<SubspaceId> = {
+  kind: typeof MSG_SETUP_BIND_AREA_OF_INTEREST;
+  /** An AreaOfInterest that the peer wishes to reference in future messages. */
+  areaOfInterest: AreaOfInterest<SubspaceId>;
+  /** A CapabilityHandle bound by the sender that grants access to all entries in the message’s area_of_interest. */
+  authorisation: bigint;
+};
 
-export type SyncEncodings<
+export const MSG_SETUP_BIND_STATIC_TOKEN = Symbol(
+  "msg_setup_static_token",
+);
+export type MsgSetupBindStaticToken<StaticToken> = {
+  kind: typeof MSG_SETUP_BIND_STATIC_TOKEN;
+  staticToken: StaticToken;
+};
+
+export type SetupMessage<
+  ReadCapability,
+  SyncSignature,
+  StaticToken,
+  SubspaceId,
+> =
+  | MsgSetupBindReadCapability<ReadCapability, SyncSignature>
+  | MsgSetupBindAreaOfInterest<SubspaceId>
+  | MsgSetupBindStaticToken<StaticToken>;
+
+export type SyncMessage<
+  ReadCapability,
+  SyncSignature,
   PsiGroup,
   SubspaceCapability,
   SyncSubspaceSignature,
+  StaticToken,
+  SubspaceId,
+> =
+  | ControlMessage
+  | IntersectionMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature>
+  | SetupMessage<ReadCapability, SyncSignature, StaticToken, SubspaceId>;
+
+// Encodings
+
+export type ReadCapPrivy<NamespaceId, SubspaceId> = {
+  outer: Area<SubspaceId>;
+  namespace: NamespaceId;
+};
+
+export type ReadCapEncodingScheme<ReadCapability, NamespaceId, SubspaceId> =
+  PrivyEncodingScheme<
+    ReadCapability,
+    ReadCapPrivy<NamespaceId, SubspaceId>
+  >;
+
+export type SyncEncodings<
+  ReadCapability,
+  SyncSignature,
+  PsiGroup,
+  SubspaceCapability,
+  SyncSubspaceSignature,
+  StaticToken,
+  NamespaceId,
+  SubspaceId,
 > = {
+  readCapability: ReadCapEncodingScheme<
+    ReadCapability,
+    NamespaceId,
+    SubspaceId
+  >;
+  syncSignature: EncodingScheme<SyncSignature>;
   groupMember: EncodingScheme<PsiGroup>;
   subspaceCapability: EncodingScheme<SubspaceCapability>;
   syncSubspaceSignature: EncodingScheme<SyncSubspaceSignature>;
+  subspace: EncodingScheme<SubspaceId>;
+  staticToken: EncodingScheme<StaticToken>;
+};
+
+export type SyncSchemes<
+  ReadCapability,
+  Receiver,
+  SyncSignature,
+  ReceiverSecretKey,
+  PsiGroup,
+  PsiScalar,
+  SubspaceCapability,
+  SubspaceReceiver,
+  SyncSubspaceSignature,
+  SubspaceSecretKey,
+  StaticToken,
+  NamespaceId,
+  SubspaceId,
+> = {
+  accessControl: AccessControlScheme<
+    ReadCapability,
+    Receiver,
+    SyncSignature,
+    ReceiverSecretKey,
+    NamespaceId,
+    SubspaceId
+  >;
+  subspaceCap: SubspaceCapScheme<
+    SubspaceCapability,
+    SubspaceReceiver,
+    SyncSubspaceSignature,
+    SubspaceSecretKey,
+    NamespaceId
+  >;
+  pai: PaiScheme<
+    ReadCapability,
+    PsiGroup,
+    PsiScalar,
+    NamespaceId,
+    SubspaceId
+  >;
+  namespace: NamespaceScheme<NamespaceId>;
+  subspace: SubspaceScheme<SubspaceId>;
+  path: PathScheme;
+  authorisationToken: AuthorisationTokenScheme<StaticToken>;
+};
+
+export type AccessControlScheme<
+  ReadCapability,
+  Receiver,
+  SyncSignature,
+  ReceiverSecretKey,
+  NamespaceId,
+  SubspaceId,
+> = {
+  getReceiver: (cap: ReadCapability) => Receiver;
+  getSecretKey: (receiver: Receiver) => ReceiverSecretKey;
+  getGrantedArea: (cap: ReadCapability) => Area<SubspaceId>;
+  signatures: SignatureScheme<Receiver, ReceiverSecretKey, SyncSignature>;
+  isValidCap: (cap: ReadCapability) => Promise<boolean>;
+  encodings: {
+    readCapability: ReadCapEncodingScheme<
+      ReadCapability,
+      NamespaceId,
+      SubspaceId
+    >;
+    syncSignature: EncodingScheme<SyncSignature>;
+  };
 };
 
 export type SubspaceCapScheme<
-  NamespaceId,
   SubspaceCapability,
   SubspaceReceiver,
-  SubspaceSecretKey,
   SyncSubspaceSignature,
+  SubspaceSecretKey,
+  NamespaceId,
 > = {
   getSecretKey: (receiver: SubspaceReceiver) => SubspaceSecretKey | undefined;
   getNamespace: (cap: SubspaceCapability) => NamespaceId;
   getReceiver: (cap: SubspaceCapability) => SubspaceReceiver;
+  isValidCap: (cap: SubspaceCapability) => Promise<boolean>;
   signatures: SignatureScheme<
     SubspaceReceiver,
     SubspaceSecretKey,
@@ -229,5 +374,12 @@ export type SubspaceCapScheme<
   encodings: {
     subspaceCapability: EncodingScheme<SubspaceCapability>;
     syncSubspaceSignature: EncodingScheme<SyncSubspaceSignature>;
+  };
+};
+
+export type AuthorisationTokenScheme<StaticToken> = {
+  encodings: {
+    staticToken: EncodingScheme<StaticToken>;
+    // TODO: Dynamic token
   };
 };
