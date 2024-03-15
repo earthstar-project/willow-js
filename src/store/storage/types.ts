@@ -51,6 +51,14 @@ export interface EntryDriver<
   >;
   /** Used to find paths that are prefixes of, or prefixed by, another path. */
   prefixIterator: PrefixIterator<Uint8Array>;
+  /** Used to keep track of how many entries are referring to a single payload  */
+  payloadReferenceCounter: PayloadReferenceCounter<PayloadDigest>;
+}
+
+export interface PayloadReferenceCounter<PayloadDigest> {
+  increment(digest: PayloadDigest): Promise<number>;
+  decrement(digest: PayloadDigest): Promise<number>;
+  count(digest: PayloadDigest): Promise<number>;
 }
 
 /**  */
@@ -58,27 +66,41 @@ export interface PayloadDriver<PayloadDigest> {
   /** Returns a payload for a given format and hash.*/
   get(
     payloadHash: PayloadDigest,
-    opts?: {
-      startOffset?: number;
-    },
   ): Promise<Payload | undefined>;
 
-  /** Stores the payload in a staging area, and returns an object used to assess whether it is what we're expecting, and if so, commit it to canonical storage. */
-  stage(
-    payload: Uint8Array | ReadableStream<Uint8Array>,
+  /** Stores a complete payload with an unknown digest, intended for a new entry. */
+  set(
+    payload: Uint8Array | AsyncIterable<Uint8Array>,
+  ): Promise<{
+    digest: PayloadDigest;
+    length: bigint;
+    payload: Payload;
+  }>;
+
+  /** Stores a possibly partial payload with an known digest, intended for an existing entry. */
+  receive(
+    opts: {
+      payload: Uint8Array | AsyncIterable<Uint8Array>;
+      offset: number;
+      knownLength: bigint;
+      knownDigest: PayloadDigest;
+    },
   ): Promise<
     {
-      hash: PayloadDigest;
+      /** The digest after ingestion */
+      digest: PayloadDigest;
+      /** the length after ingestion */
       length: bigint;
-      /** Commit the staged attachment to storage. */
-      commit: () => Promise<Payload>;
-      /** Reject the staged attachment, erasing it. */
-      reject: () => Promise<void>;
     }
   >;
 
+  /** Get the length of a stored payload */
+  length(
+    payloadHash: PayloadDigest,
+  ): Promise<bigint>;
+
   /** Erases an payload for a given format and hash.*/
   erase(
-    hash: PayloadDigest,
+    digest: PayloadDigest,
   ): Promise<true | ValidationError>;
 }

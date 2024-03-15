@@ -45,6 +45,7 @@ export type TripleStorageOpts<
     PayloadDigest,
     Fingerprint
   >;
+  getPayloadLength: (digest: PayloadDigest) => Promise<bigint>;
 };
 
 export class TripleStorage<
@@ -83,7 +84,7 @@ export class TripleStorage<
   ) {
     this.namespace = opts.namespace;
 
-    const lift = (
+    const lift = async (
       key: Uint8Array,
       value: Uint8Array,
       order: "path" | "subspace" | "timestamp",
@@ -109,7 +110,10 @@ export class TripleStorage<
         payloadLength: values.payloadLength,
       };
 
-      return opts.fingerprintScheme.fingerprintSingleton(entry);
+      const available = await opts.getPayloadLength(entry.payloadDigest) ||
+        BigInt(0);
+
+      return opts.fingerprintScheme.fingerprintSingleton({ entry, available });
     };
 
     this.ptsStorage = opts.createSummarisableStorage({
@@ -491,6 +495,31 @@ export class TripleStorage<
         break;
       }
     }
+  }
+
+  async updateAvailablePayload(
+    subspace: SubspaceId,
+    path: Path,
+  ): Promise<boolean> {
+    const result = await this.get(subspace, path);
+
+    if (!result) {
+      return false;
+    }
+
+    const { entry, authTokenHash } = result;
+
+    await this.remove(result.entry);
+    await this.insert({
+      subspace: entry.subspaceId,
+      path: entry.path,
+      timestamp: entry.timestamp,
+      payloadDigest: entry.payloadDigest,
+      length: entry.payloadLength,
+      authTokenDigest: authTokenHash,
+    });
+
+    return true;
   }
 
   private encodeKey(

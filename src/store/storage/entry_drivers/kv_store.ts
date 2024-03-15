@@ -19,7 +19,7 @@ import { TripleStorage } from "../storage_3d/triple_storage.ts";
 import { Storage3d } from "../storage_3d/types.ts";
 import { LiftingMonoid } from "../summarisable_storage/lifting_monoid.ts";
 import { Skiplist } from "../summarisable_storage/monoid_skiplist.ts";
-import { EntryDriver } from "../types.ts";
+import { EntryDriver, PayloadReferenceCounter } from "../types.ts";
 
 type EntryDriverKvOpts<
   NamespaceId,
@@ -38,6 +38,7 @@ type EntryDriverKvOpts<
     PayloadDigest,
     Fingerprint
   >;
+  getPayloadLength: (digest: PayloadDigest) => Promise<bigint>;
 };
 
 /** Store and retrieve entries in a key-value store. */
@@ -67,6 +68,10 @@ export class EntryDriverKvStore<
   private kvDriver: KvDriver;
   prefixIterator: PrefixIterator<Uint8Array>;
 
+  private getPayloadLength: (digest: PayloadDigest) => Promise<bigint>;
+
+  payloadReferenceCounter: PayloadReferenceCounter<PayloadDigest>;
+
   constructor(
     opts: EntryDriverKvOpts<
       NamespaceId,
@@ -86,6 +91,51 @@ export class EntryDriverKvStore<
     const prefixedKvDriver = new PrefixedDriver(["prefix"], this.kvDriver);
 
     this.prefixIterator = new SimpleKeyIterator<Uint8Array>(prefixedKvDriver);
+
+    this.getPayloadLength = opts.getPayloadLength;
+
+    const refKvDriver = new PrefixedDriver(["payloadRefCount"], this.kvDriver);
+
+    this.payloadReferenceCounter = {
+      count: async (digest) => {
+        const encoded = this.payloadScheme.encode(digest);
+
+        const count = await refKvDriver.get<number>([encoded]);
+
+        return count || 0;
+      },
+      increment: async (digest) => {
+        const encoded = this.payloadScheme.encode(digest);
+
+        const count = await refKvDriver.get<number>([encoded]);
+
+        const next = count ? count + 1 : 1;
+
+        await refKvDriver.set([encoded], next);
+
+        return Promise.resolve(next);
+      },
+      decrement: async (digest) => {
+        const encoded = this.payloadScheme.encode(digest);
+
+        const count = await refKvDriver.get<number>([encoded]);
+        if (!count) {
+          return Promise.resolve(0);
+        }
+
+        const next = count - 1;
+
+        if (next === 0) {
+          await refKvDriver.delete([encoded]);
+
+          return Promise.resolve(0);
+        }
+
+        await refKvDriver.set([encoded], next);
+
+        return Promise.resolve(next);
+      },
+    };
   }
 
   makeStorage(
@@ -111,6 +161,7 @@ export class EntryDriverKvStore<
       pathScheme: this.pathScheme,
       payloadScheme: this.payloadScheme,
       subspaceScheme: this.subspaceScheme,
+      getPayloadLength: this.getPayloadLength,
     });
   }
 

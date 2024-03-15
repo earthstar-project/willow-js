@@ -19,7 +19,9 @@ export type SubspaceScheme<SubspaceId> = EncodingScheme<SubspaceId> & {
 };
 
 export type PayloadScheme<PayloadDigest> = EncodingScheme<PayloadDigest> & {
-  fromBytes: (bytes: Uint8Array | ReadableStream) => Promise<PayloadDigest>;
+  fromBytes: (
+    bytes: Uint8Array | AsyncIterable<Uint8Array>,
+  ) => Promise<PayloadDigest>;
   order: (a: PayloadDigest, b: PayloadDigest) => -1 | 0 | 1;
 };
 
@@ -50,7 +52,7 @@ export type FingerprintScheme<
   Fingerprint,
 > = {
   fingerprintSingleton(
-    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
+    entry: LengthyEntry<NamespaceId, SubspaceId, PayloadDigest>,
   ): Promise<Fingerprint>;
   fingerprintCombine(
     a: Fingerprint,
@@ -177,12 +179,14 @@ export type IngestEvent<
     AuthorisationToken
   >;
 
-/** The data associated with a {@link SignedEntry}. */
+/** The (possibly partial) data associated with a {@link SignedEntry}. */
 export type Payload = {
-  /** Retrieves the payload's data all at once in a single {@link Uint8Array}. */
-  bytes: () => Promise<Uint8Array>;
-  /** A {@link ReadableStream} of the payload's data which can be read chunk by chunk. */
-  stream: ReadableStream<Uint8Array>;
+  /** Retrieves the payload's available data all at once in a single {@link Uint8Array}. */
+  bytes: (offset?: number) => Promise<Uint8Array>;
+  /** A {@link ReadableStream} of the payload's available data which can be read chunk by chunk. */
+  stream: (offset?: number) => Promise<AsyncIterable<Uint8Array>>;
+  /** The length in bytes of the available payload. */
+  length: () => Promise<bigint>;
 };
 
 export type EntryInput<SubspacePublicKey> = {
@@ -195,7 +199,7 @@ export type EntryInput<SubspacePublicKey> = {
 
 export type IngestPayloadEventFailure = {
   kind: "failure";
-  reason: "no_entry" | "mismatched_hash";
+  reason: "no_entry" | "data_mismatch";
 };
 
 export type IngestPayloadEventNoOp = {
@@ -211,3 +215,8 @@ export type IngestPayloadEvent =
   | IngestPayloadEventFailure
   | IngestPayloadEventNoOp
   | IngestPayloadEventSuccess;
+
+export type LengthyEntry<NamespaceId, SubspaceId, PayloadDigest> = {
+  entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+  available: bigint;
+};

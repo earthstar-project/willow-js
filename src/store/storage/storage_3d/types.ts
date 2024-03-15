@@ -27,6 +27,11 @@ export interface Storage3d<
     authTokenDigest: PayloadDigest;
   }): Promise<void>;
 
+  updateAvailablePayload(
+    subspace: SubspaceId,
+    path: Path,
+  ): Promise<boolean>;
+
   remove(
     entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
   ): Promise<boolean>;

@@ -469,7 +469,7 @@ Deno.test("Store.ingestPayload", async (test) => {
       path: [new Uint8Array([0])],
       subspace: TestSubspace.Gemma,
       timestamp: BigInt(0),
-    }, new Uint8Array());
+    }, new Blob([new Uint8Array()]).stream());
 
     assert(res.kind === "failure");
     assert(res.reason === "no_entry");
@@ -499,7 +499,7 @@ Deno.test("Store.ingestPayload", async (test) => {
       path: res.entry.path,
       subspace: res.entry.subspaceId,
       timestamp: res.entry.timestamp,
-    }, payload);
+    }, new Blob([new Uint8Array()]).stream());
 
     assert(res3.kind === "success");
 
@@ -507,7 +507,7 @@ Deno.test("Store.ingestPayload", async (test) => {
       path: res.entry.path,
       subspace: res.entry.subspaceId,
       timestamp: res.entry.timestamp,
-    }, payload);
+    }, new Blob([payload]).stream());
 
     assert(res4.kind === "no_op");
   });
@@ -536,10 +536,10 @@ Deno.test("Store.ingestPayload", async (test) => {
       path: res.entry.path,
       subspace: res.entry.subspaceId,
       timestamp: res.entry.timestamp,
-    }, new Uint8Array(32));
+    }, new Blob([new Uint8Array(32)]).stream());
 
     assert(res3.kind === "failure");
-    assert(res3.reason === "mismatched_hash");
+    assert(res3.reason === "data_mismatch");
   });
 
   await test.step("ingest if everything is valid", async () => {
@@ -566,7 +566,7 @@ Deno.test("Store.ingestPayload", async (test) => {
       path: res.entry.path,
       subspace: res.entry.subspaceId,
       timestamp: res.entry.timestamp,
-    }, payload);
+    }, new Blob([payload]).stream());
 
     assert(res3.kind === "success");
 
