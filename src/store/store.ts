@@ -26,6 +26,7 @@ import {
   Path,
 } from "../../deps.ts";
 import { Storage3d } from "./storage/storage_3d/types.ts";
+import { WillowError } from "../errors.ts";
 
 /** A local set of a particular namespace's entries to be written to, read from, and synced with other `Store`s.
  *
@@ -84,14 +85,18 @@ export class Store<
     this.namespace = opts.namespace;
     this.protocolParams = opts.protocolParameters;
 
+    const payloadDriver = opts.payloadDriver ||
+      new PayloadDriverMemory(opts.protocolParameters.payloadScheme);
+
     const entryDriver = opts.entryDriver || new EntryDriverMemory({
       pathScheme: opts.protocolParameters.pathScheme,
       payloadScheme: opts.protocolParameters.payloadScheme,
       subspaceScheme: opts.protocolParameters.subspaceScheme,
       fingerprintScheme: opts.protocolParameters.fingerprintScheme,
+      getPayloadLength: (digest) => {
+        return this.payloadDriver.length(digest);
+      },
     });
-    const payloadDriver = opts.payloadDriver ||
-      new PayloadDriverMemory(opts.protocolParameters.payloadScheme);
 
     this.entryDriver = entryDriver;
 
@@ -150,15 +155,17 @@ export class Store<
       : BigInt(Date.now() * 1000);
 
     // Stage it with the driver
-    const stagedResult = await this.payloadDriver.stage(input.payload);
+    const { digest, payload, length } = await this.payloadDriver.set(
+      input.payload,
+    );
 
     const entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest> = {
       namespaceId: this.namespace,
       subspaceId: input.subspace,
       path: input.path,
       timestamp: timestamp,
-      payloadLength: stagedResult.length,
-      payloadDigest: stagedResult.hash,
+      payloadLength: length,
+      payloadDigest: digest,
     };
 
     const authToken = await this.protocolParams.authorisationScheme.authorise(
@@ -169,12 +176,16 @@ export class Store<
     const ingestResult = await this.ingestEntry(entry, authToken);
 
     if (ingestResult.kind !== "success") {
-      await stagedResult.reject();
+      const count = await this.entryDriver.payloadReferenceCounter.count(
+        digest,
+      );
+
+      if (count === 0) {
+        await this.payloadDriver.erase(digest);
+      }
 
       return ingestResult;
     }
-
-    const payload = await stagedResult.commit();
 
     this.dispatchEvent(new EntryPayloadSetEvent(entry, authToken, payload));
 
@@ -382,7 +393,7 @@ export class Store<
     const encodedToken = this.protocolParams.authorisationScheme
       .tokenEncoding.encode(authToken);
 
-    const stagingResult = await this.payloadDriver.stage(encodedToken);
+    const { digest } = await this.payloadDriver.set(encodedToken);
 
     await this.entryDriver.writeAheadFlag.flagInsertion({
       namespaceId: this.namespace,
@@ -391,7 +402,7 @@ export class Store<
       payloadDigest: hash,
       payloadLength: length,
       timestamp,
-    }, stagingResult.hash);
+    }, digest);
 
     const prefixKey = [
       this.protocolParams.subspaceScheme.encode(subspace),
@@ -401,17 +412,17 @@ export class Store<
     await Promise.all([
       this.storage.insert({
         payloadDigest: hash,
-        authTokenDigest: stagingResult.hash,
+        authTokenDigest: digest,
         length,
         path,
         subspace,
         timestamp,
       }),
-      stagingResult.commit(),
       this.entryDriver.prefixIterator.insert(
         prefixKey,
         bigintToBytes(timestamp),
       ),
+      this.entryDriver.payloadReferenceCounter.increment(hash),
     ]);
 
     // And remove all prefixes with smaller timestamps.
@@ -441,7 +452,17 @@ export class Store<
 
           await Promise.all([
             this.storage.remove(toDeleteResult.entry),
-            this.payloadDriver.erase(toDeleteResult.entry.payloadDigest),
+            async () => {
+              const count = await this.entryDriver.payloadReferenceCounter
+                .decrement(toDeleteResult.entry.payloadDigest);
+
+              if (count === 0) {
+                await this.payloadDriver.erase(
+                  toDeleteResult.entry.payloadDigest,
+                );
+              }
+            },
+
             this.entryDriver.prefixIterator.remove(prefixedBySubspacePath),
           ]);
 
@@ -467,7 +488,8 @@ export class Store<
       timestamp: bigint;
       subspace: SubspacePublicKey;
     },
-    payload: Uint8Array | ReadableStream<Uint8Array>,
+    payload: AsyncIterable<Uint8Array>,
+    offset = 0,
   ): Promise<IngestPayloadEvent> {
     const getResult = await this.storage.get(
       entryDetails.subspace,
@@ -492,27 +514,48 @@ export class Store<
       };
     }
 
-    const stagedResult = await this.payloadDriver.stage(payload);
+    const result = await this.payloadDriver.receive({
+      payload: payload,
+      offset,
+      knownDigest: entry.payloadDigest,
+      knownLength: entry.payloadLength,
+    });
 
     if (
-      this.protocolParams.payloadScheme.order(
-        stagedResult.hash,
-        entry.payloadDigest,
-      ) !== 0
+      result.length > entry.payloadLength ||
+      (result.length === entry.payloadLength &&
+        this.protocolParams.payloadScheme.order(
+            result.digest,
+            entry.payloadDigest,
+          ) !== 0)
     ) {
-      await stagedResult.reject();
-
       return {
         kind: "failure",
-        reason: "mismatched_hash",
+        reason: "data_mismatch",
       };
     }
 
-    const committedPayload = await stagedResult.commit();
+    if (
+      result.length === entry.payloadLength &&
+      this.protocolParams.payloadScheme.order(
+          result.digest,
+          entry.payloadDigest,
+        ) === 0
+    ) {
+      const complete = await this.payloadDriver.get(entry.payloadDigest);
 
-    this.dispatchEvent(
-      new PayloadIngestEvent(entry, committedPayload),
-    );
+      if (!complete) {
+        throw new WillowError(
+          "Could not get payload for a payload that was just ingested.",
+        );
+      }
+
+      this.dispatchEvent(
+        new PayloadIngestEvent(entry, complete),
+      );
+    }
+
+    await this.storage.updateAvailablePayload(entry.subspaceId, entry.path);
 
     return {
       kind: "success",

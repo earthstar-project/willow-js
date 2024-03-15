@@ -1,17 +1,12 @@
-import {
-  encodeBase64,
-  EncodingScheme,
-  toArrayBuffer,
-} from "../../../../deps.ts";
+import { concat, encodeBase64 } from "../../../../deps.ts";
 import { ValidationError } from "../../../errors.ts";
-import { Payload } from "../../types.ts";
+import { Payload, PayloadScheme } from "../../types.ts";
 import { PayloadDriver } from "../types.ts";
 
 /** Store and retrieve payloads in memory. */
 export class PayloadDriverMemory<PayloadDigest>
   implements PayloadDriver<PayloadDigest> {
-  private stagingMap = new Map<string, Blob>();
-  private payloadMap = new Map<string, Blob>();
+  private payloadMap = new Map<string, Uint8Array>();
 
   private getKey(payloadHash: PayloadDigest) {
     const encoded = this.payloadScheme.encode(payloadHash);
@@ -20,47 +15,60 @@ export class PayloadDriverMemory<PayloadDigest>
   }
 
   constructor(
-    readonly payloadScheme: EncodingScheme<PayloadDigest> & {
-      fromBytes: (bytes: Uint8Array | ReadableStream) => Promise<PayloadDigest>;
-      order: (a: PayloadDigest, b: PayloadDigest) => -1 | 0 | 1;
-    },
+    readonly payloadScheme: PayloadScheme<PayloadDigest>,
   ) {
+  }
+
+  private getPayload(bytes: Uint8Array): Payload {
+    return {
+      bytes: (offset) => {
+        if (!offset) {
+          return Promise.resolve(bytes);
+        }
+
+        return Promise.resolve(
+          new Uint8Array(
+            bytes.slice(offset),
+          ),
+        );
+      },
+
+      // Need to do this for Node's sake.
+      stream: (offset) => {
+        if (!offset) {
+          return Promise.resolve(
+            new Blob([bytes.buffer]).stream() as unknown as ReadableStream<
+              Uint8Array
+            >,
+          );
+        }
+
+        return Promise.resolve(new Blob([bytes.subarray(offset).buffer])
+          .stream() as unknown as ReadableStream<
+            Uint8Array
+          >);
+      },
+      length: () => Promise.resolve(BigInt(bytes.byteLength)),
+    };
   }
 
   get(
     payloadHash: PayloadDigest,
-    opts?: { startOffset?: number | undefined } | undefined,
   ): Promise<Payload | undefined> {
     const key = this.getKey(payloadHash);
 
-    const payloadBlob = this.payloadMap.get(key);
+    const bytes = this.payloadMap.get(key);
 
-    if (!payloadBlob) {
+    if (!bytes) {
       return Promise.resolve(undefined);
     }
 
-    if (opts?.startOffset) {
-      return Promise.resolve({
-        bytes: async () =>
-          new Uint8Array(
-            await payloadBlob.slice(opts.startOffset).arrayBuffer(),
-          ),
-        stream:
-          // Need to do this for Node's sake.
-          payloadBlob.stream() as unknown as ReadableStream<Uint8Array>,
-      });
-    }
-
-    return Promise.resolve({
-      bytes: async () => new Uint8Array(await payloadBlob.arrayBuffer()),
-      stream:
-        // Need to do this for Node's sake.
-        payloadBlob.stream() as unknown as ReadableStream<Uint8Array>,
-    });
+    return Promise.resolve(this.getPayload(bytes));
   }
 
   erase(payloadHash: PayloadDigest): Promise<true | ValidationError> {
     const key = this.getKey(payloadHash);
+
     if (this.payloadMap.has(key)) {
       this.payloadMap.delete(key);
       return Promise.resolve(true as true);
@@ -71,46 +79,89 @@ export class PayloadDriverMemory<PayloadDigest>
     );
   }
 
-  async stage(
-    payload: Uint8Array | ReadableStream<Uint8Array>,
-  ): Promise<
-    {
-      hash: PayloadDigest;
-      length: bigint;
-      commit: () => Promise<Payload>;
-      reject: () => Promise<void>;
+  length(payloadHash: PayloadDigest): Promise<bigint> {
+    const key = this.getKey(payloadHash);
+
+    const bytes = this.payloadMap.get(key);
+
+    if (!bytes) {
+      return Promise.resolve(BigInt(0));
     }
-  > {
+
+    return Promise.resolve(BigInt(bytes.length));
+  }
+
+  async set(
+    payload: Uint8Array | AsyncIterable<Uint8Array>,
+  ): Promise<{ digest: PayloadDigest; payload: Payload; length: bigint }> {
     const bytes = payload instanceof Uint8Array
       ? payload
-      : new Uint8Array(await toArrayBuffer(payload));
+      : new Uint8Array(await collectUint8Arrays(payload));
 
-    const hash = await this.payloadScheme.fromBytes(bytes);
+    const digest = await this.payloadScheme.fromBytes(bytes);
 
-    const newPayload = new Blob([bytes]);
+    const key = this.getKey(digest);
 
-    const key = this.getKey(hash);
+    this.payloadMap.set(key, bytes);
 
-    this.stagingMap.set(key, newPayload);
-
-    return Promise.resolve({
-      hash,
-      length: BigInt(newPayload.size),
-      commit: () => {
-        this.payloadMap.set(key, newPayload);
-        this.stagingMap.delete(key);
-
-        return Promise.resolve({
-          bytes: async () => new Uint8Array(await newPayload.arrayBuffer()),
-          stream: // Need to do this for Node's sake.
-            newPayload.stream() as unknown as ReadableStream<Uint8Array>,
-        });
-      },
-      reject: () => {
-        this.stagingMap.delete(key);
-
-        return Promise.resolve();
-      },
-    });
+    return {
+      digest,
+      length: BigInt(bytes.byteLength),
+      payload: this.getPayload(bytes),
+    };
   }
+
+  async receive(
+    opts: {
+      payload: AsyncIterable<Uint8Array>;
+      offset: number;
+      knownLength: bigint;
+      knownDigest: PayloadDigest;
+    },
+  ): Promise<{ digest: PayloadDigest; length: bigint }> {
+    const key = this.getKey(opts.knownDigest);
+    const existingBytes = this.payloadMap.get(key) || new Uint8Array();
+
+    const collectedBytes: Uint8Array[] = [];
+
+    for await (const chunk of opts.payload) {
+      collectedBytes.push(chunk);
+    }
+
+    const assembled = concat(
+      existingBytes.slice(0, opts.offset),
+      ...collectedBytes,
+    );
+
+    this.payloadMap.set(key, assembled);
+
+    const digest = await this.payloadScheme.fromBytes(assembled);
+
+    return {
+      digest,
+      length: BigInt(assembled.byteLength),
+    };
+  }
+}
+
+export async function collectUint8Arrays(
+  it: AsyncIterable<Uint8Array>,
+): Promise<Uint8Array> {
+  const chunks = [];
+  let length = 0;
+  for await (const chunk of it) {
+    chunks.push(chunk);
+    length += chunk.length;
+  }
+  if (chunks.length === 1) {
+    // No need to copy.
+    return chunks[0];
+  }
+  const collected = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    collected.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return collected;
 }

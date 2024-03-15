@@ -33,7 +33,7 @@ import {
   randomSubspace,
   randomTimestamp,
 } from "../../../test/utils.ts";
-import { ProtocolParameters, QueryOrder } from "../../types.ts";
+import { LengthyEntry, ProtocolParameters, QueryOrder } from "../../types.ts";
 import { MonoidRbTree } from "../summarisable_storage/monoid_rbtree.ts";
 import { encodePathWithSeparators, TripleStorage } from "./triple_storage.ts";
 import { Storage3d } from "./types.ts";
@@ -104,6 +104,7 @@ const tripleStorageScenario = {
           compare: orderBytes,
         });
       },
+      getPayloadLength: () => Promise.resolve(BigInt(0)),
     });
 
     return Promise.resolve({ storage, dispose: () => Promise.resolve() });
@@ -166,13 +167,13 @@ Deno.test("Storage3d.summarise", async () => {
   // A 'special' fingerprint which really just lists all the items it is made from.
   const specialFingerprintScheme = {
     fingerprintSingleton(
-      entry: Entry<TestNamespace, TestSubspace, ArrayBuffer>,
+      lengthy: LengthyEntry<TestNamespace, TestSubspace, ArrayBuffer>,
     ): Promise<[number, Path, bigint, bigint][]> {
       return Promise.resolve([[
-        entry.subspaceId,
-        entry.path,
-        entry.timestamp,
-        entry.payloadLength,
+        lengthy.entry.subspaceId,
+        lengthy.entry.path,
+        lengthy.entry.timestamp,
+        lengthy.entry.payloadLength,
       ]]);
     },
     fingerprintCombine(
@@ -449,7 +450,7 @@ Deno.test("Storage3d.summarise", async () => {
         }
 
         const lifted = await specialFingerprintScheme.fingerprintSingleton(
-          entry,
+          { entry, available: BigInt(0) },
         );
 
         actualFingerprintMap.set(
@@ -528,6 +529,11 @@ Deno.test("Storage3d.query", async (test) => {
           flagRemoval: () => Promise.resolve(),
           unflagInsertion: () => Promise.resolve(),
           unflagRemoval: () => Promise.resolve(),
+        },
+        payloadReferenceCounter: {
+          count: () => Promise.resolve(0),
+          increment: () => Promise.resolve(0),
+          decrement: () => Promise.resolve(0),
         },
       },
     });

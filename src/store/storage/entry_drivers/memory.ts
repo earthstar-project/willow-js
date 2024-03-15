@@ -8,7 +8,12 @@ import { MonoidRbTree } from "../summarisable_storage/monoid_rbtree.ts";
 import { EntryDriver } from "../types.ts";
 import { Storage3d } from "../storage_3d/types.ts";
 import { TripleStorage } from "../storage_3d/triple_storage.ts";
-import { Entry, orderBytes, PathScheme } from "../../../../deps.ts";
+import {
+  encodeBase64,
+  Entry,
+  orderBytes,
+  PathScheme,
+} from "../../../../deps.ts";
 import { RadixTree } from "../prefix_iterators/radix_tree.ts";
 
 type EntryDriverMemoryOpts<
@@ -26,6 +31,7 @@ type EntryDriverMemoryOpts<
     PayloadDigest,
     Fingerprint
   >;
+  getPayloadLength: (digest: PayloadDigest) => Promise<bigint>;
 };
 
 /** Store and retrieve entries in memory. */
@@ -51,6 +57,8 @@ export class EntryDriverMemory<
     | Entry<NamespaceId, SubspaceId, PayloadDigest>
     | undefined;
 
+  private payloadRefCounts = new Map<string, number>();
+
   makeStorage(
     namespace: NamespaceId,
   ): Storage3d<NamespaceId, SubspaceId, PayloadDigest, Fingerprint> {
@@ -68,6 +76,7 @@ export class EntryDriverMemory<
       pathScheme: this.opts.pathScheme,
       payloadScheme: this.opts.payloadScheme,
       subspaceScheme: this.opts.subspaceScheme,
+      getPayloadLength: this.opts.getPayloadLength,
     });
   }
   writeAheadFlag = {
@@ -106,4 +115,51 @@ export class EntryDriverMemory<
     },
   };
   prefixIterator = new RadixTree<Uint8Array>();
+  payloadReferenceCounter = {
+    count: (digest: PayloadDigest) => {
+      const encoded = this.opts.payloadScheme.encode(digest);
+
+      const b64 = encodeBase64(encoded);
+
+      const result = this.payloadRefCounts.get(b64);
+
+      return Promise.resolve(result || 0);
+    },
+    increment: (digest: PayloadDigest) => {
+      const encoded = this.opts.payloadScheme.encode(digest);
+
+      const b64 = encodeBase64(encoded);
+
+      const result = this.payloadRefCounts.get(b64);
+
+      const next = result ? result + 1 : 1;
+
+      this.payloadRefCounts.set(b64, next);
+
+      return Promise.resolve(next);
+    },
+    decrement: (digest: PayloadDigest) => {
+      const encoded = this.opts.payloadScheme.encode(digest);
+
+      const b64 = encodeBase64(encoded);
+
+      const result = this.payloadRefCounts.get(b64);
+
+      if (!result) {
+        return Promise.resolve(0);
+      }
+
+      const next = result - 1;
+
+      if (next === 0) {
+        this.payloadRefCounts.delete(b64);
+
+        return Promise.resolve(0);
+      }
+
+      this.payloadRefCounts.set(b64, next);
+
+      return Promise.resolve(next);
+    },
+  };
 }

@@ -388,15 +388,19 @@ export const testSchemeFingerprint: FingerprintScheme<
   Uint8Array
 > = {
   neutral: new Uint8Array(32),
-  async fingerprintSingleton(entry) {
+  async fingerprintSingleton(lengthy) {
     const encodedEntry = encodeEntry({
       namespaceScheme: testSchemeNamespace,
       subspaceScheme: testSchemeSubspace,
       pathScheme: testSchemePath,
       payloadScheme: testSchemePayload,
-    }, entry);
+    }, lengthy.entry);
 
-    return new Uint8Array(await crypto.subtle.digest("SHA-256", encodedEntry));
+    const lengthEnc = bigintToBytes(lengthy.available);
+
+    return new Uint8Array(
+      await crypto.subtle.digest("SHA-256", concat(encodedEntry, lengthEnc)),
+    );
   },
   fingerprintCombine(a, b) {
     const bytes = new Uint8Array(32);
