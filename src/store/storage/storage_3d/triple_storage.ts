@@ -1,18 +1,17 @@
 import {
-  ANY_SUBSPACE,
-  Area,
-  AreaOfInterest,
   bigintToBytes,
   concat,
   EncodingScheme,
   Entry,
+  isIncluded3d,
   isIncludedRange,
-  isPathPrefixed,
   OPEN_END,
+  orderPath,
   orderTimestamp,
   Path,
   PathScheme,
-  successorPrefix,
+  Range3d,
+  successorPath,
 } from "../../../../deps.ts";
 import {
   FingerprintScheme,
@@ -22,7 +21,7 @@ import {
 } from "../../types.ts";
 import { LiftingMonoid } from "../summarisable_storage/lifting_monoid.ts";
 import { SummarisableStorage } from "../summarisable_storage/types.ts";
-import { Storage3d } from "./types.ts";
+import { RangeOfInterest, Storage3d } from "./types.ts";
 
 export type TripleStorageOpts<
   NamespaceId,
@@ -73,6 +72,7 @@ export class TripleStorage<
     PayloadDigest,
     Fingerprint
   >;
+  private pathScheme: PathScheme;
 
   constructor(
     opts: TripleStorageOpts<
@@ -134,8 +134,8 @@ export class TripleStorage<
 
     this.subspaceScheme = opts.subspaceScheme;
     this.payloadScheme = opts.payloadScheme;
-
     this.fingerprintScheme = opts.fingerprintScheme;
+    this.pathScheme = opts.pathScheme;
   }
 
   async get(
@@ -148,9 +148,15 @@ export class TripleStorage<
     } | undefined
   > {
     const firstResult = this.query({
-      area: {
-        includedSubspaceId: subspace,
-        pathPrefix: path,
+      range: {
+        subspaceRange: {
+          start: subspace,
+          end: this.subspaceScheme.successor(subspace) || OPEN_END,
+        },
+        pathRange: {
+          start: path,
+          end: successorPath(path, this.pathScheme) || OPEN_END,
+        },
         timeRange: {
           start: BigInt(0),
           end: OPEN_END,
@@ -222,7 +228,7 @@ export class TripleStorage<
   }
 
   async summarise(
-    areaOfInterest: AreaOfInterest<SubspaceId>,
+    rangeOfInterest: RangeOfInterest<SubspaceId>,
   ): Promise<{ fingerprint: Fingerprint; size: number }> {
     let fingerprint = this.fingerprintScheme.neutral;
     /** The size of the fingerprint. */
@@ -232,14 +238,12 @@ export class TripleStorage<
     let sizeUsed = BigInt(0);
 
     // Iterate through all the entries of each range.
-    const subspaceEntriesLowerBound =
-      areaOfInterest.area.includedSubspaceId === ANY_SUBSPACE
-        ? undefined
-        : areaOfInterest.area.includedSubspaceId;
+    const subspaceEntriesLowerBound = rangeOfInterest.range.subspaceRange.start;
+
     const subspaceEntriesUpperBound =
-      areaOfInterest.area.includedSubspaceId === ANY_SUBSPACE
+      rangeOfInterest.range.subspaceRange.end === OPEN_END
         ? undefined
-        : this.subspaceScheme.successor(areaOfInterest.area.includedSubspaceId);
+        : rangeOfInterest.range.subspaceRange.end;
 
     const subspaceEntries = this.sptStorage.entries(
       subspaceEntriesLowerBound
@@ -294,48 +298,26 @@ export class TripleStorage<
       );
 
       // Decode the key.
-      const { timestamp, path } = decodeEntryKey(
+      const { timestamp, path, subspace } = decodeEntryKey(
         subspaceEntry.key,
         "subspace",
         this.subspaceScheme,
       );
 
-      // Check that decoded time and subspace are included by both other dimensions
-      let pathIncluded = false;
-
-      if (isPathPrefixed(areaOfInterest.area.pathPrefix, path)) {
-        pathIncluded = true;
-      }
-
-      // If it's not included, and we ran into an included item earlier,
-      // that indicates the end of a contiguous range.
-      // Recalculate the fingerprint!
-      if (!pathIncluded) {
-        if (leastIncluded) {
-          await updateFingerprint(leastIncluded);
-        }
-
-        // This entry is now the least excluded entry we've run into.
-        leastExcluded = subspaceEntry.key;
-        continue;
-      }
-
-      let timeIncluded = false;
-
-      if (
-        isIncludedRange(
-          orderTimestamp,
-          areaOfInterest.area.timeRange,
-          timestamp,
-        )
-      ) {
-        timeIncluded = true;
-      }
+      const isIncluded = isIncluded3d(
+        this.subspaceScheme.order,
+        rangeOfInterest.range,
+        {
+          path,
+          time: timestamp,
+          subspace,
+        },
+      );
 
       // If it's not included, and we ran into an included item earlier,
       // that indicates the end of a contiguous range.
       // Recalculate the fingerprint!
-      if (!timeIncluded) {
+      if (!isIncluded) {
         if (leastIncluded) {
           await updateFingerprint(leastIncluded);
         }
@@ -356,10 +338,10 @@ export class TripleStorage<
       const nextSizeUsed = sizeUsed + values.payloadLength;
 
       if (
-        (areaOfInterest.maxCount !== 0 &&
-          nextCountUsed > areaOfInterest.maxCount) ||
-        (areaOfInterest.maxSize !== BigInt(0) &&
-          nextSizeUsed > areaOfInterest.maxSize)
+        (rangeOfInterest.maxCount !== 0 &&
+          nextCountUsed > rangeOfInterest.maxCount) ||
+        (rangeOfInterest.maxSize !== BigInt(0) &&
+          nextSizeUsed > rangeOfInterest.maxSize)
       ) {
         break;
       }
@@ -384,7 +366,7 @@ export class TripleStorage<
   }
 
   async *query(
-    areaOfInterest: AreaOfInterest<SubspaceId>,
+    rangeOfInterest: RangeOfInterest<SubspaceId>,
     order: QueryOrder,
     reverse = false,
   ): AsyncIterable<{
@@ -398,10 +380,10 @@ export class TripleStorage<
       : this.tspStorage;
 
     const { lowerBound, upperBound } = order === "subspace"
-      ? this.createSptBounds(areaOfInterest.area)
+      ? this.createSptBounds(rangeOfInterest.range)
       : order === "path"
-      ? this.createPtsBounds(areaOfInterest.area)
-      : this.createTspBounds(areaOfInterest.area);
+      ? this.createPtsBounds(rangeOfInterest.range)
+      : this.createTspBounds(rangeOfInterest.range);
 
     let entriesYielded = 0;
     let payloadBytesYielded = BigInt(0);
@@ -423,28 +405,33 @@ export class TripleStorage<
         this.subspaceScheme,
       );
 
-      if (
-        areaOfInterest.area.includedSubspaceId !== ANY_SUBSPACE
-      ) {
-        const isSubspace = this.subspaceScheme.order(
-          subspace,
-          areaOfInterest.area.includedSubspaceId,
-        ) === 0;
+      const allowAnySubspace = this.subspaceScheme.order(
+            rangeOfInterest.range.subspaceRange.start,
+            this.subspaceScheme.minimalSubspaceId,
+          ) === 0 && rangeOfInterest.range.subspaceRange.end === OPEN_END;
 
-        if (!isSubspace) {
+      if (!allowAnySubspace) {
+        if (
+          !isIncludedRange(
+            this.subspaceScheme.order,
+            rangeOfInterest.range.subspaceRange,
+            subspace,
+          )
+        ) {
           continue;
         }
       }
 
-      const isOpenTime = areaOfInterest.area.timeRange.start === BigInt(0) &&
-        areaOfInterest.area.timeRange.end === OPEN_END;
+      const allowAnyTime =
+        rangeOfInterest.range.timeRange.start === BigInt(0) &&
+        rangeOfInterest.range.timeRange.end === OPEN_END;
 
       if (
-        !isOpenTime
+        !allowAnyTime
       ) {
         const isTimeIncluded = isIncludedRange(
           orderTimestamp,
-          areaOfInterest.area.timeRange,
+          rangeOfInterest.range.timeRange,
           timestamp,
         );
 
@@ -453,11 +440,15 @@ export class TripleStorage<
         }
       }
 
+      const allowAnyPath = rangeOfInterest.range.pathRange.start.length === 0 &&
+        rangeOfInterest.range.pathRange.end === OPEN_END;
+
       if (
-        areaOfInterest.area.pathPrefix.length !== 0
+        !allowAnyPath
       ) {
-        const isPathIncluded = isPathPrefixed(
-          areaOfInterest.area.pathPrefix,
+        const isPathIncluded = isIncludedRange(
+          orderPath,
+          rangeOfInterest.range.pathRange,
           path,
         );
 
@@ -470,8 +461,8 @@ export class TripleStorage<
       payloadBytesYielded += values.payloadLength;
 
       if (
-        areaOfInterest.maxSize !== BigInt(0) &&
-        payloadBytesYielded >= areaOfInterest.maxSize
+        rangeOfInterest.maxSize !== BigInt(0) &&
+        payloadBytesYielded >= rangeOfInterest.maxSize
       ) {
         break;
       }
@@ -489,8 +480,8 @@ export class TripleStorage<
       };
 
       if (
-        areaOfInterest.maxCount !== 0 &&
-        entriesYielded >= areaOfInterest.maxCount
+        rangeOfInterest.maxCount !== 0 &&
+        entriesYielded >= rangeOfInterest.maxCount
       ) {
         break;
       }
@@ -543,189 +534,181 @@ export class TripleStorage<
   }
 
   private createSptBounds(
-    area: Area<SubspaceId>,
+    range: Range3d<SubspaceId>,
   ): {
     lowerBound: Uint8Array | undefined;
     upperBound: Uint8Array | undefined;
   } {
-    if (area.includedSubspaceId === ANY_SUBSPACE) {
-      return { lowerBound: undefined, upperBound: undefined };
-    }
-
-    const encodedSubspace = this.subspaceScheme.encode(area.includedSubspaceId);
-
-    const successorSubspace = this.subspaceScheme.successor(
-      area.includedSubspaceId,
+    const encSubspaceStart = this.subspaceScheme.encode(
+      range.subspaceRange.start,
     );
 
-    if (!successorSubspace) {
+    if (range.subspaceRange.end === OPEN_END) {
       return {
-        lowerBound: this.encodeKey(1, encodedSubspace),
+        lowerBound: this.encodeKey(1, encSubspaceStart),
         upperBound: undefined,
       };
     }
 
-    const encodeddSubspaceSuccessor = this.subspaceScheme.encode(
-      successorSubspace,
-    );
+    const encSubspaceEnd = this.subspaceScheme.encode(range.subspaceRange.end);
 
-    if (area.pathPrefix.length === 0) {
+    const encPathStart = encodePathWithSeparators(range.pathRange.start);
+
+    if (range.pathRange.end === OPEN_END) {
       return {
-        lowerBound: this.encodeKey(1, encodedSubspace),
-        upperBound: this.encodeKey(1, encodeddSubspaceSuccessor),
+        lowerBound: this.encodeKey(1, encSubspaceStart, encPathStart),
+        upperBound: this.encodeKey(1, encSubspaceEnd),
       };
     }
 
-    const encodedAreaPrefix = encodePathWithSeparators(area.pathPrefix);
+    const encPathEnd = encodePathWithSeparators(range.pathRange.end);
 
-    const areaPrefixSuccessor = successorPrefix(area.pathPrefix);
+    const encTimeStart = bigintToBytes(range.timeRange.start);
 
-    if (!areaPrefixSuccessor) {
-      return {
-        lowerBound: this.encodeKey(1, encodedSubspace, encodedAreaPrefix),
-        upperBound: this.encodeKey(1, encodeddSubspaceSuccessor),
-      };
-    }
-
-    const encodedTime = bigintToBytes(area.timeRange.start);
-
-    const encodedAreaPrefixSuccessor = encodePathWithSeparators(
-      areaPrefixSuccessor,
-    );
-
-    if (area.timeRange.end === OPEN_END) {
+    if (range.timeRange.end === OPEN_END) {
       return {
         lowerBound: this.encodeKey(
           1,
-          encodedSubspace,
-          encodedAreaPrefix,
-          encodedTime,
+          encSubspaceStart,
+          encPathStart,
+          encTimeStart,
         ),
-        upperBound: this.encodeKey(
-          1,
-          encodedSubspace,
-          encodedAreaPrefixSuccessor,
-        ),
+        upperBound: this.encodeKey(1, encSubspaceEnd, encPathEnd),
       };
     }
 
-    const encodedTimeEnd = bigintToBytes(area.timeRange.end);
+    const encTimeEnd = bigintToBytes(range.timeRange.end);
 
     return {
       lowerBound: this.encodeKey(
         1,
-        encodedSubspace,
-        encodedAreaPrefix,
-        encodedTime,
+        encSubspaceStart,
+        encPathStart,
+        encTimeStart,
       ),
-      upperBound: this.encodeKey(
-        1,
-        encodeddSubspaceSuccessor,
-        encodedAreaPrefixSuccessor,
-        encodedTimeEnd,
-      ),
+      upperBound: this.encodeKey(1, encSubspaceEnd, encPathEnd, encTimeEnd),
     };
   }
 
   private createPtsBounds(
-    area: Area<SubspaceId>,
+    range: Range3d<SubspaceId>,
   ): {
     lowerBound: Uint8Array | undefined;
     upperBound: Uint8Array | undefined;
   } {
-    if (area.pathPrefix.length === 0) {
+    const encPathStart = encodePathWithSeparators(range.pathRange.start);
+
+    if (range.pathRange.end === OPEN_END) {
       return {
-        lowerBound: undefined,
+        lowerBound: this.encodeKey(0, encPathStart),
         upperBound: undefined,
       };
     }
 
-    const encodedPrefix = encodePathWithSeparators(area.pathPrefix);
+    const encPathEnd = encodePathWithSeparators(range.pathRange.end);
 
-    const areaPrefixSuccessor = successorPrefix(area.pathPrefix);
-    const encodedTimeStart = bigintToBytes(area.timeRange.start);
+    const encTimeStart = bigintToBytes(range.timeRange.start);
 
-    if (!areaPrefixSuccessor) {
+    if (range.timeRange.end === OPEN_END) {
       return {
-        lowerBound: this.encodeKey(0, encodedPrefix, encodedTimeStart),
-        upperBound: undefined,
+        lowerBound: this.encodeKey(
+          0,
+          encPathStart,
+          encTimeStart,
+        ),
+        upperBound: this.encodeKey(0, encPathEnd),
       };
     }
 
-    const encodedPrefixSuccessor = encodePathWithSeparators(
-      areaPrefixSuccessor,
+    const encTimeEnd = bigintToBytes(range.timeRange.end);
+
+    const encSubspaceStart = this.subspaceScheme.encode(
+      range.subspaceRange.start,
     );
 
-    if (area.timeRange.end === OPEN_END) {
+    if (range.subspaceRange.end === OPEN_END) {
       return {
-        lowerBound: this.encodeKey(0, encodedPrefix, encodedTimeStart),
-        upperBound: encodedPrefixSuccessor,
+        lowerBound: this.encodeKey(
+          0,
+          encPathStart,
+          encTimeStart,
+          encSubspaceStart,
+        ),
+        upperBound: this.encodeKey(0, encPathEnd, encTimeEnd),
       };
     }
 
-    if (area.includedSubspaceId === ANY_SUBSPACE) {
-      return {
-        lowerBound: this.encodeKey(0, encodedPrefix, encodedTimeStart),
-        upperBound: encodedPrefixSuccessor,
-      };
-    }
-
-    const encodedSubspace = this.subspaceScheme.encode(area.includedSubspaceId);
+    const encSubspaceEnd = this.subspaceScheme.encode(range.subspaceRange.end);
 
     return {
       lowerBound: this.encodeKey(
         0,
-        encodedPrefix,
-        encodedTimeStart,
-        encodedSubspace,
+        encPathStart,
+        encTimeStart,
+        encSubspaceStart,
       ),
-      upperBound: this.encodeKey(0, encodedPrefixSuccessor),
+      upperBound: this.encodeKey(0, encPathEnd, encTimeEnd, encSubspaceEnd),
     };
   }
 
   private createTspBounds(
-    area: Area<SubspaceId>,
+    range: Range3d<SubspaceId>,
   ): {
     lowerBound: Uint8Array | undefined;
     upperBound: Uint8Array | undefined;
   } {
-    if (area.timeRange.start === BigInt(0)) {
+    const encTimeStart = bigintToBytes(range.timeRange.start);
+
+    if (range.timeRange.end === OPEN_END) {
       return {
-        lowerBound: undefined,
+        lowerBound: this.encodeKey(2, encTimeStart),
         upperBound: undefined,
       };
     }
 
-    const encodedTimeStart = bigintToBytes(area.timeRange.start);
+    const encTimeEnd = bigintToBytes(range.timeRange.end);
 
-    if (area.timeRange.end === OPEN_END) {
+    const encSubspaceStart = this.subspaceScheme.encode(
+      range.subspaceRange.start,
+    );
+
+    if (range.subspaceRange.end === OPEN_END) {
       return {
-        lowerBound: this.encodeKey(2, encodedTimeStart),
-        upperBound: undefined,
+        lowerBound: this.encodeKey(
+          2,
+          encTimeStart,
+          encSubspaceStart,
+        ),
+        upperBound: this.encodeKey(2, encTimeEnd),
       };
     }
 
-    const encodedTimeEnd = bigintToBytes(area.timeRange.end);
+    const encSubspaceEnd = this.subspaceScheme.encode(range.subspaceRange.end);
 
-    if (area.includedSubspaceId === ANY_SUBSPACE) {
+    const encPathStart = encodePathWithSeparators(range.pathRange.start);
+
+    if (range.pathRange.end === OPEN_END) {
       return {
-        lowerBound: this.encodeKey(2, encodedTimeStart),
-        upperBound: this.encodeKey(2, encodedTimeEnd),
+        lowerBound: this.encodeKey(
+          2,
+          encTimeStart,
+          encSubspaceStart,
+          encPathStart,
+        ),
+        upperBound: this.encodeKey(2, encTimeEnd, encSubspaceEnd),
       };
     }
 
-    const encodedSubspace = this.subspaceScheme.encode(area.includedSubspaceId);
-
-    const encodedPathPrefix = encodePathWithSeparators(area.pathPrefix);
+    const encPathEnd = encodePathWithSeparators(range.pathRange.end);
 
     return {
       lowerBound: this.encodeKey(
         2,
-        encodedTimeStart,
-        encodedSubspace,
-        encodedPathPrefix,
+        encTimeStart,
+        encSubspaceStart,
+        encPathStart,
       ),
-      upperBound: this.encodeKey(2, encodedTimeEnd),
+      upperBound: this.encodeKey(2, encTimeEnd, encSubspaceEnd, encPathEnd),
     };
   }
 }

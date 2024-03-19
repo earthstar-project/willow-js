@@ -1,20 +1,18 @@
 import { assert } from "https://deno.land/std@0.202.0/assert/assert.ts";
 import {
-  ANY_SUBSPACE,
-  AreaOfInterest,
   bigintToBytes,
   concat,
   encodeBase64,
   encodeEntry,
   Entry,
-  isIncludedRange,
-  isPathPrefixed,
+  isIncluded3d,
   OPEN_END,
   orderBytes,
   orderPath,
   orderTimestamp,
   Path,
   Range,
+  successorPath,
 } from "../../../../deps.ts";
 import {
   TestNamespace,
@@ -36,7 +34,7 @@ import {
 import { LengthyEntry, ProtocolParameters, QueryOrder } from "../../types.ts";
 import { MonoidRbTree } from "../summarisable_storage/monoid_rbtree.ts";
 import { encodePathWithSeparators, TripleStorage } from "./triple_storage.ts";
-import { Storage3d } from "./types.ts";
+import { RangeOfInterest, Storage3d } from "./types.ts";
 import { assertEquals } from "https://deno.land/std@0.202.0/assert/assert_equals.ts";
 import { sample } from "https://deno.land/std@0.202.0/collections/mod.ts";
 
@@ -255,7 +253,7 @@ Deno.test("Storage3d.summarise", async () => {
 
     // Create some random products using these (pull from Meadowcap)
 
-    const areaParams: AreaOfInterest<number>[] = [];
+    const rangeParams: RangeOfInterest<number>[] = [];
 
     for (let i = 0; i < 100; i++) {
       const randomCount = () => {
@@ -268,6 +266,60 @@ Deno.test("Storage3d.summarise", async () => {
         return Math.random() > 0.5
           ? BigInt(Math.floor(Math.random() * (64 - 16 + 1) + 16))
           : BigInt(0);
+      };
+
+      const randomSubspaceRange = () => {
+        const isOpen = Math.random() > 0.5;
+
+        const start = Math.floor(Math.random() * 6);
+
+        if (isOpen) {
+          return {
+            start,
+            end: OPEN_END,
+          } as Range<number>;
+        }
+
+        const end = Math.min(
+          6,
+          start + Math.floor(Math.random() * (6 - start)),
+        );
+
+        return { start, end };
+      };
+
+      const randomPathRange = () => {
+        const isOpen = Math.random() > 0.5;
+
+        const start = randomPath();
+
+        if (isOpen) {
+          return {
+            start,
+            end: OPEN_END,
+          } as Range<Path>;
+        }
+
+        let end = successorPath(start, testSchemePath);
+
+        const iterations = Math.floor(Math.random() * 100);
+
+        for (let i = 0; i < iterations; i++) {
+          if (end === null) {
+            break;
+          }
+
+          end = successorPath(end, testSchemePath);
+        }
+
+        if (end === null) {
+          return {
+            start,
+            end: OPEN_END,
+          } as Range<Path>;
+        }
+
+        return { start, end };
       };
 
       const randomTimeRange = () => {
@@ -287,10 +339,10 @@ Deno.test("Storage3d.summarise", async () => {
         return { start, end };
       };
 
-      areaParams.push({
-        area: {
-          includedSubspaceId: randomSubspace(),
-          pathPrefix: randomPath(),
+      rangeParams.push({
+        range: {
+          pathRange: randomPathRange(),
+          subspaceRange: randomSubspaceRange(),
           timeRange: randomTimeRange(),
         },
         maxCount: randomCount(),
@@ -299,42 +351,31 @@ Deno.test("Storage3d.summarise", async () => {
     }
 
     // A function which returns all the areas a given spt is included by
-    const isIncludedByAreas = (
+    const isIncludedByRanges = (
       subspace: number,
       path: Path,
       time: bigint,
-    ): AreaOfInterest<number>[] => {
-      const inclusiveAreas: AreaOfInterest<number>[] = [];
+    ): RangeOfInterest<number>[] => {
+      const inclusiveRanges: RangeOfInterest<number>[] = [];
 
-      for (const aoi of areaParams) {
+      for (const roi of rangeParams) {
         if (
-          aoi.area.includedSubspaceId !== ANY_SUBSPACE &&
-          aoi.area.includedSubspaceId !== subspace
+          isIncluded3d(testSchemeSubspace.order, roi.range, {
+            path,
+            subspace,
+            time,
+          })
         ) {
-          continue;
+          inclusiveRanges.push(roi);
         }
-
-        if (
-          isPathPrefixed(aoi.area.pathPrefix, path) === false
-        ) {
-          continue;
-        }
-
-        if (
-          isIncludedRange(orderTimestamp, aoi.area.timeRange, time) === false
-        ) {
-          continue;
-        }
-
-        inclusiveAreas.push(aoi);
       }
 
-      return inclusiveAreas;
+      return inclusiveRanges;
     };
 
     // Define expected fingerprint map
     const actualFingerprintMap = new Map<
-      AreaOfInterest<number>,
+      RangeOfInterest<number>,
       {
         fingerprint: [number, Path, bigint, bigint][];
         count: number;
@@ -342,8 +383,8 @@ Deno.test("Storage3d.summarise", async () => {
       }
     >();
 
-    for (const areaOfInterest of areaParams) {
-      actualFingerprintMap.set(areaOfInterest, {
+    for (const rangeOfInterest of rangeParams) {
+      actualFingerprintMap.set(rangeOfInterest, {
         fingerprint: specialFingerprintScheme.neutral,
         count: 0,
         size: BigInt(0),
@@ -427,7 +468,7 @@ Deno.test("Storage3d.summarise", async () => {
     });
 
     for (const entry of entries) {
-      const includedBy = isIncludedByAreas(
+      const includedBy = isIncludedByRanges(
         entry.subspaceId,
         entry.path,
         entry.timestamp,
@@ -468,7 +509,7 @@ Deno.test("Storage3d.summarise", async () => {
     }
 
     // For all products, see if fingerprint matches the expected one.
-    for (const aoi of areaParams) {
+    for (const aoi of rangeParams) {
       const actual = await storage.summarise(aoi);
       const expected = actualFingerprintMap.get(aoi)!;
 
@@ -542,7 +583,7 @@ Deno.test("Storage3d.query", async (test) => {
       // Generate the test queries
 
       const queryParams: {
-        aoi: AreaOfInterest<TestSubspace>;
+        range: RangeOfInterest<TestSubspace>;
         order: QueryOrder;
         reverse: boolean;
       }[] = [];
@@ -594,13 +635,67 @@ Deno.test("Storage3d.query", async (test) => {
           return { start, end };
         };
 
+        const randomSubspaceRange = () => {
+          const isOpen = Math.random() > 0.5;
+
+          const start = Math.floor(Math.random() * 6);
+
+          if (isOpen) {
+            return {
+              start,
+              end: OPEN_END,
+            } as Range<number>;
+          }
+
+          const end = Math.min(
+            6,
+            start + Math.floor(Math.random() * (6 - start)),
+          );
+
+          return { start, end };
+        };
+
+        const randomPathRange = () => {
+          const isOpen = Math.random() > 0.5;
+
+          const start = randomPath();
+
+          if (isOpen) {
+            return {
+              start,
+              end: OPEN_END,
+            } as Range<Path>;
+          }
+
+          let end = successorPath(start, testSchemePath);
+
+          const iterations = Math.floor(Math.random() * 100);
+
+          for (let i = 0; i < iterations; i++) {
+            if (end === null) {
+              break;
+            }
+
+            end = successorPath(end, testSchemePath);
+          }
+
+          if (end === null) {
+            return {
+              start,
+              end: OPEN_END,
+            } as Range<Path>;
+          }
+
+          return { start, end };
+        };
+
         const orderRoll = Math.random();
 
         queryParams.push({
-          aoi: {
-            area: {
-              includedSubspaceId: sample(ALL_SUBSPACES)!,
-              pathPrefix: randomPath(),
+          range: {
+            range: {
+              pathRange: randomPathRange(),
+              subspaceRange: randomSubspaceRange(),
               timeRange: randomTimeRange(),
             },
             maxCount: randomCount(),
@@ -616,50 +711,38 @@ Deno.test("Storage3d.query", async (test) => {
       }
 
       // A function which returns all the areas a given spt is included by
-      const isIncludedByAreas = (
+      const isIncludedByRanges = (
         subspace: TestSubspace,
         path: Path,
         time: bigint,
       ): {
-        aoi: AreaOfInterest<TestSubspace>;
+        range: RangeOfInterest<TestSubspace>;
         order: QueryOrder;
         reverse: boolean;
       }[] => {
         const inclusiveParams: {
-          aoi: AreaOfInterest<TestSubspace>;
+          range: RangeOfInterest<TestSubspace>;
           order: QueryOrder;
           reverse: boolean;
         }[] = [];
 
         for (const params of queryParams) {
           if (
-            params.aoi.area.includedSubspaceId !== ANY_SUBSPACE &&
-            params.aoi.area.includedSubspaceId !== subspace
+            isIncluded3d(testSchemeSubspace.order, params.range.range, {
+              path,
+              subspace,
+              time,
+            })
           ) {
-            continue;
+            inclusiveParams.push(params);
           }
-
-          if (
-            isPathPrefixed(params.aoi.area.pathPrefix, path) === false
-          ) {
-            continue;
-          }
-
-          if (
-            isIncludedRange(orderTimestamp, params.aoi.area.timeRange, time) ===
-              false
-          ) {
-            continue;
-          }
-
-          inclusiveParams.push(params);
         }
 
         return inclusiveParams;
       };
 
       const actualResultMap = new Map<{
-        aoi: AreaOfInterest<TestSubspace>;
+        range: RangeOfInterest<TestSubspace>;
         order: QueryOrder;
         reverse: boolean;
       }, Set<string>>();
@@ -711,7 +794,7 @@ Deno.test("Storage3d.query", async (test) => {
         }
 
         // See if it belongs to any of the test queries.
-        const correspondingQueries = isIncludedByAreas(
+        const correspondingQueries = isIncludedByRanges(
           chosenSubspace,
           path,
           timestamp,
@@ -807,7 +890,7 @@ Deno.test("Storage3d.query", async (test) => {
 
         for await (
           const { entry, authTokenHash } of storage.query(
-            params.aoi,
+            params.range,
             params.order,
             params.reverse,
           )
@@ -839,20 +922,20 @@ Deno.test("Storage3d.query", async (test) => {
 
           awaiting.delete(b64EntryHash);
 
-          if (params.aoi.maxCount && entriesRead > params.aoi.maxCount) {
+          if (params.range.maxCount && entriesRead > params.range.maxCount) {
             assert(false, "Too many entries received for query");
           }
         }
 
-        if (params.aoi.maxCount !== 0) {
-          assert(entriesRead <= params.aoi.maxCount);
+        if (params.range.maxCount !== 0) {
+          assert(entriesRead <= params.range.maxCount);
         }
 
-        if (params.aoi.maxSize !== BigInt(0)) {
-          assert(entriesRead * 4 <= params.aoi.maxSize);
+        if (params.range.maxSize !== BigInt(0)) {
+          assert(entriesRead * 4 <= params.range.maxSize);
         }
 
-        if (params.aoi.maxCount === 0 && params.aoi.maxSize === BigInt(0)) {
+        if (params.range.maxCount === 0 && params.range.maxSize === BigInt(0)) {
           assertEquals(entriesRead, actualResultMap.get(params)!.size);
         }
       }

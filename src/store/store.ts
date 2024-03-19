@@ -18,12 +18,14 @@ import {
 } from "./events.ts";
 import {
   AreaOfInterest,
+  areaTo3dRange,
   bigintToBytes,
   deferred,
   Entry,
   OPEN_END,
   orderPath,
   Path,
+  successorPrefix,
 } from "../../deps.ts";
 import { Storage3d } from "./storage/storage_3d/types.ts";
 import { WillowError } from "../errors.ts";
@@ -270,10 +272,18 @@ export class Store<
     for await (
       const { entry: otherEntry } of this.storage.query(
         {
-          area: {
-            pathPrefix: entry.path,
-
-            includedSubspaceId: entry.subspaceId,
+          range: {
+            pathRange: {
+              start: entry.path,
+              end: successorPrefix(entry.path) ||
+                OPEN_END,
+            },
+            subspaceRange: {
+              start: entry.subspaceId,
+              end: this.protocolParams.subspaceScheme.successor(
+                entry.subspaceId,
+              ) || OPEN_END,
+            },
             timeRange: {
               start: BigInt(0),
               end: OPEN_END,
@@ -576,7 +586,19 @@ export class Store<
   > {
     for await (
       const { entry, authTokenHash } of this.storage.query(
-        areaOfInterest,
+        {
+          range: areaTo3dRange({
+            maxComponentCount: this.protocolParams.pathScheme.maxComponentCount,
+            maxPathComponentLength:
+              this.protocolParams.pathScheme.maxComponentLength,
+            maxPathLength: this.protocolParams.pathScheme.maxPathLength,
+            minimalSubspace:
+              this.protocolParams.subspaceScheme.minimalSubspaceId,
+            successorSubspace: this.protocolParams.subspaceScheme.successor,
+          }, areaOfInterest.area),
+          maxCount: areaOfInterest.maxCount,
+          maxSize: areaOfInterest.maxSize,
+        },
         order,
         reverse,
       )

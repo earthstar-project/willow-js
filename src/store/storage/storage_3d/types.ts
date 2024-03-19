@@ -1,5 +1,11 @@
-import { AreaOfInterest, Entry, Path } from "../../../../deps.ts";
+import { Entry, Path, Range3d } from "../../../../deps.ts";
 import { QueryOrder } from "../../types.ts";
+
+export type RangeOfInterest<SubspaceId> = {
+  range: Range3d<SubspaceId>;
+  maxCount: number;
+  maxSize: bigint;
+};
 
 export interface Storage3d<
   NamespaceId,
@@ -38,13 +44,13 @@ export interface Storage3d<
 
   // Used during sync
   summarise(
-    areaOfInterest: AreaOfInterest<SubspaceId>,
+    rangeOfInterest: RangeOfInterest<SubspaceId>,
   ): Promise<{ fingerprint: Fingerprint; size: number }>;
 
   // Used to fetch entries for transfer during sync.
   // All three dimensions are defined
   query(
-    areaOfInterest: AreaOfInterest<SubspaceId>,
+    rangeOfInterest: RangeOfInterest<SubspaceId>,
     order: QueryOrder,
     reverse?: boolean,
   ): AsyncIterable<
