@@ -1,4 +1,6 @@
 import {
+  AreaOfInterest,
+  areaTo3dRange,
   bigintToBytes,
   concat,
   EncodingScheme,
@@ -22,6 +24,8 @@ import {
 import { LiftingMonoid } from "../summarisable_storage/lifting_monoid.ts";
 import { SummarisableStorage } from "../summarisable_storage/types.ts";
 import { RangeOfInterest, Storage3d } from "./types.ts";
+import { WillowError } from "../../../errors.ts";
+import { delay } from "https://deno.land/std@0.202.0/async/delay.ts";
 
 export type TripleStorageOpts<
   NamespaceId,
@@ -228,30 +232,17 @@ export class TripleStorage<
   }
 
   async summarise(
-    rangeOfInterest: RangeOfInterest<SubspaceId>,
+    range: Range3d<SubspaceId>,
   ): Promise<{ fingerprint: Fingerprint; size: number }> {
     let fingerprint = this.fingerprintScheme.neutral;
     /** The size of the fingerprint. */
     let size = 0;
 
-    let countUsed = 0;
-    let sizeUsed = BigInt(0);
+    const { lowerBound, upperBound } = this.createTspBounds(range);
 
-    // Iterate through all the entries of each range.
-    const subspaceEntriesLowerBound = rangeOfInterest.range.subspaceRange.start;
-
-    const subspaceEntriesUpperBound =
-      rangeOfInterest.range.subspaceRange.end === OPEN_END
-        ? undefined
-        : rangeOfInterest.range.subspaceRange.end;
-
-    const subspaceEntries = this.sptStorage.entries(
-      subspaceEntriesLowerBound
-        ? this.subspaceScheme.encode(subspaceEntriesLowerBound)
-        : undefined,
-      subspaceEntriesUpperBound
-        ? this.subspaceScheme.encode(subspaceEntriesUpperBound)
-        : undefined,
+    const timeEntries = this.tspStorage.entries(
+      lowerBound,
+      upperBound,
       {
         reverse: true,
       },
@@ -260,11 +251,8 @@ export class TripleStorage<
     /** The least excluded item we've run into.
      * This is going to be the upper bound of a summarise op we run when we detect a contiguous range of included entries.
      */
-    let leastExcluded = this.subspaceScheme.encode(
-      subspaceEntriesUpperBound
-        ? subspaceEntriesUpperBound
-        : this.subspaceScheme.minimalSubspaceId,
-    );
+    let leastExcluded = upperBound ||
+      this.encodeKey(1, bigintToBytes(BigInt(0)));
 
     /** The least included item we've run into.
      * This is going to be the lower bound of a summarise op we run when we detect a contiguous range of included entries.
@@ -274,7 +262,7 @@ export class TripleStorage<
     /** Run this when we detect a contiguous range of included entries. */
     const updateFingerprint = async (start: Uint8Array) => {
       const { fingerprint: includedFp, size: includedSize } = await this
-        .sptStorage.summarise(
+        .tspStorage.summarise(
           start,
           leastExcluded,
         );
@@ -290,23 +278,17 @@ export class TripleStorage<
       leastIncluded = undefined;
     };
 
-    for await (const subspaceEntry of subspaceEntries) {
-      // Decode the key.
-      const values = decodeKvValue(
-        subspaceEntry.value,
-        this.payloadScheme,
-      );
-
+    for await (const entry of timeEntries) {
       // Decode the key.
       const { timestamp, path, subspace } = decodeEntryKey(
-        subspaceEntry.key,
-        "subspace",
+        entry.key,
+        "timestamp",
         this.subspaceScheme,
       );
 
       const isIncluded = isIncluded3d(
         this.subspaceScheme.order,
-        rangeOfInterest.range,
+        range,
         {
           path,
           time: timestamp,
@@ -323,7 +305,89 @@ export class TripleStorage<
         }
 
         // This entry is now the least excluded entry we've run into.
-        leastExcluded = subspaceEntry.key;
+        leastExcluded = entry.key;
+        continue;
+      }
+
+      // Now we know this entry is included.
+
+      // This entry is part of a contiguous range of included entries,
+      // and it's the least included key we've encountered so far.
+      leastIncluded = entry.key;
+    }
+
+    // Calculate a range that was left over, if any.
+    if (leastIncluded) {
+      await updateFingerprint(leastIncluded);
+    }
+
+    return {
+      fingerprint,
+      size,
+    };
+  }
+
+  async removeInterest(
+    areaOfInterest: AreaOfInterest<SubspaceId>,
+  ): Promise<Range3d<SubspaceId>> {
+    const range = areaTo3dRange({
+      maxComponentCount: this.pathScheme.maxComponentCount,
+      maxPathComponentLength: this.pathScheme.maxComponentLength,
+      maxPathLength: this.pathScheme.maxPathLength,
+      minimalSubspace: this.subspaceScheme.minimalSubspaceId,
+      successorSubspace: this.subspaceScheme.successor,
+    }, areaOfInterest.area);
+
+    if (areaOfInterest.maxCount === 0 && areaOfInterest.maxSize === BigInt(0)) {
+      return range;
+    }
+
+    let countUsed = 0;
+    let sizeUsed = BigInt(0);
+
+    const { lowerBound, upperBound } = this.createTspBounds(range);
+
+    let lowerBoundTime;
+    let lowerBoundSubspace;
+    let lowerBoundPath;
+
+    let upperboundTime;
+    let upperboundSubspace;
+    let upperboundPath;
+
+    const timeEntries = this.tspStorage.entries(
+      lowerBound,
+      upperBound,
+      {
+        reverse: true,
+      },
+    );
+
+    for await (const entry of timeEntries) {
+      // Decode the key.
+      const values = decodeKvValue(
+        entry.value,
+        this.payloadScheme,
+      );
+
+      // Decode the key.
+      const { timestamp, path, subspace } = decodeEntryKey(
+        entry.key,
+        "timestamp",
+        this.subspaceScheme,
+      );
+
+      const isIncluded = isIncluded3d(
+        this.subspaceScheme.order,
+        range,
+        {
+          path,
+          time: timestamp,
+          subspace,
+        },
+      );
+
+      if (!isIncluded) {
         continue;
       }
 
@@ -338,10 +402,10 @@ export class TripleStorage<
       const nextSizeUsed = sizeUsed + values.payloadLength;
 
       if (
-        (rangeOfInterest.maxCount !== 0 &&
-          nextCountUsed > rangeOfInterest.maxCount) ||
-        (rangeOfInterest.maxSize !== BigInt(0) &&
-          nextSizeUsed > rangeOfInterest.maxSize)
+        (areaOfInterest.maxCount !== 0 &&
+          nextCountUsed > areaOfInterest.maxCount) ||
+        (areaOfInterest.maxSize !== BigInt(0) &&
+          nextSizeUsed > areaOfInterest.maxSize)
       ) {
         break;
       }
@@ -349,19 +413,57 @@ export class TripleStorage<
       countUsed = nextCountUsed;
       sizeUsed = nextSizeUsed;
 
-      // This entry is part of a contiguous range of included entries,
-      // and it's the least included key we've encountered so far.
-      leastIncluded = subspaceEntry.key;
-    }
+      if (!upperboundTime || timestamp > upperboundTime) {
+        if (timestamp === BigInt(2 ** 64 - 1)) {
+          // TODO: account for the largest possible bigint.
+          //upperboundTime = OPEN_END;
+        } else {
+          upperboundTime = timestamp + BigInt(1);
+        }
+      }
 
-    // Calculate a range that was left over, if any.
-    if (leastIncluded) {
-      await updateFingerprint(leastIncluded);
+      if (
+        !upperboundSubspace ||
+        this.subspaceScheme.order(subspace, upperboundSubspace) === 1
+      ) {
+        upperboundSubspace = this.subspaceScheme.successor(subspace);
+      }
+
+      if (!upperboundPath || orderPath(path, upperboundPath) === 1) {
+        upperboundPath = successorPath(path, this.pathScheme);
+      }
+
+      if (!lowerBoundTime || timestamp < lowerBoundTime) {
+        lowerBoundTime = timestamp;
+      }
+
+      if (
+        !lowerBoundSubspace ||
+        this.subspaceScheme.order(subspace, lowerBoundSubspace) === -1
+      ) {
+        lowerBoundSubspace = subspace;
+      }
+
+      if (
+        !lowerBoundPath || orderPath(path, lowerBoundPath) === -1
+      ) {
+        lowerBoundPath = path;
+      }
     }
 
     return {
-      fingerprint,
-      size,
+      subspaceRange: {
+        start: lowerBoundSubspace || range.subspaceRange.start,
+        end: upperboundSubspace || range.subspaceRange.end,
+      },
+      pathRange: {
+        start: lowerBoundPath || range.pathRange.start,
+        end: upperboundPath || range.pathRange.end,
+      },
+      timeRange: {
+        start: lowerBoundTime || range.timeRange.start,
+        end: upperboundTime || range.timeRange.end,
+      },
     };
   }
 
@@ -486,6 +588,124 @@ export class TripleStorage<
         break;
       }
     }
+  }
+
+  async splitRange(
+    range: Range3d<SubspaceId>,
+    knownSize: number,
+  ): Promise<[Range3d<SubspaceId>, Range3d<SubspaceId>]> {
+    if (knownSize < 2) {
+      throw new WillowError(
+        "Tried to split a range which doesn't need splitting",
+      );
+    }
+
+    let low = range.timeRange.start;
+    let high = BigInt(2 ** 64 - 1);
+    let mid = BigInt(0);
+
+    if (range.timeRange.end === OPEN_END) {
+      for await (
+        const greatest of this.query(
+          {
+            range,
+            maxCount: 0,
+            maxSize: BigInt(0),
+          },
+          "timestamp",
+          true,
+        )
+      ) {
+        high = greatest.entry.timestamp;
+        break;
+      }
+    } else {
+      high = range.timeRange.end;
+    }
+
+    let amIHappy = false;
+
+    while (low < high) {
+      if (low === high) {
+        // TODO: Screw you and your unrealistic data set.
+        // OR: Split along the other dimensions
+        break;
+      }
+
+      mid = (high + low) / BigInt(2);
+
+      const { size: sizeLowToMid } = await this.summarise(
+        {
+          ...range,
+          timeRange: {
+            start: range.timeRange.start,
+            end: mid,
+          },
+        },
+      );
+
+      const quality = sizeLowToMid / knownSize;
+
+      if (quality > 0.3333 && quality <= 0.6666) {
+        amIHappy = true;
+        break;
+      }
+
+      if (quality <= 0.5) {
+        low = mid;
+      } else {
+        high = mid;
+      }
+
+      // await delay(1000);
+    }
+
+    if (amIHappy) {
+      return [
+        {
+          ...range,
+          timeRange: {
+            start: range.timeRange.start,
+            end: mid,
+          },
+        },
+        {
+          ...range,
+          timeRange: {
+            start: mid,
+            end: range.timeRange.end,
+          },
+        },
+      ];
+    }
+
+    return [
+      {
+        ...range,
+        timeRange: {
+          start: range.timeRange.start,
+          end: mid,
+        },
+      },
+      {
+        ...range,
+        timeRange: {
+          start: mid,
+          end: range.timeRange.end,
+        },
+      },
+    ];
+
+    // Search along path
+
+    // Am I happy? No?
+
+    // Search along subspace.
+
+    // do not split range of interest, just a range
+    // when you get a (non trivial) range of interest -> range and split it.
+    // to do this, we query that range of interest and then use its results to create the new range.
+    // this way we won't exceed their limits.
   }
 
   async updateAvailablePayload(

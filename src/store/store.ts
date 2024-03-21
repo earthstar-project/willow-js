@@ -25,9 +25,10 @@ import {
   OPEN_END,
   orderPath,
   Path,
+  Range3d,
   successorPrefix,
 } from "../../deps.ts";
-import { Storage3d } from "./storage/storage_3d/types.ts";
+import { RangeOfInterest, Storage3d } from "./storage/storage_3d/types.ts";
 import { WillowError } from "../errors.ts";
 
 /** A local set of a particular namespace's entries to be written to, read from, and synced with other `Store`s.
@@ -601,6 +602,62 @@ export class Store<
         },
         order,
         reverse,
+      )
+    ) {
+      const payload = await this.payloadDriver.get(entry.payloadDigest);
+
+      const authTokenPayload = await this.payloadDriver.get(authTokenHash);
+
+      if (!authTokenPayload) {
+        continue;
+      }
+      const authTokenEncoded = await authTokenPayload.bytes();
+      const authToken = this.protocolParams.authorisationScheme.tokenEncoding
+        .decode(authTokenEncoded);
+
+      yield [entry, payload, authToken];
+    }
+  }
+
+  summarise(
+    range: Range3d<SubspacePublicKey>,
+  ): Promise<{ fingerprint: Fingerprint; size: number }> {
+    return this.storage.summarise(range);
+  }
+
+  splitRange(
+    range: Range3d<SubspacePublicKey>,
+    knownSize: number,
+  ): Promise<
+    [Range3d<SubspacePublicKey>, Range3d<SubspacePublicKey>]
+  > {
+    return this.storage.splitRange(range, knownSize);
+  }
+
+  areaOfInterestToRange(
+    areaOfInterest: AreaOfInterest<SubspacePublicKey>,
+  ): Promise<Range3d<SubspacePublicKey>> {
+    return this.storage.removeInterest(areaOfInterest);
+  }
+
+  async *queryRange(
+    range: Range3d<SubspacePublicKey>,
+  ): AsyncIterable<
+    [
+      Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
+      Payload | undefined,
+      AuthorisationToken,
+    ]
+  > {
+    for await (
+      const { entry, authTokenHash } of this.storage.query(
+        {
+          range: range,
+          maxCount: 0,
+          maxSize: BigInt(0),
+        },
+        "timestamp",
+        true,
       )
     ) {
       const payload = await this.payloadDriver.get(entry.payloadDigest);
