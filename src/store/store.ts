@@ -5,9 +5,9 @@ import {
   IngestEvent,
   IngestPayloadEvent,
   Payload,
-  ProtocolParameters,
   QueryOrder,
   StoreOpts,
+  StoreSchemes,
 } from "./types.ts";
 import { PayloadDriverMemory } from "./storage/payload_drivers/memory.ts";
 import {
@@ -28,7 +28,7 @@ import {
   Range3d,
   successorPrefix,
 } from "../../deps.ts";
-import { RangeOfInterest, Storage3d } from "./storage/storage_3d/types.ts";
+import { Storage3d } from "./storage/storage_3d/types.ts";
 import { WillowError } from "../errors.ts";
 
 /** A local set of a particular namespace's entries to be written to, read from, and synced with other `Store`s.
@@ -47,7 +47,7 @@ export class Store<
 > extends EventTarget {
   namespace: NamespacePublicKey;
 
-  private protocolParams: ProtocolParameters<
+  private schemes: StoreSchemes<
     NamespacePublicKey,
     SubspacePublicKey,
     PayloadDigest,
@@ -86,16 +86,16 @@ export class Store<
     super();
 
     this.namespace = opts.namespace;
-    this.protocolParams = opts.protocolParameters;
+    this.schemes = opts.schemes;
 
     const payloadDriver = opts.payloadDriver ||
-      new PayloadDriverMemory(opts.protocolParameters.payloadScheme);
+      new PayloadDriverMemory(opts.schemes.payload);
 
     const entryDriver = opts.entryDriver || new EntryDriverMemory({
-      pathScheme: opts.protocolParameters.pathScheme,
-      payloadScheme: opts.protocolParameters.payloadScheme,
-      subspaceScheme: opts.protocolParameters.subspaceScheme,
-      fingerprintScheme: opts.protocolParameters.fingerprintScheme,
+      pathScheme: opts.schemes.path,
+      payloadScheme: opts.schemes.payload,
+      subspaceScheme: opts.schemes.subspace,
+      fingerprintScheme: opts.schemes.fingerprint,
       getPayloadLength: (digest) => {
         return this.payloadDriver.length(digest);
       },
@@ -121,7 +121,7 @@ export class Store<
       );
 
       if (encodedAuthToken) {
-        const decodedToken = this.protocolParams.authorisationScheme
+        const decodedToken = this.schemes.authorisation
           .tokenEncoding.decode(await encodedAuthToken?.bytes());
 
         await this.insertEntry({
@@ -171,7 +171,7 @@ export class Store<
       payloadDigest: digest,
     };
 
-    const authToken = await this.protocolParams.authorisationScheme.authorise(
+    const authToken = await this.schemes.authorisation.authorise(
       entry,
       authorisation,
     );
@@ -220,7 +220,7 @@ export class Store<
 
     // Check if the entry belongs to this namespace.
     if (
-      !this.protocolParams.namespaceScheme.isEqual(
+      !this.schemes.namespace.isEqual(
         this.namespace,
         entry.namespaceId,
       )
@@ -234,7 +234,7 @@ export class Store<
     }
 
     if (
-      await this.protocolParams.authorisationScheme.isAuthorisedWrite(
+      await this.schemes.authorisation.isAuthorisedWrite(
         entry,
         authorisation,
       ) === false
@@ -248,7 +248,7 @@ export class Store<
     }
 
     const subspacePath = [
-      this.protocolParams.subspaceScheme.encode(entry.subspaceId),
+      this.schemes.subspace.encode(entry.subspaceId),
       ...entry.path,
     ];
 
@@ -281,7 +281,7 @@ export class Store<
             },
             subspaceRange: {
               start: entry.subspaceId,
-              end: this.protocolParams.subspaceScheme.successor(
+              end: this.schemes.subspace.successor(
                 entry.subspaceId,
               ) || OPEN_END,
             },
@@ -313,7 +313,7 @@ export class Store<
         };
       }
 
-      const payloadDigestOrder = this.protocolParams.payloadScheme.order(
+      const payloadDigestOrder = this.schemes.payload.order(
         entry.payloadDigest,
         otherEntry.payloadDigest,
       );
@@ -346,7 +346,7 @@ export class Store<
       await this.storage.remove(otherEntry);
 
       const toRemovePrefixPath = [
-        this.protocolParams.subspaceScheme.encode(
+        this.schemes.subspace.encode(
           otherEntry.subspaceId,
         ),
         ...otherEntry.path,
@@ -401,7 +401,7 @@ export class Store<
       authToken: AuthorisationToken;
     },
   ) {
-    const encodedToken = this.protocolParams.authorisationScheme
+    const encodedToken = this.schemes.authorisation
       .tokenEncoding.encode(authToken);
 
     const { digest } = await this.payloadDriver.set(encodedToken);
@@ -416,7 +416,7 @@ export class Store<
     }, digest);
 
     const prefixKey = [
-      this.protocolParams.subspaceScheme.encode(subspace),
+      this.schemes.subspace.encode(subspace),
       ...path,
     ];
 
@@ -450,7 +450,7 @@ export class Store<
       const [prefixedBySubspace, ...prefixedByPath] = prefixedBySubspacePath;
 
       if (prefixTimestamp < timestamp) {
-        const subspace = this.protocolParams.subspaceScheme.decode(
+        const subspace = this.schemes.subspace.decode(
           prefixedBySubspace,
         );
 
@@ -535,7 +535,7 @@ export class Store<
     if (
       result.length > entry.payloadLength ||
       (result.length === entry.payloadLength &&
-        this.protocolParams.payloadScheme.order(
+        this.schemes.payload.order(
             result.digest,
             entry.payloadDigest,
           ) !== 0)
@@ -548,7 +548,7 @@ export class Store<
 
     if (
       result.length === entry.payloadLength &&
-      this.protocolParams.payloadScheme.order(
+      this.schemes.payload.order(
           result.digest,
           entry.payloadDigest,
         ) === 0
@@ -589,13 +589,11 @@ export class Store<
       const { entry, authTokenHash } of this.storage.query(
         {
           range: areaTo3dRange({
-            maxComponentCount: this.protocolParams.pathScheme.maxComponentCount,
-            maxPathComponentLength:
-              this.protocolParams.pathScheme.maxComponentLength,
-            maxPathLength: this.protocolParams.pathScheme.maxPathLength,
-            minimalSubspace:
-              this.protocolParams.subspaceScheme.minimalSubspaceId,
-            successorSubspace: this.protocolParams.subspaceScheme.successor,
+            maxComponentCount: this.schemes.path.maxComponentCount,
+            maxPathComponentLength: this.schemes.path.maxComponentLength,
+            maxPathLength: this.schemes.path.maxPathLength,
+            minimalSubspace: this.schemes.subspace.minimalSubspaceId,
+            successorSubspace: this.schemes.subspace.successor,
           }, areaOfInterest.area),
           maxCount: areaOfInterest.maxCount,
           maxSize: areaOfInterest.maxSize,
@@ -612,7 +610,7 @@ export class Store<
         continue;
       }
       const authTokenEncoded = await authTokenPayload.bytes();
-      const authToken = this.protocolParams.authorisationScheme.tokenEncoding
+      const authToken = this.schemes.authorisation.tokenEncoding
         .decode(authTokenEncoded);
 
       yield [entry, payload, authToken];
@@ -668,7 +666,7 @@ export class Store<
         continue;
       }
       const authTokenEncoded = await authTokenPayload.bytes();
-      const authToken = this.protocolParams.authorisationScheme.tokenEncoding
+      const authToken = this.schemes.authorisation.tokenEncoding
         .decode(authTokenEncoded);
 
       yield [entry, payload, authToken];

@@ -4,9 +4,16 @@ import {
   EncodingScheme,
   PathScheme,
   PrivyEncodingScheme,
+  Range3d,
   SignatureScheme,
 } from "../../deps.ts";
-import { NamespaceScheme, SubspaceScheme } from "../store/types.ts";
+import {
+  AuthorisationScheme,
+  FingerprintScheme,
+  NamespaceScheme,
+  PayloadScheme,
+  SubspaceScheme,
+} from "../store/types.ts";
 import { PaiScheme } from "./pai/types.ts";
 
 /** The peer which initiated the synchronisation session. */
@@ -56,6 +63,8 @@ export enum HandleType {
 // Channels
 
 export enum LogicalChannel {
+  /** Logical channel for performing 3d range-based set reconciliation. */
+  ReconciliationChannel,
   /** Logical channel for controlling the binding of new IntersectionHandles. */
   IntersectionChannel,
   /** Logical channel for controlling the binding of new CapabilityHandles. */
@@ -240,18 +249,39 @@ export type SetupMessage<
   | MsgSetupBindAreaOfInterest<SubspaceId>
   | MsgSetupBindStaticToken<StaticToken>;
 
+export const MSG_RECONCILIATION_SEND_FINGERPRINT = Symbol(
+  "msg_reconciliation_send_fingerprint",
+);
+/** Send a Fingerprint as part of 3d range-based set reconciliation. */
+export type MsgReconciliationSendFingerprint<SubspaceId, Fingerprint> = {
+  kind: typeof MSG_RECONCILIATION_SEND_FINGERPRINT;
+  /** The 3dRange whose Fingerprint is transmitted. */
+  range: Range3d<SubspaceId>;
+  /** The Fingerprint of the range, that is, of all LengthyEntries the peer has in the range. */
+  fingerprint: Fingerprint;
+  /** An AreaOfInterestHandle, bound by the sender of this message, that fully contains the range. */
+  senderHandle: bigint;
+  /** An AreaOfInterestHandle, bound by the receiver of this message, that fully contains the range. */
+  receiverHandle: bigint;
+};
+
+export type ReconciliationMessage<SubspaceId, Fingerprint> =
+  MsgReconciliationSendFingerprint<SubspaceId, Fingerprint>;
+
 export type SyncMessage<
   ReadCapability,
   SyncSignature,
   PsiGroup,
   SubspaceCapability,
   SyncSubspaceSignature,
+  Fingerprint,
   StaticToken,
   SubspaceId,
 > =
   | ControlMessage
   | IntersectionMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature>
-  | SetupMessage<ReadCapability, SyncSignature, StaticToken, SubspaceId>;
+  | SetupMessage<ReadCapability, SyncSignature, StaticToken, SubspaceId>
+  | ReconciliationMessage<SubspaceId, Fingerprint>;
 
 // Encodings
 
@@ -266,27 +296,10 @@ export type ReadCapEncodingScheme<ReadCapability, NamespaceId, SubspaceId> =
     ReadCapPrivy<NamespaceId, SubspaceId>
   >;
 
-export type SyncEncodings<
-  ReadCapability,
-  SyncSignature,
-  PsiGroup,
-  SubspaceCapability,
-  SyncSubspaceSignature,
-  StaticToken,
-  NamespaceId,
-  SubspaceId,
-> = {
-  readCapability: ReadCapEncodingScheme<
-    ReadCapability,
-    NamespaceId,
-    SubspaceId
-  >;
-  syncSignature: EncodingScheme<SyncSignature>;
-  groupMember: EncodingScheme<PsiGroup>;
-  subspaceCapability: EncodingScheme<SubspaceCapability>;
-  syncSubspaceSignature: EncodingScheme<SyncSubspaceSignature>;
-  subspace: EncodingScheme<SubspaceId>;
-  staticToken: EncodingScheme<StaticToken>;
+export type ReconciliationPrivy<SubspaceId> = {
+  previousSenderHandle: bigint;
+  previousReceiverHandle: bigint;
+  previousRange: Range3d<SubspaceId>;
 };
 
 export type SyncSchemes<
@@ -300,9 +313,13 @@ export type SyncSchemes<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Fingerprint,
+  AuthorisationToken,
   StaticToken,
   NamespaceId,
   SubspaceId,
+  PayloadDigest,
+  AuthorisationOpts,
 > = {
   accessControl: AccessControlScheme<
     ReadCapability,
@@ -330,6 +347,20 @@ export type SyncSchemes<
   subspace: SubspaceScheme<SubspaceId>;
   path: PathScheme;
   authorisationToken: AuthorisationTokenScheme<StaticToken>;
+  authorisation: AuthorisationScheme<
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts,
+    AuthorisationToken
+  >;
+  payload: PayloadScheme<PayloadDigest>;
+  fingerprint: FingerprintScheme<
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest,
+    Fingerprint
+  >;
 };
 
 export type AccessControlScheme<
@@ -343,6 +374,7 @@ export type AccessControlScheme<
   getReceiver: (cap: ReadCapability) => Receiver;
   getSecretKey: (receiver: Receiver) => ReceiverSecretKey;
   getGrantedArea: (cap: ReadCapability) => Area<SubspaceId>;
+  getGrantedNamespace: (cap: ReadCapability) => NamespaceId;
   signatures: SignatureScheme<Receiver, ReceiverSecretKey, SyncSignature>;
   isValidCap: (cap: ReadCapability) => Promise<boolean>;
   encodings: {

@@ -29,7 +29,6 @@ import {
   MSG_SETUP_BIND_READ_CAPABILITY,
   MSG_SETUP_BIND_STATIC_TOKEN,
   ReadAuthorisation,
-  SyncEncodings,
   SyncMessage,
   SyncSchemes,
   Transport,
@@ -38,6 +37,9 @@ import { Intersection } from "./pai/types.ts";
 import { onAsyncIterate } from "./util.ts";
 import { WillowError } from "../../mod.universal.ts";
 import { GuaranteedQueue } from "./guaranteed_queue.ts";
+import { AoiIntersectionFinder } from "./reconciliation/aoi_intersection_finder.ts";
+import { StoreDriverCallback, StoreMap } from "./store_map.ts";
+import { Reconciler } from "./reconciliation/reconciler.ts";
 
 export type WgpsMessengerOpts<
   ReadCapability,
@@ -50,9 +52,13 @@ export type WgpsMessengerOpts<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Fingerprint,
+  AuthorisationToken,
   StaticToken,
   NamespaceId,
   SubspaceId,
+  PayloadDigest,
+  AuthorisationOpts,
 > = {
   transport: Transport;
 
@@ -77,9 +83,13 @@ export type WgpsMessengerOpts<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    Fingerprint,
+    AuthorisationToken,
     StaticToken,
     NamespaceId,
-    SubspaceId
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts
   >;
 
   interests: Map<
@@ -88,6 +98,13 @@ export type WgpsMessengerOpts<
       SubspaceCapability
     >,
     AreaOfInterest<SubspaceId>[]
+  >;
+
+  getStoreDrivers: StoreDriverCallback<
+    Fingerprint,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest
   >;
 };
 
@@ -103,9 +120,13 @@ export class WgpsMessenger<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Fingerprint,
+  AuthorisationToken,
   StaticToken,
   NamespaceId,
   SubspaceId,
+  PayloadDigest,
+  AuthorisationOpts,
 > {
   private interests: Map<
     ReadAuthorisation<
@@ -154,9 +175,13 @@ export class WgpsMessenger<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    Fingerprint,
+    AuthorisationToken,
     StaticToken,
     NamespaceId,
-    SubspaceId
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts
   >;
 
   // Private area intersection
@@ -183,6 +208,19 @@ export class WgpsMessenger<
   private handlesStaticTokensOurs = new HandleStore<StaticToken>();
   private handlesStaticTokensTheirs = new HandleStore<StaticToken>();
 
+  // Reconciliation
+
+  private storeMap: StoreMap<
+    Fingerprint,
+    AuthorisationToken,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts
+  >;
+
+  private aoiIntersectionFinder: AoiIntersectionFinder<NamespaceId, SubspaceId>;
+
   constructor(
     opts: WgpsMessengerOpts<
       ReadCapability,
@@ -195,9 +233,13 @@ export class WgpsMessenger<
       SubspaceReceiver,
       SyncSubspaceSignature,
       SubspaceSecretKey,
+      Fingerprint,
+      AuthorisationToken,
       StaticToken,
       NamespaceId,
-      SubspaceId
+      SubspaceId,
+      PayloadDigest,
+      AuthorisationOpts
     >,
   ) {
     if (opts.maxPayloadSizePower < 0 || opts.maxPayloadSizePower > 64) {
@@ -253,28 +295,23 @@ export class WgpsMessenger<
       intersectionHandlesTheirs: this.handlesIntersectionsTheirs,
     });
 
-    const encodings: SyncEncodings<
-      ReadCapability,
-      SyncSignature,
-      PsiGroup,
-      SubspaceCapability,
-      SyncSubspaceSignature,
-      StaticToken,
-      NamespaceId,
-      SubspaceId
-    > = {
-      readCapability: opts.schemes.accessControl.encodings.readCapability,
-      syncSignature: opts.schemes.accessControl.encodings.syncSignature,
-      groupMember: opts.schemes.pai.groupMemberEncoding,
-      subspaceCapability: opts.schemes.subspaceCap.encodings.subspaceCapability,
-      syncSubspaceSignature:
-        opts.schemes.subspaceCap.encodings.syncSubspaceSignature,
-      subspace: opts.schemes.subspace,
-      staticToken: opts.schemes.authorisationToken.encodings.staticToken,
-    };
+    // Reconciliation helpers
+
+    this.storeMap = new StoreMap({
+      getStoreDrivers: opts.getStoreDrivers,
+      schemes: opts.schemes,
+    });
+
+    this.aoiIntersectionFinder = new AoiIntersectionFinder({
+      namespaceScheme: this.schemes.namespace,
+      subspaceScheme: this.schemes.subspace,
+      handlesOurs: this.handlesAoisOurs,
+      handlesTheirs: this.handlesAoisTheirs,
+    });
 
     // Send encoded messages
-    this.encoder = new MessageEncoder(encodings, opts.schemes, {
+
+    this.encoder = new MessageEncoder(opts.schemes, {
       getIntersectionPrivy: (handle) => {
         return this.paiFinder.getIntersectionPrivy(handle);
       },
@@ -433,7 +470,7 @@ export class WgpsMessenger<
 
     onAsyncIterate(
       this.paiFinder.intersections(),
-      async ({ authorisation, handle }) => {
+      async ({ namespace, authorisation, handle }) => {
         // Encode and sign the challenge using the receiver of the read cap.
         const receiver = this.schemes.accessControl.getReceiver(
           authorisation.capability,
@@ -466,7 +503,13 @@ export class WgpsMessenger<
 
         // And areas of interest.
         for (const aoi of aois) {
-          this.handlesAoisOurs.bind(aoi);
+          const handle = this.handlesAoisOurs.bind(aoi);
+
+          this.aoiIntersectionFinder.addAoiHandleForNamespace(
+            handle,
+            namespace,
+            true,
+          );
 
           this.encoder.encode({
             kind: MSG_SETUP_BIND_AREA_OF_INTEREST,
@@ -480,6 +523,50 @@ export class WgpsMessenger<
     for (const auth of authorisations) {
       this.paiFinder.submitAuthorisation(auth);
     }
+  }
+
+  private setupReconciliation() {
+    onAsyncIterate(
+      this.aoiIntersectionFinder.intersections(),
+      (intersection) => {
+        // Create a new RangeReconciler.
+
+        // It has to be mapped to the intersection handles so we can route messages properly.
+        // What's a good id that's a unique product of two bigints?
+        // Or a decent data structure...
+        const store = this.storeMap.get(intersection.namespace);
+
+        const aoiOurs = this.handlesAoisOurs.get(intersection.ours);
+
+        if (!aoiOurs) {
+          throw new WillowError("Couldn't dereference AOI handle");
+        }
+
+        const aoiTheirs = this.handlesAoisTheirs.get(intersection.theirs);
+
+        if (!aoiTheirs) {
+          throw new WillowError("Couldn't dereference AOI handle");
+        }
+
+        const reconciler = new Reconciler({
+          namespace: intersection.namespace,
+          aoiOurs,
+          aoiTheirs,
+          role: this.transport.role,
+          store,
+          subspaceScheme: this.schemes.subspace,
+          fingerprintScheme: this.schemes.fingerprint,
+        });
+
+        onAsyncIterate(reconciler.fingerprints(), ({ fingerprint, range }) => {
+          // Send a ReconciliationSendFingerprint
+        });
+
+        onAsyncIterate(reconciler.entryAnnouncements(), (announcement) => {
+          // QUEUE a ReconciliationAnnounceEntries with our singleton announceentries thing
+        });
+      },
+    );
   }
 
   private async handleMessage(
@@ -700,7 +787,17 @@ export class WgpsMessenger<
           );
         }
 
-        this.handlesAoisTheirs.bind(message.areaOfInterest);
+        const grantedNamespace = this.schemes.accessControl.getGrantedNamespace(
+          cap,
+        );
+
+        const handle = this.handlesAoisTheirs.bind(message.areaOfInterest);
+
+        this.aoiIntersectionFinder.addAoiHandleForNamespace(
+          handle,
+          grantedNamespace,
+          false,
+        );
 
         break;
       }

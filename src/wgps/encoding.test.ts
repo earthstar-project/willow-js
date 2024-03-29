@@ -16,10 +16,10 @@ import {
   MSG_PAI_REPLY_FRAGMENT,
   MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
   MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+  MSG_RECONCILIATION_SEND_FINGERPRINT,
   MSG_SETUP_BIND_AREA_OF_INTEREST,
   MSG_SETUP_BIND_READ_CAPABILITY,
   MSG_SETUP_BIND_STATIC_TOKEN,
-  SyncEncodings,
   SyncMessage,
   SyncSchemes,
 } from "./types.ts";
@@ -29,10 +29,13 @@ import {
   TestNamespace,
   TestReadCap,
   testSchemeAccessControl,
+  testSchemeAuthorisation,
   testSchemeAuthorisationToken,
+  testSchemeFingerprint,
   testSchemeNamespace,
   testSchemePai,
   testSchemePath,
+  testSchemePayload,
   testSchemeSubspace,
   testSchemeSubspaceCap,
   TestSubspace,
@@ -40,13 +43,14 @@ import {
 } from "../test/test_schemes.ts";
 import { randomPath } from "../test/utils.ts";
 import { onAsyncIterate } from "./util.ts";
-import { ANY_SUBSPACE, OPEN_END } from "../../deps.ts";
+import { ANY_SUBSPACE, OPEN_END, Range3d } from "../../deps.ts";
 
 const vectors: SyncMessage<
   TestReadCap,
   Uint8Array,
   Uint8Array,
   TestSubspaceReadCap,
+  Uint8Array,
   Uint8Array,
   TestSubspace,
   TestSubspace
@@ -330,30 +334,54 @@ const vectors: SyncMessage<
     kind: MSG_SETUP_BIND_STATIC_TOKEN,
     staticToken: TestSubspace.Epson,
   },
+
+  // Reconciliation
+
+  {
+    kind: MSG_RECONCILIATION_SEND_FINGERPRINT,
+    fingerprint: crypto.getRandomValues(new Uint8Array(32)),
+    receiverHandle: 2048n,
+    senderHandle: 500000n,
+    range: {
+      subspaceRange: {
+        start: TestSubspace.Alfie,
+        end: TestSubspace.Gemma,
+      },
+      pathRange: {
+        start: [new Uint8Array([1])],
+        end: [new Uint8Array([2])],
+      },
+      timeRange: {
+        start: 1000n,
+        end: 3500n,
+      },
+    },
+  },
+
+  {
+    kind: MSG_RECONCILIATION_SEND_FINGERPRINT,
+    fingerprint: crypto.getRandomValues(new Uint8Array(32)),
+    receiverHandle: 0n,
+    senderHandle: 0n,
+    range: {
+      subspaceRange: {
+        start: TestSubspace.Alfie,
+        end: TestSubspace.Gemma,
+      },
+      pathRange: {
+        start: [new Uint8Array([1])],
+        end: [new Uint8Array([2])],
+      },
+      timeRange: {
+        start: 1000n,
+        end: 3500n,
+      },
+    },
+  },
 ];
 
 Deno.test("Encoding roundtrip test", async () => {
   const [alfie, betty] = transportPairInMemory();
-
-  const encodings: SyncEncodings<
-    TestReadCap,
-    Uint8Array,
-    Uint8Array,
-    TestSubspaceReadCap,
-    Uint8Array,
-    TestSubspace,
-    TestNamespace,
-    TestSubspace
-  > = {
-    subspaceCapability: testSchemeSubspaceCap.encodings.subspaceCapability,
-    syncSubspaceSignature:
-      testSchemeSubspaceCap.encodings.syncSubspaceSignature,
-    groupMember: testSchemePai.groupMemberEncoding,
-    readCapability: testSchemeAccessControl.encodings.readCapability,
-    subspace: testSchemeSubspace,
-    syncSignature: testSchemeAccessControl.encodings.syncSignature,
-    staticToken: testSchemeAuthorisationToken.encodings.staticToken,
-  };
 
   const schemes: SyncSchemes<
     TestReadCap,
@@ -366,8 +394,12 @@ Deno.test("Encoding roundtrip test", async () => {
     TestSubspace,
     Uint8Array,
     TestSubspace,
+    Uint8Array,
+    Uint8Array,
     TestSubspace,
     TestNamespace,
+    TestSubspace,
+    ArrayBuffer,
     TestSubspace
   > = {
     accessControl: testSchemeAccessControl,
@@ -377,9 +409,12 @@ Deno.test("Encoding roundtrip test", async () => {
     subspace: testSchemeSubspace,
     subspaceCap: testSchemeSubspaceCap,
     authorisationToken: testSchemeAuthorisationToken,
+    payload: testSchemePayload,
+    fingerprint: testSchemeFingerprint,
+    authorisation: testSchemeAuthorisation,
   };
 
-  const msgEncoder = new MessageEncoder(encodings, schemes, {
+  const msgEncoder = new MessageEncoder(schemes, {
     getIntersectionPrivy: (handle) => {
       if (handle === BigInt(64)) {
         return {
@@ -432,6 +467,26 @@ Deno.test("Encoding roundtrip test", async () => {
         },
       };
     },
+    getReconciliationPrivy: () => {
+      return {
+        previousReceiverHandle: 0n,
+        previousSenderHandle: 0n,
+        previousRange: {
+          subspaceRange: {
+            start: 0,
+            end: OPEN_END,
+          },
+          pathRange: {
+            start: [],
+            end: OPEN_END,
+          },
+          timeRange: {
+            start: 0n,
+            end: OPEN_END,
+          },
+        } as Range3d<TestSubspace>,
+      };
+    },
   });
 
   const messages: SyncMessage<
@@ -439,6 +494,7 @@ Deno.test("Encoding roundtrip test", async () => {
     Uint8Array,
     Uint8Array,
     TestSubspaceReadCap,
+    Uint8Array,
     Uint8Array,
     TestSubspace,
     TestSubspace
@@ -452,7 +508,6 @@ Deno.test("Encoding roundtrip test", async () => {
     decodeMessages({
       transport: betty,
       challengeLength: 4,
-      encodings,
       schemes: schemes,
       getIntersectionPrivy: (handle) => {
         if (handle === BigInt(64)) {
@@ -479,6 +534,26 @@ Deno.test("Encoding roundtrip test", async () => {
               end: OPEN_END,
             },
           },
+        };
+      },
+      getReconciliationPrivy: () => {
+        return {
+          previousReceiverHandle: 0n,
+          previousSenderHandle: 0n,
+          previousRange: {
+            subspaceRange: {
+              start: 0,
+              end: OPEN_END,
+            },
+            pathRange: {
+              start: [],
+              end: OPEN_END,
+            },
+            timeRange: {
+              start: 0n,
+              end: OPEN_END,
+            },
+          } as Range3d<TestSubspace>,
         };
       },
       getCap: (handle) => {

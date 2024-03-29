@@ -411,6 +411,23 @@ export const testSchemeFingerprint: FingerprintScheme<
 
     return bytes;
   },
+  isEqual: (a, b) => {
+    return orderBytes(a, b) === 0;
+  },
+  encoding: {
+    encode: (fp) => fp,
+    decode: (encoded) => encoded.slice(0, 32),
+    encodedLength: () => 32,
+    decodeStream: async (bytes) => {
+      await bytes.nextAbsolute(32);
+
+      const fp = bytes.array.slice(0, 32);
+
+      bytes.prune(32);
+
+      return fp;
+    },
+  },
 };
 
 export const testSchemeAuthorisation: AuthorisationScheme<
@@ -564,6 +581,7 @@ export const testSchemeAccessControl: AccessControlScheme<
   TestNamespace,
   TestSubspace
 > = {
+  getGrantedNamespace: (cap) => cap.namespace,
   getGrantedArea: (cap) => {
     return {
       includedSubspaceId: cap.subspace,

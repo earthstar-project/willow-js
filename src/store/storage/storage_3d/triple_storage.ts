@@ -25,7 +25,6 @@ import { LiftingMonoid } from "../summarisable_storage/lifting_monoid.ts";
 import { SummarisableStorage } from "../summarisable_storage/types.ts";
 import { RangeOfInterest, Storage3d } from "./types.ts";
 import { WillowError } from "../../../errors.ts";
-import { delay } from "https://deno.land/std@0.202.0/async/delay.ts";
 
 export type TripleStorageOpts<
   NamespaceId,

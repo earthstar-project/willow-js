@@ -13,11 +13,12 @@ import {
   MSG_PAI_REPLY_FRAGMENT,
   MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
   MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+  MSG_RECONCILIATION_SEND_FINGERPRINT,
   MSG_SETUP_BIND_AREA_OF_INTEREST,
   MSG_SETUP_BIND_READ_CAPABILITY,
   MSG_SETUP_BIND_STATIC_TOKEN,
   ReadCapPrivy,
-  SyncEncodings,
+  ReconciliationPrivy,
   SyncMessage,
   SyncSchemes,
 } from "../types.ts";
@@ -41,6 +42,7 @@ import {
   encodeSetupBindReadCapability,
   encodeSetupBindStaticToken,
 } from "./setup.ts";
+import { encodeReconciliationSendFingerprint } from "./reconciliation.ts";
 
 export type EncodedSyncMessage = {
   channel: LogicalChannel | null;
@@ -58,23 +60,17 @@ export class MessageEncoder<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Fingerprint,
+  AuthorisationToken,
   StaticToken,
   NamespaceId,
   SubspaceId,
+  PayloadDigest,
+  AuthorisationOpts,
 > {
   private messageChannel = new FIFO<EncodedSyncMessage>();
 
   constructor(
-    readonly encodings: SyncEncodings<
-      ReadCapability,
-      SyncSignature,
-      PsiGroup,
-      SubspaceCapability,
-      SyncSubspaceSignature,
-      StaticToken,
-      NamespaceId,
-      SubspaceId
-    >,
     readonly schemes: SyncSchemes<
       ReadCapability,
       Receiver,
@@ -86,14 +82,19 @@ export class MessageEncoder<
       SubspaceReceiver,
       SyncSubspaceSignature,
       SubspaceSecretKey,
+      Fingerprint,
+      AuthorisationToken,
       StaticToken,
       NamespaceId,
-      SubspaceId
+      SubspaceId,
+      PayloadDigest,
+      AuthorisationOpts
     >,
     readonly opts: {
       getIntersectionPrivy: (
         handle: bigint,
       ) => ReadCapPrivy<NamespaceId, SubspaceId>;
+      getReconciliationPrivy: () => ReconciliationPrivy<SubspaceId>;
       getCap: (handle: bigint) => ReadCapability;
     },
   ) {
@@ -112,6 +113,7 @@ export class MessageEncoder<
       PsiGroup,
       SubspaceCapability,
       SyncSubspaceSignature,
+      Fingerprint,
       StaticToken,
       SubspaceId
     >,
@@ -165,7 +167,7 @@ export class MessageEncoder<
       case MSG_PAI_BIND_FRAGMENT: {
         const bytes = encodePaiBindFragment(
           message,
-          this.encodings.groupMember.encode,
+          this.schemes.pai.groupMemberEncoding.encode,
         );
         push(LogicalChannel.IntersectionChannel, bytes);
         break;
@@ -173,7 +175,7 @@ export class MessageEncoder<
       case MSG_PAI_REPLY_FRAGMENT: {
         const bytes = encodePaiReplyFragment(
           message,
-          this.encodings.groupMember.encode,
+          this.schemes.pai.groupMemberEncoding.encode,
         );
         push(LogicalChannel.IntersectionChannel, bytes);
         break;
@@ -186,8 +188,8 @@ export class MessageEncoder<
       case MSG_PAI_REPLY_SUBSPACE_CAPABILITY: {
         const bytes = encodePaiReplySubspaceCapability(
           message,
-          this.encodings.subspaceCapability.encode,
-          this.encodings.syncSubspaceSignature.encode,
+          this.schemes.subspaceCap.encodings.subspaceCapability.encode,
+          this.schemes.subspaceCap.encodings.syncSubspaceSignature.encode,
         );
         push(LogicalChannel.IntersectionChannel, bytes);
         break;
@@ -199,8 +201,8 @@ export class MessageEncoder<
 
         const bytes = encodeSetupBindReadCapability(
           message,
-          this.encodings.readCapability.encode,
-          this.encodings.syncSignature.encode,
+          this.schemes.accessControl.encodings.readCapability.encode,
+          this.schemes.accessControl.encodings.syncSignature.encode,
           privy,
         );
 
@@ -216,7 +218,7 @@ export class MessageEncoder<
         const bytes = encodeSetupBindAreaOfInterest(
           message,
           {
-            encodeSubspace: this.encodings.subspace.encode,
+            encodeSubspace: this.schemes.subspace.encode,
             orderSubspace: this.schemes.subspace.order,
             pathScheme: this.schemes.path,
             outer,
@@ -230,10 +232,35 @@ export class MessageEncoder<
       case MSG_SETUP_BIND_STATIC_TOKEN: {
         const bytes = encodeSetupBindStaticToken(
           message,
-          this.encodings.staticToken.encode,
+          this.schemes.authorisationToken.encodings.staticToken.encode,
         );
 
         push(LogicalChannel.StaticTokenChannel, bytes);
+        break;
+      }
+
+      // Reconciliation
+
+      case MSG_RECONCILIATION_SEND_FINGERPRINT: {
+        const bytes = encodeReconciliationSendFingerprint(
+          message,
+          {
+            isFingerprintNeutral: (fp) => {
+              return this.schemes.fingerprint.isEqual(
+                fp,
+                this.schemes.fingerprint.neutral,
+              );
+            },
+            encodeSubspaceId: this.schemes.subspace.encode,
+            orderSubspace: this.schemes.subspace.order,
+            pathScheme: this.schemes.path,
+            privy: this.opts.getReconciliationPrivy(),
+            encodeFingerprint: this.schemes.fingerprint.encoding.encode,
+          },
+        );
+
+        push(LogicalChannel.ReconciliationChannel, bytes);
+
         break;
       }
 

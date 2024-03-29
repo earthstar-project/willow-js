@@ -94,6 +94,7 @@ export class PaiFinder<
   /** Queue of: a read capability to bind, and a handle of our own intersection this is related to, and the outer area to encode against.  */
   private intersectionQueue = new FIFO<
     [
+      NamespaceId,
       ReadAuthorisation<
         ReadCapability,
         SubspaceReadCapability
@@ -375,6 +376,7 @@ export class PaiFinder<
     }
 
     this.intersectionQueue.push([
+      namespace,
       fragmentInfo.authorisation,
       handle,
     ]);
@@ -434,6 +436,7 @@ export class PaiFinder<
 
       if (fragmentInfo.onIntersection === BIND_READ_CAP) {
         this.intersectionQueue.push([
+          fragmentInfo.namespace,
           fragmentInfo.authorisation,
           ourHandle,
         ]);
@@ -536,10 +539,11 @@ export class PaiFinder<
 
   async *intersections() {
     for await (
-      const [authorisation, handle] of this
+      const [namespace, authorisation, handle] of this
         .intersectionQueue
     ) {
       yield {
+        namespace,
         authorisation,
         handle,
       };

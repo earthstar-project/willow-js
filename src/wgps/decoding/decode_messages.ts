@@ -1,7 +1,7 @@
 import { GrowingBytes } from "../../../deps.ts";
 import {
   ReadCapPrivy,
-  SyncEncodings,
+  ReconciliationPrivy,
   SyncMessage,
   SyncSchemes,
   Transport,
@@ -26,6 +26,7 @@ import {
   decodeSetupBindReadCapability,
   decodeSetupBindStaticToken,
 } from "./setup.ts";
+import { decodeReconciliationSendFingerprint } from "./reconciliation.ts";
 
 export type DecodeMessagesOpts<
   ReadCapability,
@@ -38,9 +39,13 @@ export type DecodeMessagesOpts<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Fingerprint,
+  AuthorisationToken,
   StaticToken,
   NamespaceId,
   SubspaceId,
+  PayloadDigest,
+  AuthorisationOpts,
 > = {
   schemes: SyncSchemes<
     ReadCapability,
@@ -53,25 +58,20 @@ export type DecodeMessagesOpts<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    Fingerprint,
+    AuthorisationToken,
     StaticToken,
     NamespaceId,
-    SubspaceId
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts
   >;
   transport: Transport;
   challengeLength: number;
-  encodings: SyncEncodings<
-    ReadCapability,
-    SyncSignature,
-    PsiGroup,
-    SubspaceCapability,
-    SyncSubspaceSignature,
-    StaticToken,
-    NamespaceId,
-    SubspaceId
-  >;
   getIntersectionPrivy: (
     handle: bigint,
   ) => ReadCapPrivy<NamespaceId, SubspaceId>;
+  getReconciliationPrivy: () => ReconciliationPrivy<SubspaceId>;
   getCap: (handle: bigint) => Promise<ReadCapability>;
 };
 
@@ -86,9 +86,13 @@ export async function* decodeMessages<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Fingerprint,
+  AuthorisationToken,
   StaticToken,
   NamespaceId,
   SubspaceId,
+  PayloadDigest,
+  AuthorisationOpts,
 >(
   opts: DecodeMessagesOpts<
     ReadCapability,
@@ -101,9 +105,13 @@ export async function* decodeMessages<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    Fingerprint,
+    AuthorisationToken,
     StaticToken,
     NamespaceId,
-    SubspaceId
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts
   >,
 ): AsyncIterable<
   SyncMessage<
@@ -112,6 +120,7 @@ export async function* decodeMessages<
     PsiGroup,
     SubspaceCapability,
     SyncSubspaceSignature,
+    Fingerprint,
     StaticToken,
     SubspaceId
   >
@@ -148,11 +157,23 @@ export async function* decodeMessages<
     } else if ((firstByte & 0x80) === 0x80) {
       // Control Issue Guarantee.
       yield await decodeControlIssueGuarantee(bytes);
+    } else if ((firstByte & 0x40) === 0x40) {
+      // Send fingerprint
+      yield await decodeReconciliationSendFingerprint(
+        bytes,
+        {
+          decodeFingerprint: opts.schemes.fingerprint.encoding.decodeStream,
+          decodeSubspaceId: opts.schemes.subspace.decodeStream,
+          neutralFingerprint: opts.schemes.fingerprint.neutral,
+          pathScheme: opts.schemes.path,
+          getPrivy: opts.getReconciliationPrivy,
+        },
+      );
     } else if ((firstByte & 0x30) === 0x30) {
       // Setup Bind Static Token
       yield await decodeSetupBindStaticToken(
         bytes,
-        opts.encodings.staticToken.decodeStream,
+        opts.schemes.authorisationToken.encodings.staticToken.decodeStream,
       );
     } else if ((firstByte & 0x28) === 0x28) {
       // Setup Bind Area of Interest
@@ -162,23 +183,23 @@ export async function* decodeMessages<
           const cap = await opts.getCap(authHandle);
           return opts.schemes.accessControl.getGrantedArea(cap);
         },
-        opts.encodings.subspace.decodeStream,
+        opts.schemes.subspace.decodeStream,
         opts.schemes.path,
       );
     } else if ((firstByte & 0x20) === 0x20) {
       // Setup Bind Read Capability
       yield await decodeSetupBindReadCapability(
         bytes,
-        opts.encodings.readCapability,
+        opts.schemes.accessControl.encodings.readCapability,
         opts.getIntersectionPrivy,
-        opts.encodings.syncSignature.decodeStream,
+        opts.schemes.accessControl.encodings.syncSignature.decodeStream,
       );
     } else if ((firstByte & 0x10) === 0x10) {
       // PAI Reply Subspace Capability
       yield await decodePaiReplySubspaceCapability(
         bytes,
-        opts.encodings.subspaceCapability.decodeStream,
-        opts.encodings.syncSubspaceSignature.decodeStream,
+        opts.schemes.subspaceCap.encodings.subspaceCapability.decodeStream,
+        opts.schemes.subspaceCap.encodings.syncSubspaceSignature.decodeStream,
       );
     } else if ((firstByte & 0xc) === 0xc) {
       // PAI Request Subspace Capability
@@ -187,13 +208,13 @@ export async function* decodeMessages<
       // PAI Reply Fragment
       yield await decodePaiReplyFragment(
         bytes,
-        opts.encodings.groupMember.decodeStream,
+        opts.schemes.pai.groupMemberEncoding.decodeStream,
       );
     } else if ((firstByte & 0x4) === 0x4) {
       // PAI Bind Fragment
       yield await decodePaiBindFragment(
         bytes,
-        opts.encodings.groupMember.decodeStream,
+        opts.schemes.pai.groupMemberEncoding.decodeStream,
       );
     } else {
       // Couldn't decode.

@@ -59,10 +59,12 @@ export type FingerprintScheme<
     b: Fingerprint,
   ): Fingerprint;
   neutral: Fingerprint;
+  isEqual: (a: Fingerprint, b: Fingerprint) => boolean;
+  encoding: EncodingScheme<Fingerprint>;
 };
 
 /** Concrete parameters peculiar to a specific usage of Willow. */
-export interface ProtocolParameters<
+export interface StoreSchemes<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
@@ -70,16 +72,16 @@ export interface ProtocolParameters<
   AuthorisationToken,
   Fingerprint,
 > {
-  pathScheme: PathScheme;
+  path: PathScheme;
 
-  namespaceScheme: NamespaceScheme<NamespaceId>;
+  namespace: NamespaceScheme<NamespaceId>;
 
-  subspaceScheme: SubspaceScheme<SubspaceId>;
+  subspace: SubspaceScheme<SubspaceId>;
 
   // Learn about payloads and producing them from bytes
-  payloadScheme: PayloadScheme<PayloadDigest>;
+  payload: PayloadScheme<PayloadDigest>;
 
-  authorisationScheme: AuthorisationScheme<
+  authorisation: AuthorisationScheme<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
@@ -87,7 +89,7 @@ export interface ProtocolParameters<
     AuthorisationToken
   >;
 
-  fingerprintScheme: FingerprintScheme<
+  fingerprint: FingerprintScheme<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
@@ -105,8 +107,8 @@ export type StoreOpts<
 > = {
   /** The public key of the namespace this store holds entries for. */
   namespace: NamespaceId;
-  /** The protocol parameters this store should use. */
-  protocolParameters: ProtocolParameters<
+  /** The protocol schemes this store should use. */
+  schemes: StoreSchemes<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
@@ -121,7 +123,7 @@ export type StoreOpts<
     PayloadDigest,
     Fingerprint
   >;
-  /** An option driver used to store and retrieve a store's payloads.  */
+  /** An optional driver used to store and retrieve a store's payloads.  */
   payloadDriver?: PayloadDriver<PayloadDigest>;
 };
 
