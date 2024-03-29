@@ -265,8 +265,22 @@ export type MsgReconciliationSendFingerprint<SubspaceId, Fingerprint> = {
   receiverHandle: bigint;
 };
 
+export const MSG_RECONCILIATION_ANNOUNCE_ENTRIES = Symbol(
+  "msg_reconciliation_announce_entries",
+);
+export type MsgReconciliationAnnounceEntries<SubspaceId> = {
+  kind: typeof MSG_RECONCILIATION_ANNOUNCE_ENTRIES;
+  range: Range3d<SubspaceId>;
+  count: bigint;
+  wantResponse: boolean;
+  willSort: boolean;
+  senderHandle: bigint;
+  receiverHandle: bigint;
+};
+
 export type ReconciliationMessage<SubspaceId, Fingerprint> =
-  MsgReconciliationSendFingerprint<SubspaceId, Fingerprint>;
+  | MsgReconciliationSendFingerprint<SubspaceId, Fingerprint>
+  | MsgReconciliationAnnounceEntries<SubspaceId>;
 
 export type SyncMessage<
   ReadCapability,
@@ -300,6 +314,7 @@ export type ReconciliationPrivy<SubspaceId> = {
   previousSenderHandle: bigint;
   previousReceiverHandle: bigint;
   previousRange: Range3d<SubspaceId>;
+  aoiHandlesToRange3d: (aoi1: bigint, aoi2: bigint) => Range3d<SubspaceId>;
 };
 
 export type SyncSchemes<

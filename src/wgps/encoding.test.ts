@@ -16,6 +16,7 @@ import {
   MSG_PAI_REPLY_FRAGMENT,
   MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
   MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+  MSG_RECONCILIATION_ANNOUNCE_ENTRIES,
   MSG_RECONCILIATION_SEND_FINGERPRINT,
   MSG_SETUP_BIND_AREA_OF_INTEREST,
   MSG_SETUP_BIND_READ_CAPABILITY,
@@ -378,6 +379,52 @@ const vectors: SyncMessage<
       },
     },
   },
+
+  {
+    kind: MSG_RECONCILIATION_ANNOUNCE_ENTRIES,
+    receiverHandle: 220n,
+    senderHandle: 250n,
+    wantResponse: true,
+    count: 10000n,
+    willSort: true,
+    range: {
+      subspaceRange: {
+        start: TestSubspace.Alfie,
+        end: TestSubspace.Gemma,
+      },
+      pathRange: {
+        start: [new Uint8Array([1])],
+        end: [new Uint8Array([2])],
+      },
+      timeRange: {
+        start: 1000n,
+        end: 3500n,
+      },
+    },
+  },
+
+  {
+    kind: MSG_RECONCILIATION_ANNOUNCE_ENTRIES,
+    receiverHandle: 0n,
+    senderHandle: 0n,
+    wantResponse: true,
+    count: 1n,
+    willSort: false,
+    range: {
+      subspaceRange: {
+        start: TestSubspace.Alfie,
+        end: TestSubspace.Gemma,
+      },
+      pathRange: {
+        start: [new Uint8Array([1])],
+        end: [new Uint8Array([2])],
+      },
+      timeRange: {
+        start: 1000n,
+        end: 3500n,
+      },
+    },
+  },
 ];
 
 Deno.test("Encoding roundtrip test", async () => {
@@ -473,7 +520,7 @@ Deno.test("Encoding roundtrip test", async () => {
         previousSenderHandle: 0n,
         previousRange: {
           subspaceRange: {
-            start: 0,
+            start: TestSubspace.Alfie,
             end: OPEN_END,
           },
           pathRange: {
@@ -485,6 +532,22 @@ Deno.test("Encoding roundtrip test", async () => {
             end: OPEN_END,
           },
         } as Range3d<TestSubspace>,
+        aoiHandlesToRange3d: () => {
+          return {
+            subspaceRange: {
+              start: TestSubspace.Betty,
+              end: OPEN_END,
+            },
+            pathRange: {
+              start: [new Uint8Array([1])],
+              end: OPEN_END,
+            },
+            timeRange: {
+              start: 1n,
+              end: OPEN_END,
+            },
+          } as Range3d<TestSubspace>;
+        },
       };
     },
   });
@@ -554,6 +617,22 @@ Deno.test("Encoding roundtrip test", async () => {
               end: OPEN_END,
             },
           } as Range3d<TestSubspace>,
+          aoiHandlesToRange3d: () => {
+            return {
+              subspaceRange: {
+                start: TestSubspace.Betty,
+                end: OPEN_END,
+              },
+              pathRange: {
+                start: [new Uint8Array([1])],
+                end: OPEN_END,
+              },
+              timeRange: {
+                start: 1n,
+                end: OPEN_END,
+              },
+            } as Range3d<TestSubspace>;
+          },
         };
       },
       getCap: (handle) => {

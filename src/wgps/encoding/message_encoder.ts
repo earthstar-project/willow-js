@@ -13,6 +13,7 @@ import {
   MSG_PAI_REPLY_FRAGMENT,
   MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
   MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+  MSG_RECONCILIATION_ANNOUNCE_ENTRIES,
   MSG_RECONCILIATION_SEND_FINGERPRINT,
   MSG_SETUP_BIND_AREA_OF_INTEREST,
   MSG_SETUP_BIND_READ_CAPABILITY,
@@ -42,7 +43,10 @@ import {
   encodeSetupBindReadCapability,
   encodeSetupBindStaticToken,
 } from "./setup.ts";
-import { encodeReconciliationSendFingerprint } from "./reconciliation.ts";
+import {
+  encodeReconciliationAnnounceEntries,
+  encodeReconciliationSendFingerprint,
+} from "./reconciliation.ts";
 
 export type EncodedSyncMessage = {
   channel: LogicalChannel | null;
@@ -258,6 +262,19 @@ export class MessageEncoder<
             encodeFingerprint: this.schemes.fingerprint.encoding.encode,
           },
         );
+
+        push(LogicalChannel.ReconciliationChannel, bytes);
+
+        break;
+      }
+
+      case MSG_RECONCILIATION_ANNOUNCE_ENTRIES: {
+        const bytes = encodeReconciliationAnnounceEntries(message, {
+          encodeSubspaceId: this.schemes.subspace.encode,
+          orderSubspace: this.schemes.subspace.order,
+          pathScheme: this.schemes.path,
+          privy: this.opts.getReconciliationPrivy(),
+        });
 
         push(LogicalChannel.ReconciliationChannel, bytes);
 

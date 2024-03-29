@@ -26,7 +26,10 @@ import {
   decodeSetupBindReadCapability,
   decodeSetupBindStaticToken,
 } from "./setup.ts";
-import { decodeReconciliationSendFingerprint } from "./reconciliation.ts";
+import {
+  decodeReconciliationAnnounceEntries,
+  decodeReconciliationSendFingerprint,
+} from "./reconciliation.ts";
 
 export type DecodeMessagesOpts<
   ReadCapability,
@@ -157,8 +160,18 @@ export async function* decodeMessages<
     } else if ((firstByte & 0x80) === 0x80) {
       // Control Issue Guarantee.
       yield await decodeControlIssueGuarantee(bytes);
+    } else if ((firstByte & 0x50) === 0x50) {
+      // Reconciliation Announce Entries
+      yield await decodeReconciliationAnnounceEntries(
+        bytes,
+        {
+          decodeSubspaceId: opts.schemes.subspace.decodeStream,
+          pathScheme: opts.schemes.path,
+          getPrivy: opts.getReconciliationPrivy,
+        },
+      );
     } else if ((firstByte & 0x40) === 0x40) {
-      // Send fingerprint
+      // Reconciliation send fingerprint
       yield await decodeReconciliationSendFingerprint(
         bytes,
         {
