@@ -10,6 +10,7 @@ import { EntryDriver, PayloadDriver } from "./storage/types.ts";
 
 export type NamespaceScheme<NamespaceId> = EncodingScheme<NamespaceId> & {
   isEqual: EqualityFn<NamespaceId>;
+  defaultNamespaceId: NamespaceId;
 };
 
 export type SubspaceScheme<SubspaceId> = EncodingScheme<SubspaceId> & {
@@ -23,6 +24,7 @@ export type PayloadScheme<PayloadDigest> = EncodingScheme<PayloadDigest> & {
     bytes: Uint8Array | AsyncIterable<Uint8Array>,
   ) => Promise<PayloadDigest>;
   order: (a: PayloadDigest, b: PayloadDigest) => -1 | 0 | 1;
+  defaultDigest: PayloadDigest;
 };
 
 export type AuthorisationScheme<

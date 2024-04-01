@@ -2,6 +2,7 @@ import {
   Area,
   AreaOfInterest,
   EncodingScheme,
+  Entry,
   PathScheme,
   PrivyEncodingScheme,
   Range3d,
@@ -10,6 +11,7 @@ import {
 import {
   AuthorisationScheme,
   FingerprintScheme,
+  LengthyEntry,
   NamespaceScheme,
   PayloadScheme,
   SubspaceScheme,
@@ -268,19 +270,53 @@ export type MsgReconciliationSendFingerprint<SubspaceId, Fingerprint> = {
 export const MSG_RECONCILIATION_ANNOUNCE_ENTRIES = Symbol(
   "msg_reconciliation_announce_entries",
 );
+/** Prepare transmission of the LengthyEntries a peer has in a 3dRange as part of 3d range-based set reconciliation. */
 export type MsgReconciliationAnnounceEntries<SubspaceId> = {
   kind: typeof MSG_RECONCILIATION_ANNOUNCE_ENTRIES;
+  /** The 3dRange whose LengthyEntries to transmit. */
   range: Range3d<SubspaceId>;
+  /** The number of Entries the sender has in the range. */
   count: bigint;
+  /** A boolean flag to indicate whether the sender wishes to receive a ReconciliationAnnounceEntries message for the same 3dRange in return. */
   wantResponse: boolean;
+  /** Whether the sender promises to send the Entries in the range sorted from oldest to newest. */
   willSort: boolean;
+  /** An AreaOfInterestHandle, bound by the sender of this message, that fully contains the range. */
   senderHandle: bigint;
+  /** An AreaOfInterestHandle, bound by the receiver of this message, that fully contains the range. */
   receiverHandle: bigint;
 };
 
-export type ReconciliationMessage<SubspaceId, Fingerprint> =
+export const MSG_RECONCILIATION_SEND_ENTRY = Symbol(
+  "msg_reconciliation_send_entry",
+);
+export type MsgReconciliationSendEntry<
+  DynamicToken,
+  NamespaceId,
+  SubspaceId,
+  PayloadDigest,
+> = {
+  kind: typeof MSG_RECONCILIATION_SEND_ENTRY;
+  entry: LengthyEntry<NamespaceId, SubspaceId, PayloadDigest>;
+  staticTokenHandle: bigint;
+  dynamicToken: DynamicToken;
+};
+
+export type ReconciliationMessage<
+  Fingerprint,
+  DynamicToken,
+  NamespaceId,
+  SubspaceId,
+  PayloadDigest,
+> =
   | MsgReconciliationSendFingerprint<SubspaceId, Fingerprint>
-  | MsgReconciliationAnnounceEntries<SubspaceId>;
+  | MsgReconciliationAnnounceEntries<SubspaceId>
+  | MsgReconciliationSendEntry<
+    DynamicToken,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest
+  >;
 
 export type SyncMessage<
   ReadCapability,
@@ -290,12 +326,21 @@ export type SyncMessage<
   SyncSubspaceSignature,
   Fingerprint,
   StaticToken,
+  DynamicToken,
+  NamespaceId,
   SubspaceId,
+  PayloadDigest,
 > =
   | ControlMessage
   | IntersectionMessage<PsiGroup, SubspaceCapability, SyncSubspaceSignature>
   | SetupMessage<ReadCapability, SyncSignature, StaticToken, SubspaceId>
-  | ReconciliationMessage<SubspaceId, Fingerprint>;
+  | ReconciliationMessage<
+    Fingerprint,
+    DynamicToken,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest
+  >;
 
 // Encodings
 
@@ -310,11 +355,16 @@ export type ReadCapEncodingScheme<ReadCapability, NamespaceId, SubspaceId> =
     ReadCapPrivy<NamespaceId, SubspaceId>
   >;
 
-export type ReconciliationPrivy<SubspaceId> = {
-  previousSenderHandle: bigint;
-  previousReceiverHandle: bigint;
-  previousRange: Range3d<SubspaceId>;
-  aoiHandlesToRange3d: (aoi1: bigint, aoi2: bigint) => Range3d<SubspaceId>;
+export type ReconciliationPrivy<NamespaceId, SubspaceId, PayloadDigest> = {
+  prevSenderHandle: bigint;
+  prevReceiverHandle: bigint;
+  prevRange: Range3d<SubspaceId>;
+  prevStaticTokenHandle: bigint;
+  prevEntry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+  announced: {
+    range: Range3d<SubspaceId>;
+    namespace: NamespaceId;
+  };
 };
 
 export type SyncSchemes<
@@ -331,6 +381,7 @@ export type SyncSchemes<
   Fingerprint,
   AuthorisationToken,
   StaticToken,
+  DynamicToken,
   NamespaceId,
   SubspaceId,
   PayloadDigest,
@@ -361,7 +412,11 @@ export type SyncSchemes<
   namespace: NamespaceScheme<NamespaceId>;
   subspace: SubspaceScheme<SubspaceId>;
   path: PathScheme;
-  authorisationToken: AuthorisationTokenScheme<StaticToken>;
+  authorisationToken: AuthorisationTokenScheme<
+    AuthorisationToken,
+    StaticToken,
+    DynamicToken
+  >;
   authorisation: AuthorisationScheme<
     NamespaceId,
     SubspaceId,
@@ -424,9 +479,20 @@ export type SubspaceCapScheme<
   };
 };
 
-export type AuthorisationTokenScheme<StaticToken> = {
+export type AuthorisationTokenScheme<
+  AuthorisationToken,
+  StaticToken,
+  DynamicToken,
+> = {
+  recomposeAuthToken: (
+    staticToken: StaticToken,
+    dynamicToken: DynamicToken,
+  ) => AuthorisationToken;
+  decomposeAuthToken: (
+    authToken: AuthorisationToken,
+  ) => [StaticToken, DynamicToken];
   encodings: {
     staticToken: EncodingScheme<StaticToken>;
-    // TODO: Dynamic token
+    dynamicToken: EncodingScheme<DynamicToken>;
   };
 };

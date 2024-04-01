@@ -14,12 +14,12 @@ import {
   MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
   MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
   MSG_RECONCILIATION_ANNOUNCE_ENTRIES,
+  MSG_RECONCILIATION_SEND_ENTRY,
   MSG_RECONCILIATION_SEND_FINGERPRINT,
   MSG_SETUP_BIND_AREA_OF_INTEREST,
   MSG_SETUP_BIND_READ_CAPABILITY,
   MSG_SETUP_BIND_STATIC_TOKEN,
   ReadCapPrivy,
-  ReconciliationPrivy,
   SyncMessage,
   SyncSchemes,
 } from "../types.ts";
@@ -45,8 +45,13 @@ import {
 } from "./setup.ts";
 import {
   encodeReconciliationAnnounceEntries,
+  encodeReconciliationSendEntry,
   encodeReconciliationSendFingerprint,
 } from "./reconciliation.ts";
+import {
+  ReconcileMsgTracker,
+  ReconcileMsgTrackerOpts,
+} from "../reconciliation/reconcile_msg_tracker.ts";
 
 export type EncodedSyncMessage = {
   channel: LogicalChannel | null;
@@ -67,12 +72,21 @@ export class MessageEncoder<
   Fingerprint,
   AuthorisationToken,
   StaticToken,
+  DynamicToken,
   NamespaceId,
   SubspaceId,
   PayloadDigest,
   AuthorisationOpts,
 > {
   private messageChannel = new FIFO<EncodedSyncMessage>();
+
+  private reconcileMsgTracker: ReconcileMsgTracker<
+    Fingerprint,
+    DynamicToken,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest
+  >;
 
   constructor(
     readonly schemes: SyncSchemes<
@@ -89,6 +103,7 @@ export class MessageEncoder<
       Fingerprint,
       AuthorisationToken,
       StaticToken,
+      DynamicToken,
       NamespaceId,
       SubspaceId,
       PayloadDigest,
@@ -98,10 +113,10 @@ export class MessageEncoder<
       getIntersectionPrivy: (
         handle: bigint,
       ) => ReadCapPrivy<NamespaceId, SubspaceId>;
-      getReconciliationPrivy: () => ReconciliationPrivy<SubspaceId>;
       getCap: (handle: bigint) => ReadCapability;
-    },
+    } & ReconcileMsgTrackerOpts<NamespaceId, SubspaceId, PayloadDigest>,
   ) {
+    this.reconcileMsgTracker = new ReconcileMsgTracker(opts);
   }
 
   async *[Symbol.asyncIterator]() {
@@ -119,7 +134,10 @@ export class MessageEncoder<
       SyncSubspaceSignature,
       Fingerprint,
       StaticToken,
-      SubspaceId
+      DynamicToken,
+      NamespaceId,
+      SubspaceId,
+      PayloadDigest
     >,
   ) {
     const push = (channel: LogicalChannel | null, message: Uint8Array) => {
@@ -258,12 +276,14 @@ export class MessageEncoder<
             encodeSubspaceId: this.schemes.subspace.encode,
             orderSubspace: this.schemes.subspace.order,
             pathScheme: this.schemes.path,
-            privy: this.opts.getReconciliationPrivy(),
+            privy: this.reconcileMsgTracker.getPrivy(),
             encodeFingerprint: this.schemes.fingerprint.encoding.encode,
           },
         );
 
         push(LogicalChannel.ReconciliationChannel, bytes);
+
+        this.reconcileMsgTracker.onSendFingerprint(message);
 
         break;
       }
@@ -273,10 +293,35 @@ export class MessageEncoder<
           encodeSubspaceId: this.schemes.subspace.encode,
           orderSubspace: this.schemes.subspace.order,
           pathScheme: this.schemes.path,
-          privy: this.opts.getReconciliationPrivy(),
+          privy: this.reconcileMsgTracker.getPrivy(),
         });
 
         push(LogicalChannel.ReconciliationChannel, bytes);
+
+        this.reconcileMsgTracker.onAnnounceEntries(message);
+
+        break;
+      }
+
+      case MSG_RECONCILIATION_SEND_ENTRY: {
+        const bytes = encodeReconciliationSendEntry(
+          message,
+          {
+            privy: this.reconcileMsgTracker.getPrivy(),
+            encodeDynamicToken:
+              this.schemes.authorisationToken.encodings.dynamicToken.encode,
+            encodeSubspaceId: this.schemes.subspace.encode,
+            encodeNamespaceId: this.schemes.namespace.encode,
+            encodePayloadDigest: this.schemes.payload.encode,
+            orderSubspace: this.schemes.subspace.order,
+            pathScheme: this.schemes.path,
+            isEqualNamespace: this.schemes.namespace.isEqual,
+          },
+        );
+
+        push(LogicalChannel.ReconciliationChannel, bytes);
+
+        this.reconcileMsgTracker.onSendEntry(message);
 
         break;
       }

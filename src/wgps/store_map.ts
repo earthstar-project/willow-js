@@ -1,14 +1,29 @@
-import { encodeBase64 } from "../../deps.ts";
+import { encodeBase64, PathScheme } from "../../deps.ts";
 import { EntryDriver, PayloadDriver } from "../store/storage/types.ts";
 import { Store } from "../store/store.ts";
-import { StoreSchemes } from "../store/types.ts";
+import {
+  FingerprintScheme,
+  PayloadScheme,
+  StoreSchemes,
+  SubspaceScheme,
+} from "../store/types.ts";
 
 export type StoreDriverCallback<
   Fingerprint,
   NamespaceId,
   SubspaceId,
   PayloadDigest,
-> = (namespace: NamespaceId) => {
+> = (namespace: NamespaceId, schemes: {
+  payload: PayloadScheme<PayloadDigest>;
+  fingerprint: FingerprintScheme<
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest,
+    Fingerprint
+  >;
+  subspace: SubspaceScheme<SubspaceId>;
+  path: PathScheme;
+}) => {
   entryDriver: EntryDriver<
     NamespaceId,
     SubspaceId,
@@ -116,7 +131,7 @@ export class StoreMap<
       return store;
     }
 
-    const drivers = this.getStoreDrivers(namespace);
+    const drivers = this.getStoreDrivers(namespace, this.schemes);
 
     const newStore = new Store({
       namespace,

@@ -2,18 +2,25 @@ import {
   compactWidth,
   concat,
   encodeCompactWidth,
+  encodeEntryRelativeEntry,
   encodeRange3dRelative,
   PathScheme,
   TotalOrder,
 } from "../../../deps.ts";
 import {
   MsgReconciliationAnnounceEntries,
+  MsgReconciliationSendEntry,
   MsgReconciliationSendFingerprint,
   ReconciliationPrivy,
 } from "../types.ts";
 import { compactWidthOr } from "./util.ts";
 
-export function encodeReconciliationSendFingerprint<SubspaceId, Fingerprint>(
+export function encodeReconciliationSendFingerprint<
+  Fingerprint,
+  NamespaceId,
+  SubspaceId,
+  PayloadDigest,
+>(
   msg: MsgReconciliationSendFingerprint<SubspaceId, Fingerprint>,
   opts: {
     orderSubspace: TotalOrder<SubspaceId>;
@@ -21,7 +28,7 @@ export function encodeReconciliationSendFingerprint<SubspaceId, Fingerprint>(
     pathScheme: PathScheme;
     isFingerprintNeutral: (fp: Fingerprint) => boolean;
     encodeFingerprint: (fp: Fingerprint) => Uint8Array;
-    privy: ReconciliationPrivy<SubspaceId>;
+    privy: ReconciliationPrivy<NamespaceId, SubspaceId, PayloadDigest>;
   },
 ): Uint8Array {
   // header relies on prev_range, prev_sender_handle, prev_receiver_handle
@@ -31,10 +38,9 @@ export function encodeReconciliationSendFingerprint<SubspaceId, Fingerprint>(
 
   const encodedRelativeToPrevRange = 0x4;
 
-  const senderHandleIsSame =
-    msg.senderHandle === opts.privy.previousSenderHandle;
+  const senderHandleIsSame = msg.senderHandle === opts.privy.prevSenderHandle;
   const receiverHandleIsSame =
-    msg.receiverHandle === opts.privy.previousReceiverHandle;
+    msg.receiverHandle === opts.privy.prevReceiverHandle;
 
   const usingPrevSenderHandleMask = senderHandleIsSame ? 0x2 : 0x0;
 
@@ -88,7 +94,7 @@ export function encodeReconciliationSendFingerprint<SubspaceId, Fingerprint>(
       pathScheme: opts.pathScheme,
     },
     msg.range,
-    opts.privy.previousRange,
+    opts.privy.prevRange,
   );
 
   return concat(
@@ -101,10 +107,14 @@ export function encodeReconciliationSendFingerprint<SubspaceId, Fingerprint>(
   );
 }
 
-export function encodeReconciliationAnnounceEntries<SubspaceId>(
+export function encodeReconciliationAnnounceEntries<
+  NamespaceId,
+  SubspaceId,
+  PayloadDigest,
+>(
   msg: MsgReconciliationAnnounceEntries<SubspaceId>,
   opts: {
-    privy: ReconciliationPrivy<SubspaceId>;
+    privy: ReconciliationPrivy<NamespaceId, SubspaceId, PayloadDigest>;
     orderSubspace: TotalOrder<SubspaceId>;
     encodeSubspaceId: (subspace: SubspaceId) => Uint8Array;
     pathScheme: PathScheme;
@@ -118,10 +128,9 @@ export function encodeReconciliationAnnounceEntries<SubspaceId>(
 
   const encodedRelativebit = 0x4;
 
-  const senderHandleIsSame =
-    msg.senderHandle === opts.privy.previousSenderHandle;
+  const senderHandleIsSame = msg.senderHandle === opts.privy.prevSenderHandle;
   const receiverHandleIsSame =
-    msg.receiverHandle === opts.privy.previousReceiverHandle;
+    msg.receiverHandle === opts.privy.prevReceiverHandle;
 
   const usingPrevSenderHandleMask = senderHandleIsSame ? 0x2 : 0x0;
 
@@ -178,7 +187,7 @@ export function encodeReconciliationAnnounceEntries<SubspaceId>(
       pathScheme: opts.pathScheme,
     },
     msg.range,
-    opts.privy.previousRange,
+    opts.privy.prevRange,
   );
 
   return concat(
@@ -187,5 +196,98 @@ export function encodeReconciliationAnnounceEntries<SubspaceId>(
     encodedReceiverHandle,
     encodedCount,
     encodedRelativeRange,
+  );
+}
+
+export function encodeReconciliationSendEntry<
+  DynamicToken,
+  NamespaceId,
+  SubspaceId,
+  PayloadDigest,
+>(
+  msg: MsgReconciliationSendEntry<
+    DynamicToken,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest
+  >,
+  opts: {
+    privy: ReconciliationPrivy<NamespaceId, SubspaceId, PayloadDigest>;
+    isEqualNamespace: (a: NamespaceId, b: NamespaceId) => boolean;
+    orderSubspace: TotalOrder<SubspaceId>;
+    encodeNamespaceId: (namespace: NamespaceId) => Uint8Array;
+    encodeSubspaceId: (subspace: SubspaceId) => Uint8Array;
+    encodePayloadDigest: (digest: PayloadDigest) => Uint8Array;
+    encodeDynamicToken: (token: DynamicToken) => Uint8Array;
+    pathScheme: PathScheme;
+  },
+): Uint8Array {
+  const messageTypeMask = 0x50;
+
+  const isPrevTokenEqual =
+    msg.staticTokenHandle === opts.privy.prevStaticTokenHandle;
+
+  const isPrevStaticTokenFlag = isPrevTokenEqual ? 0x8 : 0x0;
+
+  const isEncodedRelativeToPrevEntryFlag = 0x4;
+
+  const compactWidthAvailableFlag = compactWidthOr(
+    0,
+    compactWidth(msg.entry.available),
+  );
+
+  const header = messageTypeMask | isPrevStaticTokenFlag |
+    isEncodedRelativeToPrevEntryFlag | compactWidthAvailableFlag;
+
+  let encodedStaticTokenWidth: Uint8Array;
+
+  const compactWidthStaticToken = compactWidth(msg.staticTokenHandle);
+
+  if (isPrevTokenEqual) {
+    encodedStaticTokenWidth = new Uint8Array();
+  } else if (msg.staticTokenHandle < 63n) {
+    encodedStaticTokenWidth = new Uint8Array([Number(msg.staticTokenHandle)]);
+  } else if (compactWidthStaticToken === 1) {
+    encodedStaticTokenWidth = new Uint8Array([0x3f]);
+  } else if (compactWidthStaticToken === 2) {
+    encodedStaticTokenWidth = new Uint8Array([0x7f]);
+  } else if (compactWidthStaticToken === 4) {
+    encodedStaticTokenWidth = new Uint8Array([0xbf]);
+  } else {
+    encodedStaticTokenWidth = new Uint8Array([0xff]);
+  }
+
+  let encodedStaticToken: Uint8Array;
+
+  if (!isPrevTokenEqual && msg.staticTokenHandle > 63n) {
+    encodedStaticToken = encodeCompactWidth(msg.staticTokenHandle);
+  } else {
+    encodedStaticToken = new Uint8Array();
+  }
+
+  const encodedAvailable = encodeCompactWidth(msg.entry.available);
+
+  const encodedDynamicToken = opts.encodeDynamicToken(msg.dynamicToken);
+
+  const encodedRelativeEntry = encodeEntryRelativeEntry(
+    {
+      encodeNamespace: opts.encodeNamespaceId,
+      encodeSubspace: opts.encodeSubspaceId,
+      isEqualNamespace: opts.isEqualNamespace,
+      orderSubspace: opts.orderSubspace,
+      encodePayloadDigest: opts.encodePayloadDigest,
+      pathScheme: opts.pathScheme,
+    },
+    msg.entry.entry,
+    opts.privy.prevEntry,
+  );
+
+  return concat(
+    new Uint8Array([header]),
+    encodedStaticTokenWidth,
+    encodedStaticToken,
+    encodedAvailable,
+    encodedDynamicToken,
+    encodedRelativeEntry,
   );
 }

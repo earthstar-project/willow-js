@@ -1,4 +1,5 @@
-export * from "https://deno.land/x/willow_utils@0.6.0/mod.ts";
+//export * from "https://deno.land/x/willow_utils@0.6.0/mod.ts";
+export * from "../willow_utils/mod.ts";
 export { FIFO } from "https://deno.land/x/fifo@v0.2.2/mod.ts";
 export {
   type Deferred,

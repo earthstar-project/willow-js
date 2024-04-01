@@ -143,6 +143,7 @@ export class Skiplist<
   ) {
     await this.isSetup;
 
+    /** The existing baseline insertion on the skiplist. */
     const existing = await this.kv.get<SkiplistBaseValue<LiftedType>>([
       0,
       key,
@@ -160,21 +161,24 @@ export class Skiplist<
 
     const batch = this.kv.batch();
 
+    /** A randomly chosen height to insert up to. */
     const insertionHeight = opts?.layer !== undefined
       ? opts.layer
       : randomHeight();
 
     // console.log(`["${key}", ${insertionHeight}],`);
 
-    let previousSuccessor: { key: ValueType; height: number } | undefined =
+    /** The successor to this key from the previous layer, along with its maximum height. */
+    let previousLayerSuccessor: { key: ValueType; height: number } | undefined =
       undefined;
+    /** The computed label from the previous layer. */
     let previousComputedLabel: [LiftedType, number] | undefined = undefined;
 
     const liftedValue = await this.monoid.lift(key, value);
 
     for (let layer = 0; layer <= insertionHeight; layer++) {
       // On the first layer we don't need to compute any labels, as there is no skipping.
-      // But unlike higher layeys, we DO need to store the payload hash.
+      // But unlike higher layers, we DO need to store the payload hash.
       if (layer === 0) {
         const label = await this.monoid.lift(key, value);
 
@@ -194,7 +198,7 @@ export class Skiplist<
       // If the previous successor's height is greater than current layer, great!
       // we can just reuse that value and continue upwards.
       if (
-        previousSuccessor && previousSuccessor.height > layer &&
+        previousLayerSuccessor && previousLayerSuccessor.height > layer &&
         previousComputedLabel
       ) {
         batch.set(
@@ -206,6 +210,7 @@ export class Skiplist<
 
       // The next sibling is unknown, so we can't reuse a cached value.
 
+      /** The successor to the inserted key on *this* layer. */
       const nextSuccessor = await this.getRightItem(layer, key, true);
 
       // But if there is a previous successor, we can use the previously computed label
@@ -217,7 +222,9 @@ export class Skiplist<
 
       // If there is a previous successor, we can start from there instead of from the insertion key
       // as we already have the computed label up to that point.
-      const startFrom = previousSuccessor ? previousSuccessor.key : key;
+      const startFrom = previousLayerSuccessor
+        ? previousLayerSuccessor.key
+        : key;
 
       for await (
         const entry of this.kv.list<SkiplistValue<LiftedType>>(
@@ -238,7 +245,7 @@ export class Skiplist<
       ] as SkiplistValue<LiftedType>);
 
       previousComputedLabel = newLabel;
-      previousSuccessor = nextSuccessor
+      previousLayerSuccessor = nextSuccessor
         ? {
           key: nextSuccessor.key[this.valueKeyIndex] as ValueType,
           height: nextSuccessor.value[0],
@@ -263,7 +270,9 @@ export class Skiplist<
       | undefined = previousPredecessorComputedLabel;
     let previousOverarchingSuccessorHeight: number | undefined;
 
-    if (previousSuccessor && previousSuccessor.height <= insertionHeight) {
+    if (
+      previousLayerSuccessor && previousLayerSuccessor.height <= insertionHeight
+    ) {
       previousComputedLabel = undefined;
     }
 
@@ -401,17 +410,17 @@ export class Skiplist<
 
       // The problem: the newly added label is not here!
 
-      if (previousSuccessor) {
+      if (previousLayerSuccessor) {
         for await (
           const entry of this.kv.list<SkiplistValue<LiftedType>>(
             {
-              start: [layer - 1, previousSuccessor.key],
+              start: [layer - 1, previousLayerSuccessor.key],
               end: overarchingSuccessor
                 ? [
                   layer - 1,
                   overarchingSuccessor.key[this.valueKeyIndex] as ValueType,
                 ]
-                : [layer - 1, key],
+                : [layer],
             },
           )
         ) {
@@ -425,7 +434,7 @@ export class Skiplist<
       ] as SkiplistValue<LiftedType>);
 
       previousComputedLabel = undefined;
-      previousSuccessor = undefined;
+      previousLayerSuccessor = undefined;
 
       previousOverarchingPredecessor = {
         key: overarchingPredecessor.key[this.valueKeyIndex] as ValueType,

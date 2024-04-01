@@ -149,10 +149,13 @@ export class EntryDriverKvStore<
     return new TripleStorage({
       namespace,
       createSummarisableStorage: (
-        monoid: LiftingMonoid<Uint8Array, Fingerprint>,
+        monoid,
+        id,
       ) => {
+        const prefixedAgain = new PrefixedDriver([id], prefixedStorageDriver);
+
         return new Skiplist({
-          kv: prefixedStorageDriver,
+          kv: prefixedAgain,
           monoid,
           compare: orderBytes,
         });

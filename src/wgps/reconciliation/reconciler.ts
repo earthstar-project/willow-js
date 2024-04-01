@@ -1,5 +1,6 @@
 import {
   AreaOfInterest,
+  deferred,
   FIFO,
   intersectRange3d,
   Range3d,
@@ -55,7 +56,8 @@ export class Reconciler<
     PayloadDigest,
     Fingerprint
   >;
-  private store: Store<
+
+  store: Store<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
@@ -74,6 +76,8 @@ export class Reconciler<
     wantResponse: boolean;
   }>();
 
+  range = deferred<Range3d<SubspaceId>>();
+
   constructor(
     opts: ReconcilerOpts<
       Fingerprint,
@@ -88,12 +92,14 @@ export class Reconciler<
     this.subspaceScheme = opts.subspaceScheme;
     this.store = opts.store;
 
+    this.determineRange(opts.aoiOurs, opts.aoiTheirs);
+
     if (opts.role === IS_ALFIE) {
-      this.initiate(opts.aoiOurs, opts.aoiTheirs);
+      this.initiate();
     }
   }
 
-  async initiate(
+  private async determineRange(
     aoi1: AreaOfInterest<SubspaceId>,
     aoi2: AreaOfInterest<SubspaceId>,
   ) {
@@ -113,6 +119,12 @@ export class Reconciler<
         "There was no intersection between two range-ified AOIs. That shouldn't happen...",
       );
     }
+
+    this.range.resolve(intersection);
+  }
+
+  async initiate() {
+    const intersection = await this.range;
 
     // Initialise sync with that first range.
     const { fingerprint } = await this.store.summarise(intersection);

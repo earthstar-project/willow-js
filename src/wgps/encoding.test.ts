@@ -17,10 +17,12 @@ import {
   MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
   MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
   MSG_RECONCILIATION_ANNOUNCE_ENTRIES,
+  MSG_RECONCILIATION_SEND_ENTRY,
   MSG_RECONCILIATION_SEND_FINGERPRINT,
   MSG_SETUP_BIND_AREA_OF_INTEREST,
   MSG_SETUP_BIND_READ_CAPABILITY,
   MSG_SETUP_BIND_STATIC_TOKEN,
+  MsgReconciliationSendEntry,
   SyncMessage,
   SyncSchemes,
 } from "./types.ts";
@@ -44,7 +46,7 @@ import {
 } from "../test/test_schemes.ts";
 import { randomPath } from "../test/utils.ts";
 import { onAsyncIterate } from "./util.ts";
-import { ANY_SUBSPACE, OPEN_END, Range3d } from "../../deps.ts";
+import { ANY_SUBSPACE, defaultRange3d, OPEN_END } from "../../deps.ts";
 
 const vectors: SyncMessage<
   TestReadCap,
@@ -54,7 +56,10 @@ const vectors: SyncMessage<
   Uint8Array,
   Uint8Array,
   TestSubspace,
-  TestSubspace
+  Uint8Array,
+  TestNamespace,
+  TestSubspace,
+  ArrayBuffer
 >[] = [
   {
     kind: MSG_COMMITMENT_REVEAL,
@@ -427,6 +432,96 @@ const vectors: SyncMessage<
   },
 ];
 
+// Because ReconciliationSendEntry vectors are decoded using state (an ReconciliationAnnounceEntries must have come before)
+// We need to split them off into their own little section.
+const sendEntryVectors: MsgReconciliationSendEntry<
+  Uint8Array,
+  TestNamespace,
+  TestSubspace,
+  ArrayBuffer
+>[] = [
+  {
+    kind: MSG_RECONCILIATION_SEND_ENTRY,
+    dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
+    staticTokenHandle: 8n,
+    entry: {
+      available: 3000n,
+      entry: {
+        namespaceId: TestNamespace.Family,
+        path: [new Uint8Array([7])],
+        payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+        payloadLength: 500n,
+        subspaceId: TestSubspace.Betty,
+        timestamp: 40000n,
+      },
+    },
+  },
+  {
+    kind: MSG_RECONCILIATION_SEND_ENTRY,
+    dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
+    staticTokenHandle: 80n,
+    entry: {
+      available: 3000n,
+      entry: {
+        namespaceId: TestNamespace.Family,
+        path: [new Uint8Array([7])],
+        payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+        payloadLength: 500n,
+        subspaceId: TestSubspace.Betty,
+        timestamp: 40000n,
+      },
+    },
+  },
+  {
+    kind: MSG_RECONCILIATION_SEND_ENTRY,
+    dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
+    staticTokenHandle: 800n,
+    entry: {
+      available: 3000n,
+      entry: {
+        namespaceId: TestNamespace.Family,
+        path: [new Uint8Array([7])],
+        payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+        payloadLength: 500n,
+        subspaceId: TestSubspace.Betty,
+        timestamp: 40000n,
+      },
+    },
+  },
+  {
+    kind: MSG_RECONCILIATION_SEND_ENTRY,
+    dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
+    staticTokenHandle: 8000000n,
+    entry: {
+      available: 3000n,
+      entry: {
+        namespaceId: TestNamespace.Family,
+        path: [new Uint8Array([7])],
+        payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+        payloadLength: 500n,
+        subspaceId: TestSubspace.Betty,
+        timestamp: 40000n,
+      },
+    },
+  },
+  {
+    kind: MSG_RECONCILIATION_SEND_ENTRY,
+    dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
+    staticTokenHandle: 8000000000n,
+    entry: {
+      available: 3000n,
+      entry: {
+        namespaceId: TestNamespace.Family,
+        path: [new Uint8Array([7])],
+        payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+        payloadLength: 500n,
+        subspaceId: TestSubspace.Betty,
+        timestamp: 40000n,
+      },
+    },
+  },
+];
+
 Deno.test("Encoding roundtrip test", async () => {
   const [alfie, betty] = transportPairInMemory();
 
@@ -444,6 +539,7 @@ Deno.test("Encoding roundtrip test", async () => {
     Uint8Array,
     Uint8Array,
     TestSubspace,
+    Uint8Array,
     TestNamespace,
     TestSubspace,
     ArrayBuffer,
@@ -514,41 +610,12 @@ Deno.test("Encoding roundtrip test", async () => {
         },
       };
     },
-    getReconciliationPrivy: () => {
-      return {
-        previousReceiverHandle: 0n,
-        previousSenderHandle: 0n,
-        previousRange: {
-          subspaceRange: {
-            start: TestSubspace.Alfie,
-            end: OPEN_END,
-          },
-          pathRange: {
-            start: [],
-            end: OPEN_END,
-          },
-          timeRange: {
-            start: 0n,
-            end: OPEN_END,
-          },
-        } as Range3d<TestSubspace>,
-        aoiHandlesToRange3d: () => {
-          return {
-            subspaceRange: {
-              start: TestSubspace.Betty,
-              end: OPEN_END,
-            },
-            pathRange: {
-              start: [new Uint8Array([1])],
-              end: OPEN_END,
-            },
-            timeRange: {
-              start: 1n,
-              end: OPEN_END,
-            },
-          } as Range3d<TestSubspace>;
-        },
-      };
+    defaultNamespaceId: TestNamespace.Family,
+    defaultSubspaceId: TestSubspace.Alfie,
+    defaultPayloadDigest: new Uint8Array(32),
+    handleToNamespaceId: () => TestNamespace.Family,
+    aoiHandlesToRange3d: () => {
+      return Promise.resolve(defaultRange3d(TestSubspace.Alfie));
     },
   });
 
@@ -560,12 +627,19 @@ Deno.test("Encoding roundtrip test", async () => {
     Uint8Array,
     Uint8Array,
     TestSubspace,
-    TestSubspace
+    Uint8Array,
+    TestNamespace,
+    TestSubspace,
+    ArrayBuffer
   >[] = [];
 
   onAsyncIterate(msgEncoder, ({ message }) => {
     alfie.send(message);
   });
+
+  // Announcements and SendEntry are conditionally decoded depending on whether entries are expected or not.
+  // Here we just decode announcements first and SendEntry later in a separate batch.
+  let isExpectingSendEntry = false;
 
   onAsyncIterate(
     decodeMessages({
@@ -599,41 +673,12 @@ Deno.test("Encoding roundtrip test", async () => {
           },
         };
       },
-      getReconciliationPrivy: () => {
-        return {
-          previousReceiverHandle: 0n,
-          previousSenderHandle: 0n,
-          previousRange: {
-            subspaceRange: {
-              start: 0,
-              end: OPEN_END,
-            },
-            pathRange: {
-              start: [],
-              end: OPEN_END,
-            },
-            timeRange: {
-              start: 0n,
-              end: OPEN_END,
-            },
-          } as Range3d<TestSubspace>,
-          aoiHandlesToRange3d: () => {
-            return {
-              subspaceRange: {
-                start: TestSubspace.Betty,
-                end: OPEN_END,
-              },
-              pathRange: {
-                start: [new Uint8Array([1])],
-                end: OPEN_END,
-              },
-              timeRange: {
-                start: 1n,
-                end: OPEN_END,
-              },
-            } as Range3d<TestSubspace>;
-          },
-        };
+      defaultNamespaceId: TestNamespace.Family,
+      defaultSubspaceId: TestSubspace.Alfie,
+      defaultPayloadDigest: new Uint8Array(32),
+      handleToNamespaceId: () => TestNamespace.Family,
+      aoiHandlesToRange3d: () => {
+        return Promise.resolve(defaultRange3d(TestSubspace.Alfie));
       },
       getCap: (handle) => {
         if (handle === BigInt(23)) {
@@ -674,5 +719,13 @@ Deno.test("Encoding roundtrip test", async () => {
 
   await delay(15);
 
-  assertEquals(messages, vectors);
+  isExpectingSendEntry = true;
+
+  for (const message of sendEntryVectors) {
+    msgEncoder.encode(message);
+  }
+
+  await delay(15);
+
+  assertEquals(messages, [...vectors, ...sendEntryVectors]);
 });

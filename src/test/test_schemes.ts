@@ -45,6 +45,7 @@ export enum TestNamespace {
   Vibes,
 }
 export const testSchemeNamespace: NamespaceScheme<TestNamespace> = {
+  defaultNamespaceId: TestNamespace.Family,
   encode: (v) => {
     return new Uint8Array([v]);
   },
@@ -379,6 +380,7 @@ export const testSchemePayload: PayloadScheme<ArrayBuffer> = {
       | 0
       | -1;
   },
+  defaultDigest: new Uint8Array(32),
 };
 
 export const testSchemeFingerprint: FingerprintScheme<
@@ -717,9 +719,46 @@ export const testSchemeAccessControl: AccessControlScheme<
 };
 
 export const testSchemeAuthorisationToken: AuthorisationTokenScheme<
-  TestSubspace
+  Uint8Array,
+  TestSubspace,
+  Uint8Array
 > = {
+  decomposeAuthToken: (authToken) => {
+    const staticToken = authToken[0];
+
+    const dynamicToken = authToken.subarray(1);
+
+    return [staticToken, dynamicToken];
+  },
+  recomposeAuthToken: (staticToken, dynamicToken) => {
+    const bytes = new Uint8Array(33);
+
+    bytes.set([staticToken], 0);
+    bytes.set(dynamicToken, 1);
+
+    return bytes;
+  },
   encodings: {
+    dynamicToken: {
+      encode(hash) {
+        return new Uint8Array(hash);
+      },
+      decode(bytes) {
+        return bytes.subarray(0, 32);
+      },
+      encodedLength() {
+        return 32;
+      },
+      async decodeStream(bytes) {
+        await bytes.nextAbsolute(32);
+
+        const digest = bytes.array.subarray(0, 32);
+
+        bytes.prune(32);
+
+        return digest;
+      },
+    },
     staticToken: {
       encode: (subspace) => {
         return new Uint8Array([subspace]);

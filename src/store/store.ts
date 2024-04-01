@@ -640,6 +640,7 @@ export class Store<
 
   async *queryRange(
     range: Range3d<SubspacePublicKey>,
+    order: "newest" | "oldest",
   ): AsyncIterable<
     [
       Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
@@ -655,7 +656,7 @@ export class Store<
           maxSize: BigInt(0),
         },
         "timestamp",
-        true,
+        order === "newest" ? true : false,
       )
     ) {
       const payload = await this.payloadDriver.get(entry.payloadDigest);

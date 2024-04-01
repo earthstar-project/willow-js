@@ -38,6 +38,8 @@ export class PrefixedDriver implements KvDriver {
         prefix: [...this.prefix, ...selector.prefix],
       };
 
+    // console.log({ selectorPrefixed });
+
     for await (
       const entry of this.parentDriver.list<ValueType>(
         selectorPrefixed,

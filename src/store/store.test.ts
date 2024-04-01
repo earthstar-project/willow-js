@@ -27,13 +27,13 @@ class TestStore extends Store<
   constructor(namespace = 0) {
     super({
       namespace,
-      protocolParameters: {
-        namespaceScheme: testSchemeNamespace,
-        subspaceScheme: testSchemeSubspace,
-        pathScheme: testSchemePath,
-        payloadScheme: testSchemePayload,
-        authorisationScheme: testSchemeAuthorisation,
-        fingerprintScheme: testSchemeFingerprint,
+      schemes: {
+        namespace: testSchemeNamespace,
+        subspace: testSchemeSubspace,
+        path: testSchemePath,
+        payload: testSchemePayload,
+        authorisation: testSchemeAuthorisation,
+        fingerprint: testSchemeFingerprint,
       },
     });
   }

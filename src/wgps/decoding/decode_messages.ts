@@ -1,11 +1,5 @@
 import { GrowingBytes } from "../../../deps.ts";
-import {
-  ReadCapPrivy,
-  ReconciliationPrivy,
-  SyncMessage,
-  SyncSchemes,
-  Transport,
-} from "../types.ts";
+import { ReadCapPrivy, SyncMessage, SyncSchemes, Transport } from "../types.ts";
 import { decodeCommitmentReveal } from "./commitment_reveal.ts";
 import {
   decodeControlAbsolve,
@@ -28,8 +22,13 @@ import {
 } from "./setup.ts";
 import {
   decodeReconciliationAnnounceEntries,
+  decodeReconciliationSendEntry,
   decodeReconciliationSendFingerprint,
 } from "./reconciliation.ts";
+import {
+  ReconcileMsgTracker,
+  ReconcileMsgTrackerOpts,
+} from "../reconciliation/reconcile_msg_tracker.ts";
 
 export type DecodeMessagesOpts<
   ReadCapability,
@@ -45,6 +44,7 @@ export type DecodeMessagesOpts<
   Fingerprint,
   AuthorisationToken,
   StaticToken,
+  DynamicToken,
   NamespaceId,
   SubspaceId,
   PayloadDigest,
@@ -64,6 +64,7 @@ export type DecodeMessagesOpts<
     Fingerprint,
     AuthorisationToken,
     StaticToken,
+    DynamicToken,
     NamespaceId,
     SubspaceId,
     PayloadDigest,
@@ -74,9 +75,8 @@ export type DecodeMessagesOpts<
   getIntersectionPrivy: (
     handle: bigint,
   ) => ReadCapPrivy<NamespaceId, SubspaceId>;
-  getReconciliationPrivy: () => ReconciliationPrivy<SubspaceId>;
   getCap: (handle: bigint) => Promise<ReadCapability>;
-};
+} & ReconcileMsgTrackerOpts<NamespaceId, SubspaceId, PayloadDigest>;
 
 export async function* decodeMessages<
   ReadCapability,
@@ -92,6 +92,7 @@ export async function* decodeMessages<
   Fingerprint,
   AuthorisationToken,
   StaticToken,
+  DynamicToken,
   NamespaceId,
   SubspaceId,
   PayloadDigest,
@@ -111,6 +112,7 @@ export async function* decodeMessages<
     Fingerprint,
     AuthorisationToken,
     StaticToken,
+    DynamicToken,
     NamespaceId,
     SubspaceId,
     PayloadDigest,
@@ -125,9 +127,14 @@ export async function* decodeMessages<
     SyncSubspaceSignature,
     Fingerprint,
     StaticToken,
-    SubspaceId
+    DynamicToken,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest
   >
 > {
+  const reconcileMsgTracker = new ReconcileMsgTracker(opts);
+
   const bytes = new GrowingBytes(opts.transport);
 
   // TODO: Not while true, but while transport is open.
@@ -162,26 +169,64 @@ export async function* decodeMessages<
       yield await decodeControlIssueGuarantee(bytes);
     } else if ((firstByte & 0x50) === 0x50) {
       // Reconciliation Announce Entries
-      yield await decodeReconciliationAnnounceEntries(
-        bytes,
-        {
-          decodeSubspaceId: opts.schemes.subspace.decodeStream,
-          pathScheme: opts.schemes.path,
-          getPrivy: opts.getReconciliationPrivy,
-        },
-      );
+      // OR a send entry. It all depends on what we are expecting...
+
+      if (reconcileMsgTracker.isExpectingReconciliationSendEntry()) {
+        const message = await decodeReconciliationSendEntry(
+          bytes,
+          {
+            getPrivy: () => {
+              return reconcileMsgTracker.getPrivy();
+            },
+            decodeDynamicToken:
+              opts.schemes.authorisationToken.encodings.dynamicToken
+                .decodeStream,
+            decodeNamespaceId: opts.schemes.namespace.decodeStream,
+            decodePayloadDigest: opts.schemes.payload.decodeStream,
+            decodeSubspaceId: opts.schemes.subspace.decodeStream,
+            pathScheme: opts.schemes.path,
+          },
+        );
+
+        reconcileMsgTracker.onSendEntry(message);
+
+        yield message;
+      } else {
+        const message = await decodeReconciliationAnnounceEntries(
+          bytes,
+          {
+            decodeSubspaceId: opts.schemes.subspace.decodeStream,
+            pathScheme: opts.schemes.path,
+            getPrivy: () => {
+              return reconcileMsgTracker.getPrivy();
+            },
+            aoiHandlesToRange3d: opts.aoiHandlesToRange3d,
+          },
+        );
+
+        reconcileMsgTracker.onAnnounceEntries(message);
+
+        yield message;
+      }
     } else if ((firstByte & 0x40) === 0x40) {
       // Reconciliation send fingerprint
-      yield await decodeReconciliationSendFingerprint(
+      const message = await decodeReconciliationSendFingerprint(
         bytes,
         {
           decodeFingerprint: opts.schemes.fingerprint.encoding.decodeStream,
           decodeSubspaceId: opts.schemes.subspace.decodeStream,
           neutralFingerprint: opts.schemes.fingerprint.neutral,
           pathScheme: opts.schemes.path,
-          getPrivy: opts.getReconciliationPrivy,
+          getPrivy: () => {
+            return reconcileMsgTracker.getPrivy();
+          },
+          aoiHandlesToRange3d: opts.aoiHandlesToRange3d,
         },
       );
+
+      reconcileMsgTracker.onSendFingerprint(message);
+
+      yield message;
     } else if ((firstByte & 0x30) === 0x30) {
       // Setup Bind Static Token
       yield await decodeSetupBindStaticToken(
@@ -190,6 +235,7 @@ export async function* decodeMessages<
       );
     } else if ((firstByte & 0x28) === 0x28) {
       // Setup Bind Area of Interest
+
       yield await decodeSetupBindAreaOfInterest(
         bytes,
         async (authHandle) => {

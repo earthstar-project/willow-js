@@ -19,20 +19,32 @@ import {
 import { compactWidthFromEndOfByte } from "./util.ts";
 
 export function decodeChannelFromBeginningOfByte(byte: number): LogicalChannel {
-  if ((byte & 0x60) === 0x60) {
+  if ((byte & 0xc0) === 0xc0) {
+    return LogicalChannel.StaticTokenChannel;
+  } else if ((byte & 0x80) === 0x80) {
+    return LogicalChannel.AreaOfInterestChannel;
+  } else if ((byte & 0x60) === 0x60) {
     return LogicalChannel.CapabilityChannel;
   } else if ((byte & 0x40) === 0x40) {
     return LogicalChannel.IntersectionChannel;
+  } else if ((byte & 0x0) === 0x0) {
+    return LogicalChannel.ReconciliationChannel;
   }
 
   throw new WillowError("Couldn't decode logical channel");
 }
 
 export function decodeChannelFromEndOfByte(byte: number): LogicalChannel {
-  if ((byte & 0x3) === 0x3) {
+  if ((byte & 0x6) === 0x6) {
+    return LogicalChannel.StaticTokenChannel;
+  } else if ((byte & 0x4) === 0x4) {
+    return LogicalChannel.AreaOfInterestChannel;
+  } else if ((byte & 0x3) === 0x3) {
     return LogicalChannel.CapabilityChannel;
   } else if ((byte & 0x2) === 0x2) {
     return LogicalChannel.IntersectionChannel;
+  } else if ((byte & 0x0) === 0x0) {
+    return LogicalChannel.ReconciliationChannel;
   }
 
   throw new WillowError("Couldn't decode logical channel");
