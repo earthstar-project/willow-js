@@ -1,5 +1,6 @@
 import { MonoidRbTree } from "./monoid_rbtree.ts";
-import { assertEquals } from "https://deno.land/std@0.202.0/testing/asserts.ts";
+import { assertEquals } from "https://deno.land/std@0.202.0/assert/mod.ts";
+import { shuffle } from "https://deno.land/x/proc@0.21.9/mod3.ts";
 import { Skiplist } from "./monoid_skiplist.ts";
 
 import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
@@ -236,26 +237,28 @@ const letters = [
   "z",
 ];
 
-function makeRandomSet() {
-  const newSet: string[] = [];
+function makeRandomLetters() {
+  const arr: string[] = [];
 
-  const threshold = Math.random();
+  const threshold = 0.5;
 
   for (const letter of letters) {
     if (Math.random() > threshold) {
-      newSet.push(letter);
+      arr.push(letter);
     }
   }
 
-  if (newSet.length === 0) {
-    newSet.push(
+  if (arr.length === 0) {
+    arr.push(
       letters[
-        Math.floor(Math.random() * letters.length)
+        Math.floor(Math.random() * arr.length)
       ],
     );
   }
 
-  return newSet;
+  shuffle(arr);
+
+  return arr;
 }
 
 function makeRandomRange(set: string[]) {
@@ -283,6 +286,40 @@ function makeRandomItemsQuery(set: string[]) {
   };
 }
 
+Deno.test.only("Insertion and summary", async (test) => {
+  for (const scenario of scenarios) {
+    await test.step(scenario.name, async () => {
+      const letterArrays: string[][] = [];
+
+      for (let i = 0; i < 3; i++) {
+        letterArrays.push(makeRandomLetters());
+      }
+
+      for (const letterArr of letterArrays) {
+        const { storage, dispose } = await scenario
+          .makeScenario();
+
+        let expectedFingerprint = concatMonoid.neutral;
+
+        for (const item of letterArr.toSorted()) {
+          expectedFingerprint = concatMonoid.combine(expectedFingerprint, item);
+        }
+
+        for (const item of letterArr) {
+          await storage.insert(item, new Uint8Array());
+        }
+
+        const { fingerprint, size } = await storage.summarise("a", "a");
+
+        assertEquals(fingerprint, expectedFingerprint);
+        assertEquals(size, letterArr.length);
+
+        await dispose();
+      }
+    });
+  }
+});
+
 Deno.test("Summarise and compare (random 100 sets x 100 ranges)", async (test) => {
   for (const [aScenario, bScenario] of scenarioPairings) {
     await test.step({
@@ -291,7 +328,7 @@ Deno.test("Summarise and compare (random 100 sets x 100 ranges)", async (test) =
         const sets: string[][] = [];
 
         for (let i = 0; i < 100; i++) {
-          sets.push(makeRandomSet());
+          sets.push(makeRandomLetters());
         }
 
         for (const set of sets) {
