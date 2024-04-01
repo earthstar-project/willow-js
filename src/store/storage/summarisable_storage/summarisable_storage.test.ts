@@ -240,7 +240,7 @@ const letters = [
 function makeRandomLetters() {
   const arr: string[] = [];
 
-  const threshold = 0.5;
+  const threshold = 0.8;
 
   for (const letter of letters) {
     if (Math.random() > threshold) {
@@ -310,6 +310,16 @@ Deno.test.only("Insertion and summary", async (test) => {
         }
 
         const { fingerprint, size } = await storage.summarise("a", "a");
+
+        console.log({
+          fingerprint,
+          expectedFingerprint,
+          letterArr,
+        });
+
+        if (storage instanceof Skiplist) {
+          await storage.print();
+        }
 
         assertEquals(fingerprint, expectedFingerprint);
         assertEquals(size, letterArr.length);

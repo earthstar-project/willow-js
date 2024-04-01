@@ -35,18 +35,20 @@ const skiplist = new Skiplist(
 );
 
 const set: [string, number][] = [
-  ["n", 1],
-  ["p", 0],
-  ["q", 0],
-  ["w", 4],
+  ["w", 1],
+  ["f", 0],
+  ["n", 3],
+  ["u", 1],
 ];
 
 for (const [letter, level] of set) {
-  await skiplist.insert(letter, new Uint8Array([0, 0, 0, 0]), {
+  await skiplist.insert(letter, new Uint8Array(), {
     layer: level,
   });
-}
 
-console.log(await skiplist.summarise("w", "q"));
+  console.log("inserted", letter);
+
+  console.log(await skiplist.summarise("a", "a"));
+}
 
 await skiplist.print();
