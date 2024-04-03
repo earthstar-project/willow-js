@@ -433,26 +433,33 @@ export class Skiplist<
       if (!currentLeft) {
         // Nothing to do here. Yay =)
       } else {
-        // The label of `currentLeft` summarises everything from currentLeft to priorLeft, combined with the label of priorLeft (which summarises up until `current`).
-        const newCurrentLeftSummary = this.monoid.combine(
-          await this.summariseSingleLayer(
-            currentLeft.key,
-            physicalKeyGetLogicalKey(priorLeft!.key),
-          ),
-          priorLeft!.value.summary,
-        );
-
-        // Update `currentLeft` with its proper label, and record the mutation to be passed on to the kv store eventually.
-        currentLeft.value.summary = newCurrentLeftSummary;
-        batch.set(currentLeft.key, currentLeft.value);
-
-        if (currentLayer <= insertionHeight) {
-          batch.set(currentKey, current.value);
+        if (insertingCompletelyNew && (currentLayer <= insertionHeight)) {
+          // We know the left labels to stay unchanged in these cases. Hence, nothing to do ^_^
         } else {
-          // On the kv store, we need to summarise not only until `current`, but until `currentRight`.
-          const actualRightValue = {...currentLeft.value};
-          actualRightValue.summary = this.monoid.combine(currentLeft.value.summary, current.value.summary);
-          batch.set(currentLeft.key, actualRightValue);
+          // The label of `currentLeft` summarises everything from currentLeft to priorLeft, combined with the label of priorLeft (which summarises up until `current`).
+          const newCurrentLeftSummary = this.monoid.combine(
+            await this.summariseSingleLayer(
+              currentLeft.key,
+              physicalKeyGetLogicalKey(priorLeft!.key),
+            ),
+            priorLeft!.value.summary,
+          );
+
+          // Update `currentLeft` with its proper label, and record the mutation to be passed on to the kv store eventually.
+          currentLeft.value.summary = newCurrentLeftSummary;
+          batch.set(currentLeft.key, currentLeft.value);
+
+          if (currentLayer <= insertionHeight) {
+            batch.set(currentKey, current.value);
+          } else {
+            // On the kv store, we need to summarise not only until `current`, but until `currentRight`.
+            const actualRightValue = { ...currentLeft.value };
+            actualRightValue.summary = this.monoid.combine(
+              currentLeft.value.summary,
+              current.value.summary,
+            );
+            batch.set(currentLeft.key, actualRightValue);
+          }
         }
       }
 
@@ -461,9 +468,12 @@ export class Skiplist<
 
       Can we break early?
       */
-     if (currentLeft === undefined && currentLayer > insertionHeight && currentRight === undefined) {
-      break;
-     }
+      if (
+        currentLeft === undefined && currentLayer > insertionHeight &&
+        currentRight === undefined
+      ) {
+        break;
+      }
 
       // Prepare for the next iteration.
       prior = current;
