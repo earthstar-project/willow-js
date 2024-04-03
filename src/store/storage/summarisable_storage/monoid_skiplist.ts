@@ -28,6 +28,12 @@ function physicalKeyGetLogicalKey<LogicalKey extends KeyPart[]>(
   return <LogicalKey> <unknown> pk.slice(1);
 }
 
+function physicalKeyIncrementLayer<LogicalKey extends KeyPart[]>(
+  pk: PhysicalKey<LogicalKey>,
+): PhysicalKey<LogicalKey> {
+  return [physicalKeyGetLayer(pk) + 1, ...physicalKeyGetLogicalKey(pk)];
+}
+
 /*
 Further, the skiplist is summarisable: you can efficiently query for a *summary* of arbitrary ranges, consisting of the number of items in that range, as well as some accumulated monoidal value (see the range-based set reconciliation paper for more details).
 To support this efficiently, each physical value consists not only of a logical value, but also of some metadata.
@@ -47,13 +53,12 @@ type PhysicalValue<LogicalValue, SummaryData> = {
    */
   maxLayer: number;
   /**
-   * The number of logical entries on layer zero of the skip list whose key is greater than or equal to ours but strictly less than the key of the next entry on the same layer.
-   */
-  summaryCount: number;
-  /**
    * The summary data of the logical entries on layer zero of the skip list whose key is greater than or equal to ours but strictly less than the key of the next entry on the same layer.
    */
-  summaryData: SummaryData;
+  summary: [
+    SummaryData,
+    number, /* number of logical entries on layer zero until the next entry */
+  ];
 };
 
 /**
@@ -67,6 +72,19 @@ type Node<
   key: PhysicalKey<LogicalKey>;
   value: PhysicalValue<LogicalValue, SummaryData>;
 };
+
+function nodeIncrementLayer<
+  LogicalKey extends KeyPart[],
+  LogicalValue,
+  SummaryData,
+>(
+  node: Node<LogicalKey, LogicalValue, SummaryData>,
+): Node<LogicalKey, LogicalValue, SummaryData> {
+  return {
+    key: physicalKeyIncrementLayer(node.key),
+    value: node.value,
+  };
+}
 
 // Take this to the power of l to get the probability that the skiplist has a node at layer l.
 const LAYER_INSERT_PROBABILITY = 0.5;
@@ -258,6 +276,8 @@ export class Skiplist<
       return;
     }
 
+    const insertingCompletelyNew = !got;
+
     /*
     Unfortunately, we need to do some actual work.
 
@@ -285,18 +305,17 @@ export class Skiplist<
 
     On layer zero, we do not skip over anything. Hence, we summarise only ourselves.
     */
-    const layerZeroSummary = await this.monoid.lift(key);
     const layerZeroPhysicalValue: PhysicalValue<LogicalValue, SummaryData> = {
       logicalValue: value, // On layer zero, we include the physical value. We won't on higher layers.
       maxLayer: insertionHeight,
-      summaryCount: layerZeroSummary[1],
-      summaryData: layerZeroSummary[0],
+      summary: await this.monoid.lift(key),
     };
 
     batch.set(layerZeroPhysicalKey, layerZeroPhysicalValue);
 
     /*
-    That is all kv mutation for layer zero, now we need to prepare the information-from-the-layer-below for layer one. Which information is that? So glad you asked, let's define some things!
+    That is all kv mutation for layer zero, now we need to prepare the information-from-the-layer-below for layer one.
+    Which information is that? So glad you asked, let's define some things!
 
     Assume we are currently working at layer number `currentLayer`. Two tasks to do in that layer:
 
@@ -308,35 +327,36 @@ export class Skiplist<
     Let `current` denote the node for the current key at layer `currentLayer` (if any).
     Let `currentLeft` denote the node preceeding `current` at layer `currentLayer`.
     Left `currentRight` denote the node succceeding `current` at layer `currentLayer`.
-    Let `currentDown` denote the node with the same key as `current` but at layer `currentLayer - 1`.
-    Let `currentLeftDown` denote the node with the same key as `currentLeft` but at layer `currentLayer - 1`.
-    Let `currentRightDown` denote the node with the same key as `currentRight` but at layer `currentLayer - 1`.
+    Let `prior` denote the node with the same key as `current` but at layer `currentLayer - 1`.
+    Let `priorLeft` denote the node preceeding `prior` (at layer `currentLayer - 1`).
+    Let `priorRight` denote the node succeeding `prior` (at layer `currentLayer - 1`).
 
-    All of these can be undefined, because they might not exist: `current` doesn't exist if `currentLayer > insertionHeight`, `currentLeft` doesn't exist if `current` is a leftmost node, and `currentRight` doesn't exist if `current` is a rightmost node. The down-versions then stop existing one layer higher.
+    To simplify the code, we always maintain `current` and `prior`, even above the `insertionHeight`. Those computations are not wasted, these values are used when computing labels for `currentLeft` at layers above `insertionHeight`. Accordingly, the summaries we store in `currentLeft` and `priorLeft` summarise only up until (and excluding) `current` and `prior` respectively. In layers above `insertionHeight`, we write full summary information to the underlying kv store, but the information in these variables stays truncated.
+
+    Left and right nodes can be undefined, because they might not exist: `currentLeft` doesn't exist if `current` is a leftmost node, and `currentRight` doesn't exist if `current` is a rightmost node. The prior-versions then stop existing one layer higher.
 
     We can now initialise these for `currentLayer := 1`.
     */
 
-    // The `...Down` versions refer to layer zero initially.
-    let currentDown: Node<LogicalKey, LogicalValue, SummaryData> | undefined = {
+    // The `priorFoo` versions refer to layer zero initially.
+    let prior: Node<LogicalKey, LogicalValue, SummaryData> = {
       key: layerZeroPhysicalKey,
       value: layerZeroPhysicalValue,
     };
-    let currentLeftDown:
+    let priorLeft:
       | Node<LogicalKey, LogicalValue, SummaryData>
       | undefined = await this.getLeftNode(layerZeroPhysicalKey);
-    let currentRightDown:
+    let priorRight:
       | Node<LogicalKey, LogicalValue, SummaryData>
       | undefined = await this.getRightNode(layerZeroPhysicalKey);
-    let current: Node<LogicalKey, LogicalValue, SummaryData> | undefined =
-      undefined;
+    let current: Node<LogicalKey, LogicalValue, SummaryData> = prior; // This initialisation is not meaningful, we just needed a non-undefined value.
     let currentLeft: Node<LogicalKey, LogicalValue, SummaryData> | undefined =
       undefined;
     let currentRight: Node<LogicalKey, LogicalValue, SummaryData> | undefined =
       undefined;
 
     /*
-    Now we iterate through all higher layers (conceptually at least — we do sneak in early returns where possible), copute current, currentLeft, and currentRight based off the -Down versions, record the corresponding kv updates in the batch object, and then set the -Down versions to the current versions before going into the next iteration.
+    Now we iterate through all higher layers (conceptually at least — we do sneak in some early returns), compute current, currentLeft, and currentRight based off the priorFoo versions, record the corresponding kv updates in the batch object, and then set the priorFoo versions to the current versions before going into the next iteration.
     */
     for (
       let currentLayer = 1;
@@ -344,316 +364,119 @@ export class Skiplist<
       currentLayer++
     ) {
       /*
-      At this point in the code, we can assume that the `...Down` nodes to accurately reflect the layer `currentLayer - 1`.
-      We assume `current`, `currentLeft`, and `currentRight` to contain outdated garbage - they merely exist to let us store information without overwriting the informatio from the previous layer.
+      At this point in the code, we can assume that the `priorFoo` nodes to accurately reflect the layer `currentLayer - 1`.
+      We assume `current`, `currentLeft`, and `currentRight` to contain outdated garbage - they merely exist to let us store information without overwriting the information from the previous layer.
+
+      Now, we need to update `current`, `currentLeft`, and `currentRight` into non-garbage. `currentRight` only exists to make computations more efficient, whereas `current`, `currentLeft` receive updates that need to be reflected in the kv store at the end of this function.
       */
+
+      const currentKey: PhysicalKey<LogicalKey> = [currentLayer, ...key];
 
       /*
-      All computations for this iteration done now.
-
-      Record the kv updates.
+      If the maxLayer of priorRight is greater than or equal to the currentLayer, then currentRight is simply the node above priorRight.
+      If priorRight is undefined, then currentRight will also be undefined.
       */
-      if (current) {
-        batch.set(current.key, current.value);
+      if (!priorRight) {
+        currentRight = undefined;
+      } else if (priorRight.value.maxLayer <= currentLayer) {
+        currentRight = nodeIncrementLayer(priorRight);
+      } else {
+        // Query the kv store for the right node.
+        currentRight = await this.getRightNode(currentKey);
       }
-      if (currentLeft) {
+
+      // We now have all information to compute (the label of) `current`.
+      //
+      // The label of current summarises until currentRight, which is the same as summarising the label of `prior` and everything from priorRight to currentRight.
+      // If priorRight is already undefined, then the new label is simply the old label.
+      let newCurrentSummary = prior!.value.summary;
+      if (priorRight) {
+        newCurrentSummary = this.monoid.combine(
+          newCurrentSummary,
+          await this.summariseSingleLayer(
+            priorRight.key,
+            currentRight
+              ? physicalKeyGetLogicalKey(currentRight.key)
+              : undefined,
+          ),
+        );
+      }
+
+      // Update `current` with its proper label, and record the mutation to be passed on to the kv store eventually.
+      current = nodeIncrementLayer(prior!);
+      current.value.summary = newCurrentSummary;
+
+      if (currentLayer <= insertionHeight) {
+        batch.set(currentKey, current.value);
+      }
+
+      /*
+      It remains to tackle currentLeft; figuring out its label is slightly more tricky than for `current`.
+      But first, we simply obtain the node, analogously to that of currentRight.
+
+      If the maxLayer of priorLeft is greater than or equal to the currentLayer, then currentLeft is simply the node above priorLeft.
+      If priorLeft is undefined, then currentLeft will also be undefined.
+      */
+      if (!priorLeft) {
+        currentLeft = undefined;
+      } else if (priorLeft.value.maxLayer <= currentLayer) {
+        currentLeft = nodeIncrementLayer(priorLeft);
+      } else {
+        // Query the kv store for the left node.
+        currentLeft = await this.getLeftNode(currentKey);
+      }
+
+      /*
+      Now for computing (the label of) `currentLeft`.
+      */
+
+      if (!currentLeft) {
+        // Nothing to do here. Yay =)
+      } else {
+        // The label of `currentLeft` summarises everything from currentLeft to priorLeft, combined with the label of priorLeft (which summarises up until `current`).
+        const newCurrentLeftSummary = this.monoid.combine(
+          await this.summariseSingleLayer(
+            currentLeft.key,
+            physicalKeyGetLogicalKey(priorLeft!.key),
+          ),
+          priorLeft!.value.summary,
+        );
+
+        // Update `currentLeft` with its proper label, and record the mutation to be passed on to the kv store eventually.
+        currentLeft.value.summary = newCurrentLeftSummary;
         batch.set(currentLeft.key, currentLeft.value);
-      }
-      if (currentRight) {
-        batch.set(currentRight.key, currentRight.value);
+
+        if (currentLayer <= insertionHeight) {
+          batch.set(currentKey, current.value);
+        } else {
+          // On the kv store, we need to summarise not only until `current`, but until `currentRight`.
+          const actualRightValue = {...currentLeft.value};
+          actualRightValue.summary = this.monoid.combine(currentLeft.value.summary, current.value.summary);
+          batch.set(currentLeft.key, actualRightValue);
+        }
       }
 
-      // And prepare for the next iteration.
-      currentDown = current;
-      currentLeftDown = currentLeft;
-      currentRightDown = currentRight;
+      /*
+      All computations for this iteration done. Yay!
+
+      Can we break early?
+      */
+     if (currentLeft === undefined && currentLayer > insertionHeight && currentRight === undefined) {
+      break;
+     }
+
+      // Prepare for the next iteration.
+      prior = current;
+      priorLeft = currentLeft;
+      priorRight = currentRight;
     }
 
-    /** The successor to this key from the previous layer, along with its maximum height. */
-    let previousLayerSuccessor:
-      | { key: LogicalKey; height: number }
-      | undefined = undefined;
-    /** The computed label from the previous layer. */
-    let previousComputedLabel: [SummaryData, number] | undefined = undefined;
-
-    const liftedValue = await this.monoid.lift(key, value);
-
-    for (let layer = 0; layer <= insertionHeight; layer++) {
-      // On the first layer we don't need to compute any labels, as there is no skipping.
-      // But unlike higher layers, we DO need to store the payload hash.
-      if (layer === 0) {
-        const label = await this.monoid.lift(key, value);
-
-        previousComputedLabel = label;
-
-        batch.set([layer, key], [
-          insertionHeight,
-          label,
-          value,
-        ] as SkiplistBaseValue<SummaryData>);
-
-        continue;
-      }
-
-      // On levels higher than 0, we may need to recompute labels.
-
-      // If the previous successor's height is greater than current layer, great!
-      // we can just reuse that value and continue upwards.
-      if (
-        previousLayerSuccessor && previousLayerSuccessor.height > layer &&
-        previousComputedLabel
-      ) {
-        batch.set(
-          [layer, key],
-          [insertionHeight, previousComputedLabel] as SkiplistValue<
-            SummaryData
-          >,
-        );
-        continue;
-      }
-
-      // The next sibling is unknown, so we can't reuse a cached value.
-
-      /** The successor to the inserted key on *this* layer. */
-      const nextSuccessor = await this.getRightNode(layer, key, true);
-
-      // But if there is a previous successor, we can use the previously computed label
-      // and start iterating from there.
-
-      /** The newly computed label for the inserted value. */
-      let newLabel: [SummaryData, number] = previousComputedLabel ||
-        liftedValue;
-
-      // If there is a previous successor, we can start from there instead of from the insertion key
-      // as we already have the computed label up to that point.
-      const startFrom = previousLayerSuccessor
-        ? previousLayerSuccessor.key
-        : key;
-
-      for await (
-        const entry of this.kv.list<SkiplistValue<SummaryData>>(
-          {
-            start: [layer - 1, startFrom],
-            end: nextSuccessor
-              ? [layer - 1, nextSuccessor.key[this.valueKeyIndex]]
-              : [layer],
-          },
-        )
-      ) {
-        newLabel = this.monoid.combine(newLabel, entry.value[1]);
-      }
-
-      batch.set([layer, key], [
-        insertionHeight,
-        newLabel,
-      ] as SkiplistValue<SummaryData>);
-
-      previousComputedLabel = newLabel;
-      previousLayerSuccessor = nextSuccessor
-        ? {
-          key: nextSuccessor.key[this.valueKeyIndex] as LogicalKey,
-          height: nextSuccessor.value[0],
-        }
-        : undefined;
-    }
-
-    // Now we recompute the preceding labels.
-
-    // For preceding values
-    let previousPredecessor: { key: LogicalKey; height: number } | undefined =
-      undefined;
-    let previousPredecessorComputedLabel: [SummaryData, number] | undefined =
-      undefined;
-
-    //  For overarching preceding values
-    let previousOverarchingPredecessor:
-      | { key: LogicalKey; height: number }
-      | undefined = previousPredecessor;
-    let previousOverarchingPredecessorComputedLabel:
-      | [SummaryData, number]
-      | undefined = previousPredecessorComputedLabel;
-    let previousOverarchingSuccessorHeight: number | undefined;
-
-    if (
-      previousLayerSuccessor && previousLayerSuccessor.height <= insertionHeight
-    ) {
-      previousComputedLabel = undefined;
-    }
-
-    // Start from layer 1 as nothing needs to be recomputed on the base level.
-    for (let layer = 1; layer <= this._maxHeight; layer++) {
-      // We need to recompute labels which the newly inserted label may have truncated.
-      // i.e. the labels for values who have height <= inserted height.
-      if (layer <= insertionHeight) {
-        if (
-          previousPredecessor &&
-          previousPredecessor.height >= layer &&
-          previousPredecessorComputedLabel
-        ) {
-          // We can just reuse the previously computed label.
-          batch.set(
-            [layer, previousPredecessor.key],
-            [
-              previousPredecessor.height,
-              previousPredecessorComputedLabel,
-            ] as SkiplistValue<SummaryData>,
-          );
-
-          continue;
-        }
-
-        const predecessor = await this.getLeftNode(layer, key);
-
-        if (!predecessor) {
-          // If there's no predecessor here, there won't be any on the layers above.
-          break;
-        }
-
-        let newLabel = this.monoid.neutral;
-
-        for await (
-          const entry of this.kv.list<SkiplistValue<SummaryData>>(
-            {
-              start: [layer - 1, predecessor.key[this.valueKeyIndex]],
-              end: previousPredecessor
-                ? [layer - 1, previousPredecessor.key]
-                : [layer - 1, key],
-            },
-          )
-        ) {
-          newLabel = this.monoid.combine(newLabel, entry.value[1]);
-        }
-
-        if (previousPredecessorComputedLabel) {
-          newLabel = this.monoid.combine(
-            newLabel,
-            previousPredecessorComputedLabel,
-          );
-        }
-
-        batch.set(predecessor.key, [
-          predecessor.value[0],
-          newLabel,
-        ] as SkiplistValue<SummaryData>);
-
-        previousPredecessorComputedLabel = newLabel;
-
-        previousPredecessor = {
-          key: predecessor.key[this.valueKeyIndex] as LogicalKey,
-          height: predecessor.value[0],
-        };
-
-        continue;
-      }
-
-      // We also need to recompute the values of overarching values.
-
-      // If the previous overarching predecessor's height is gte the current layer
-      // AND the successor is the same as last time
-      // we can reuse the value from the previous iteration.
-
-      if (
-        previousOverarchingSuccessorHeight &&
-        previousOverarchingSuccessorHeight >= layer &&
-        previousOverarchingPredecessor &&
-        previousOverarchingPredecessor.height >= layer &&
-        previousOverarchingPredecessorComputedLabel
-      ) {
-        batch.set([layer, previousOverarchingPredecessor.key], [
-          previousOverarchingPredecessor.height,
-          previousOverarchingPredecessorComputedLabel,
-        ] as SkiplistValue<SummaryData>);
-
-        continue;
-      }
-
-      const overarchingPredecessor = await this.getLeftNode(layer, key);
-
-      if (!overarchingPredecessor) {
-        // If there's no overarching predecessor here, there never will be.
-        break;
-      }
-
-      const overarchingSuccessor = await this.getRightNode(
-        layer,
-        overarchingPredecessor.key[this.valueKeyIndex] as LogicalKey,
-      );
-
-      let newLabel = this.monoid.neutral;
-
-      for await (
-        const entry of this.kv.list<SkiplistValue<SummaryData>>(
-          {
-            start: [layer - 1, overarchingPredecessor.key[this.valueKeyIndex]],
-            end: previousOverarchingPredecessor
-              ? [layer - 1, previousOverarchingPredecessor.key]
-              : [layer - 1, key],
-          },
-        )
-      ) {
-        const overarchingKey = overarchingPredecessor
-          .key[this.valueKeyIndex] as LogicalKey;
-
-        if (this.logicalKeyCompare(key, overarchingKey) === 0) {
-          continue;
-        }
-
-        newLabel = this.monoid.combine(newLabel, entry.value[1]);
-      }
-
-      if (previousOverarchingPredecessorComputedLabel) {
-        newLabel = this.monoid.combine(
-          newLabel,
-          previousOverarchingPredecessorComputedLabel,
-        );
-      }
-
-      if (previousComputedLabel) {
-        newLabel = this.monoid.combine(newLabel, previousComputedLabel);
-      }
-
-      // The problem: the newly added label is not here!
-
-      if (previousLayerSuccessor) {
-        for await (
-          const entry of this.kv.list<SkiplistValue<SummaryData>>(
-            {
-              start: [layer - 1, previousLayerSuccessor.key],
-              end: overarchingSuccessor
-                ? [
-                  layer - 1,
-                  overarchingSuccessor.key[this.valueKeyIndex] as LogicalKey,
-                ]
-                : [layer],
-            },
-          )
-        ) {
-          newLabel = this.monoid.combine(newLabel, entry.value[1]);
-        }
-      }
-
-      batch.set(overarchingPredecessor.key, [
-        overarchingPredecessor.value[0],
-        newLabel,
-      ] as SkiplistValue<SummaryData>);
-
-      previousComputedLabel = undefined;
-      previousLayerSuccessor = undefined;
-
-      previousOverarchingPredecessor = {
-        key: overarchingPredecessor.key[this.valueKeyIndex] as LogicalKey,
-        height: overarchingPredecessor.value[0],
-      };
-      previousOverarchingPredecessorComputedLabel = newLabel;
-      previousOverarchingSuccessorHeight = overarchingSuccessor
-        ? overarchingSuccessor.value[0]
-        : 65;
-    }
-
+    // Bookkeeping.
     if (insertionHeight > await this.maxHeight()) {
       this.setMaxHeight(insertionHeight);
     }
 
+    // Write mutations to the kv store.
     await batch.commit();
   }
 
@@ -698,6 +521,37 @@ export class Skiplist<
     }
 
     return undefined;
+  }
+
+  /**
+   * Summarise nodes on a single layer until reaching a node whose logical key is >= `end` (the `end` node is *excluded*). If `end` is undefined, summarises untl the end of the layer.
+   *
+   * Returns the empty summary if the sequence of nodes in question is empty.
+   */
+  async summariseSingleLayer(
+    start: PhysicalKey<LogicalKey>,
+    end?: LogicalKey,
+  ): Promise<[SummaryData, number]> {
+    const layer = physicalKeyGetLayer(start);
+    let summary = this.monoid.neutral;
+
+    let currentKey = start;
+    let currentLogicalKey = physicalKeyGetLogicalKey(currentKey);
+
+    while (!end || this.logicalKeyCompare(currentLogicalKey, end) < 0) {
+      const next = await this.getRightNode(currentKey);
+
+      if (!next || physicalKeyGetLayer(next.key) > layer) {
+        break;
+      } else {
+        summary = this.monoid.combine(summary, next.value.summary);
+
+        currentKey = next.key;
+        currentLogicalKey = physicalKeyGetLogicalKey(currentKey);
+      }
+    }
+
+    return summary;
   }
 
   // async remove(key: LogicalKey) {
