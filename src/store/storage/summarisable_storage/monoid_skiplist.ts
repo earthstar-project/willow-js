@@ -3,45 +3,122 @@ import { KeyPart, KvDriver } from "../kv/types.ts";
 import { combineMonoid, LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
 import { SummarisableStorage } from "./types.ts";
 
+/*
+This file implements a skiplist on top of a traditional kv-store.
+The skiplist maps *logical keys* to *logical values*. These are stored as *physical values* in the kv-store, indexed by *physical keys*.
+A pair of a logical key and its logical value is called a *logical entry*, a pair of a physical key and a physical value is called a *phyical entry*.
+
+On the key value store, we create a physical entry for each node in the skip list. We sort these entries by layer first, logical key second.
+*/
+
+type PhysicalKey<LogicalKey extends KeyPart[]> = [
+  number, /* which layer? */
+  ...LogicalKey,
+] | [number /* which layer? */];
+
+function physicalKeyGetLayer<LogicalKey extends KeyPart[]>(
+  pk: PhysicalKey<LogicalKey>,
+): number {
+  return pk[0];
+}
+
+function physicalKeyGetLogicalKey<LogicalKey extends KeyPart[]>(
+  pk: PhysicalKey<LogicalKey>,
+): LogicalKey {
+  return <LogicalKey> <unknown> pk.slice(1);
+}
+
+/*
+Further, the skiplist is summarisable: you can efficiently query for a *summary* of arbitrary ranges, consisting of the number of items in that range, as well as some accumulated monoidal value (see the range-based set reconciliation paper for more details).
+To support this efficiently, each physical value consists not only of a logical value, but also of some metadata.
+*/
+
+type PhysicalValue<LogicalValue, SummaryData> = {
+  /**
+   * The LogicalValue that this entry stores. The only piece of non-metadata.
+   *
+   * Only the physical values on layer zero of the skip list store this, higher layers track metadata only. We forego static typing on this - apologies.
+   */
+  logicalValue?: LogicalValue;
+  /**
+   * The maximum layer in the skip list for which there is an entry with the same logical key.
+   *
+   * Tracked purely as an optimisation detail to be able to omit some kv queries.
+   */
+  maxLayer: number;
+  /**
+   * The number of logical entries on layer zero of the skip list whose key is greater than or equal to ours but strictly less than the key of the next entry on the same layer.
+   */
+  summaryCount: number;
+  /**
+   * The summary data of the logical entries on layer zero of the skip list whose key is greater than or equal to ours but strictly less than the key of the next entry on the same layer.
+   */
+  summaryData: SummaryData;
+};
+
+/**
+ * Used internally to cache skiplist node information in memory.
+ */
+type Node<
+  LogicalKey extends KeyPart[],
+  LogicalValue,
+  SummaryData,
+> = {
+  key: PhysicalKey<LogicalKey>;
+  value: PhysicalValue<LogicalValue, SummaryData>;
+};
+
+// Take this to the power of l to get the probability that the skiplist has a node at layer l.
 const LAYER_INSERT_PROBABILITY = 0.5;
+// Hard limit on the number of layers, never insert above this.
 const LAYER_LEVEL_LIMIT = 64;
 
 type SkiplistOpts<
-  ValueType extends
-    | Uint8Array
-    | string
-    | number
-    | bigint
-    | boolean
-    | symbol,
-  LiftedType,
+  LogicalKey extends KeyPart[],
+  LogicalValue,
+  SummaryData,
 > = {
-  compare: (a: ValueType, b: ValueType) => number;
-  kv: KvDriver;
-  monoid: LiftingMonoid<ValueType, LiftedType>;
+  /**
+   * Return a negative number if a < b, zero if a == b, or a positive number if a > b.
+   *
+   * This **must** coincide with how the underlying kv store compares logical keys!
+   */
+  logicalKeyCompare: (a: LogicalKey, b: LogicalKey) => number;
+  /**
+   * Return true iff a and b are considered equal.
+   */
+  logicalValueEq: (a: LogicalValue, b: LogicalValue) => boolean;
+  kv: KvDriver<
+    PhysicalKey<LogicalKey>,
+    PhysicalValue<LogicalValue, SummaryData>
+  >;
+  monoid: LiftingMonoid<LogicalKey, SummaryData>;
 };
 
-type SkiplistBaseValue<LiftedType> = [number, [LiftedType, number], Uint8Array];
-
-type SkiplistValue<LiftedType> = [number, [LiftedType, number]];
-
 export class Skiplist<
-  ValueType extends KeyPart,
-  LiftedType,
-> implements SummarisableStorage<ValueType, LiftedType> {
-  private compare: (a: ValueType, b: ValueType) => number;
-  private kv: KvDriver;
+  LogicalKey extends KeyPart[],
+  LogicalValue,
+  SummaryData,
+> //implements SummarisableStorage<LogicalKey, SummaryData>
+{
+  private logicalKeyCompare: (a: LogicalKey, b: LogicalKey) => number;
+  private logicalValueEq: (a: LogicalValue, b: LogicalValue) => boolean;
+  private kv: KvDriver<
+    PhysicalKey<LogicalKey>,
+    PhysicalValue<LogicalValue, SummaryData>
+  >;
   private _maxHeight = 0;
   private isSetup = deferred();
-  private monoid: LiftingMonoid<ValueType, [LiftedType, number]>;
+  private monoid: LiftingMonoid<LogicalKey, [SummaryData, number]>;
 
   private layerKeyIndex = 0;
   private valueKeyIndex = 1;
 
-  constructor(opts: SkiplistOpts<ValueType, LiftedType>) {
+  constructor(opts: SkiplistOpts<LogicalKey, LogicalValue, SummaryData>) {
     this.kv = opts.kv;
 
-    this.compare = opts.compare;
+    this.logicalKeyCompare = opts.logicalKeyCompare;
+    this.logicalValueEq = opts.logicalValueEq;
     this.monoid = combineMonoid(opts.monoid, sizeMonoid);
 
     this.setup();
@@ -50,31 +127,35 @@ export class Skiplist<
   async print() {
     console.group("Skiplist contents");
 
-    const map: Map<ValueType, Record<number, [LiftedType, number]>> = new Map();
+    const map: Map<
+      LogicalKey,
+      Record<number, PhysicalValue<LogicalValue, SummaryData>>
+    > = new Map();
 
     for await (
-      const entry of this.kv.list<SkiplistValue<LiftedType>>(
+      const entry of this.kv.list(
         {
           start: [0],
           end: [await this.maxHeight() + 1],
         },
       )
     ) {
-      const key = entry.key[this.valueKeyIndex] as ValueType;
+      const layer = physicalKeyGetLayer(entry.key);
+      const key = physicalKeyGetLogicalKey(entry.key);
 
       const valueEntry = map.get(key);
 
       if (valueEntry) {
         map.set(key, {
           ...valueEntry,
-          [entry.key[0] as number]: entry.value[1],
+          [layer]: entry.value,
         });
 
         continue;
       }
 
       map.set(key, {
-        [entry.key[0] as number]: entry.value[1],
+        [layer]: entry.value,
       });
     }
 
@@ -137,42 +218,163 @@ export class Skiplist<
   }
 
   async insert(
-    key: ValueType,
-    value: Uint8Array,
-    opts?: { layer?: number },
+    key: LogicalKey,
+    value: LogicalValue,
+    // Options are not part of the SummarisableStorage interface, we use them for testing only.
+    opts?: {
+      // Use this number as the layer up to which to insert, instead of choosing one at random.
+      layer?: number;
+    },
   ) {
     await this.isSetup;
 
-    /** The existing baseline insertion on the skiplist. */
-    const existing = await this.kv.get<SkiplistBaseValue<LiftedType>>([
-      0,
-      key,
-    ]);
+    /*
+    Three things to know about insertion:
 
-    if (existing) {
-      await this.kv.set([0, key], [
-        existing[0],
-        existing[1],
+    - we need to insert the correct nodes into the skiplist (in the form of physical entries)
+    - we need to update all labels that require updating
+      - doing this efficiently is the "fun" part of insertion
+    - we want to (and do) perform all kv mutations as a single batch at the end of the operation
+      - this means that we cannot query how we changed lower layers of the skiplist when computing changes to the upper layers
+        - while this complicates the code, it also forces us to be more efficient, since querying the kv store is somewhat expensive
+    */
+
+    /*
+    First, we check whether the logical key is already present. If it is, *and* the associated logical value is equal to the one we are inserting, we do not need to do anything else.
+    Otherwise, we must update the physical kv store by inserting physical entries, and by updating certain labels.
+    */
+
+    const layerZeroPhysicalKey: PhysicalKey<LogicalKey> = [0, ...key];
+    const got = await this.kv.get(layerZeroPhysicalKey);
+
+    if (
+      got &&
+      this.logicalValueEq(
+        got.logicalValue!, // On layer zero, every physical value stores a logical value.
         value,
-      ] as SkiplistBaseValue<LiftedType>);
-
+      )
+    ) {
+      // No kv modification necessary!
       return;
     }
 
+    /*
+    Unfortunately, we need to do some actual work.
+
+    Instead of modifying the kv store directly, we record all operations with this `batch` object. At the very end, we (atomically) perform all batched operations.
+    */
     const batch = this.kv.batch();
 
-    /** A randomly chosen height to insert up to. */
+    // Determine up to which skip list layer to insert physical nodes.
     const insertionHeight = opts?.layer !== undefined
       ? opts.layer
       : randomHeight();
 
-    // console.log(`["${key}", ${insertionHeight}],`);
+    /*
+    Now, the fun begins. Modification of the skiplist has two separate parts:
+
+    1. We need to update layer zero.
+    2. For all greater layers, we need to do some updates that depend on the results of updating the layer below.
+
+    Updating layer zero is far more simple, and it provides the first bit of information-from-the-layer-below for the successive layers. So we start with layer zero.
+    */
+
+    /*
+    In layer zero, we simply create (or overwrite) a node for the inserted entry.
+    We need to compute the label (metadata) of that node, but we need not modify the metadata of any other nodes.
+
+    On layer zero, we do not skip over anything. Hence, we summarise only ourselves.
+    */
+    const layerZeroSummary = await this.monoid.lift(key);
+    const layerZeroPhysicalValue: PhysicalValue<LogicalValue, SummaryData> = {
+      logicalValue: value, // On layer zero, we include the physical value. We won't on higher layers.
+      maxLayer: insertionHeight,
+      summaryCount: layerZeroSummary[1],
+      summaryData: layerZeroSummary[0],
+    };
+
+    batch.set(layerZeroPhysicalKey, layerZeroPhysicalValue);
+
+    /*
+    That is all kv mutation for layer zero, now we need to prepare the information-from-the-layer-below for layer one. Which information is that? So glad you asked, let's define some things!
+
+    Assume we are currently working at layer number `currentLayer`. Two tasks to do in that layer:
+
+    1. If `layer <= insertionHeight`, insert/update a node. To do so, we need to  summarise the correct values - and we will try to be slightly clever about that.
+    2. Update the label of the preceeding node on the same layer (if one exists). Again, there will be cleverness to achieve our time complexity goals.
+
+    The cleverness mostly consists of remembering some nodes from the layer below to get around querying the kv store too often.
+
+    Let `current` denote the node for the current key at layer `currentLayer` (if any).
+    Let `currentLeft` denote the node preceeding `current` at layer `currentLayer`.
+    Left `currentRight` denote the node succceeding `current` at layer `currentLayer`.
+    Let `currentDown` denote the node with the same key as `current` but at layer `currentLayer - 1`.
+    Let `currentLeftDown` denote the node with the same key as `currentLeft` but at layer `currentLayer - 1`.
+    Let `currentRightDown` denote the node with the same key as `currentRight` but at layer `currentLayer - 1`.
+
+    All of these can be undefined, because they might not exist: `current` doesn't exist if `currentLayer > insertionHeight`, `currentLeft` doesn't exist if `current` is a leftmost node, and `currentRight` doesn't exist if `current` is a rightmost node. The down-versions then stop existing one layer higher.
+
+    We can now initialise these for `currentLayer := 1`.
+    */
+
+    // The `...Down` versions refer to layer zero initially.
+    let currentDown: Node<LogicalKey, LogicalValue, SummaryData> | undefined = {
+      key: layerZeroPhysicalKey,
+      value: layerZeroPhysicalValue,
+    };
+    let currentLeftDown:
+      | Node<LogicalKey, LogicalValue, SummaryData>
+      | undefined = await this.getLeftNode(layerZeroPhysicalKey);
+    let currentRightDown:
+      | Node<LogicalKey, LogicalValue, SummaryData>
+      | undefined = await this.getRightNode(layerZeroPhysicalKey);
+    let current: Node<LogicalKey, LogicalValue, SummaryData> | undefined =
+      undefined;
+    let currentLeft: Node<LogicalKey, LogicalValue, SummaryData> | undefined =
+      undefined;
+    let currentRight: Node<LogicalKey, LogicalValue, SummaryData> | undefined =
+      undefined;
+
+    /*
+    Now we iterate through all higher layers (conceptually at least — we do sneak in early returns where possible), copute current, currentLeft, and currentRight based off the -Down versions, record the corresponding kv updates in the batch object, and then set the -Down versions to the current versions before going into the next iteration.
+    */
+    for (
+      let currentLayer = 1;
+      currentLayer <= LAYER_LEVEL_LIMIT;
+      currentLayer++
+    ) {
+      /*
+      At this point in the code, we can assume that the `...Down` nodes to accurately reflect the layer `currentLayer - 1`.
+      We assume `current`, `currentLeft`, and `currentRight` to contain outdated garbage - they merely exist to let us store information without overwriting the informatio from the previous layer.
+      */
+
+      /*
+      All computations for this iteration done now.
+
+      Record the kv updates.
+      */
+      if (current) {
+        batch.set(current.key, current.value);
+      }
+      if (currentLeft) {
+        batch.set(currentLeft.key, currentLeft.value);
+      }
+      if (currentRight) {
+        batch.set(currentRight.key, currentRight.value);
+      }
+
+      // And prepare for the next iteration.
+      currentDown = current;
+      currentLeftDown = currentLeft;
+      currentRightDown = currentRight;
+    }
 
     /** The successor to this key from the previous layer, along with its maximum height. */
-    let previousLayerSuccessor: { key: ValueType; height: number } | undefined =
-      undefined;
+    let previousLayerSuccessor:
+      | { key: LogicalKey; height: number }
+      | undefined = undefined;
     /** The computed label from the previous layer. */
-    let previousComputedLabel: [LiftedType, number] | undefined = undefined;
+    let previousComputedLabel: [SummaryData, number] | undefined = undefined;
 
     const liftedValue = await this.monoid.lift(key, value);
 
@@ -188,7 +390,7 @@ export class Skiplist<
           insertionHeight,
           label,
           value,
-        ] as SkiplistBaseValue<LiftedType>);
+        ] as SkiplistBaseValue<SummaryData>);
 
         continue;
       }
@@ -203,7 +405,9 @@ export class Skiplist<
       ) {
         batch.set(
           [layer, key],
-          [insertionHeight, previousComputedLabel] as SkiplistValue<LiftedType>,
+          [insertionHeight, previousComputedLabel] as SkiplistValue<
+            SummaryData
+          >,
         );
         continue;
       }
@@ -211,13 +415,13 @@ export class Skiplist<
       // The next sibling is unknown, so we can't reuse a cached value.
 
       /** The successor to the inserted key on *this* layer. */
-      const nextSuccessor = await this.getRightItem(layer, key, true);
+      const nextSuccessor = await this.getRightNode(layer, key, true);
 
       // But if there is a previous successor, we can use the previously computed label
       // and start iterating from there.
 
       /** The newly computed label for the inserted value. */
-      let newLabel: [LiftedType, number] = previousComputedLabel ||
+      let newLabel: [SummaryData, number] = previousComputedLabel ||
         liftedValue;
 
       // If there is a previous successor, we can start from there instead of from the insertion key
@@ -227,7 +431,7 @@ export class Skiplist<
         : key;
 
       for await (
-        const entry of this.kv.list<SkiplistValue<LiftedType>>(
+        const entry of this.kv.list<SkiplistValue<SummaryData>>(
           {
             start: [layer - 1, startFrom],
             end: nextSuccessor
@@ -242,12 +446,12 @@ export class Skiplist<
       batch.set([layer, key], [
         insertionHeight,
         newLabel,
-      ] as SkiplistValue<LiftedType>);
+      ] as SkiplistValue<SummaryData>);
 
       previousComputedLabel = newLabel;
       previousLayerSuccessor = nextSuccessor
         ? {
-          key: nextSuccessor.key[this.valueKeyIndex] as ValueType,
+          key: nextSuccessor.key[this.valueKeyIndex] as LogicalKey,
           height: nextSuccessor.value[0],
         }
         : undefined;
@@ -256,17 +460,17 @@ export class Skiplist<
     // Now we recompute the preceding labels.
 
     // For preceding values
-    let previousPredecessor: { key: ValueType; height: number } | undefined =
+    let previousPredecessor: { key: LogicalKey; height: number } | undefined =
       undefined;
-    let previousPredecessorComputedLabel: [LiftedType, number] | undefined =
+    let previousPredecessorComputedLabel: [SummaryData, number] | undefined =
       undefined;
 
     //  For overarching preceding values
     let previousOverarchingPredecessor:
-      | { key: ValueType; height: number }
+      | { key: LogicalKey; height: number }
       | undefined = previousPredecessor;
     let previousOverarchingPredecessorComputedLabel:
-      | [LiftedType, number]
+      | [SummaryData, number]
       | undefined = previousPredecessorComputedLabel;
     let previousOverarchingSuccessorHeight: number | undefined;
 
@@ -292,13 +496,13 @@ export class Skiplist<
             [
               previousPredecessor.height,
               previousPredecessorComputedLabel,
-            ] as SkiplistValue<LiftedType>,
+            ] as SkiplistValue<SummaryData>,
           );
 
           continue;
         }
 
-        const predecessor = await this.getLeftItem(layer, key);
+        const predecessor = await this.getLeftNode(layer, key);
 
         if (!predecessor) {
           // If there's no predecessor here, there won't be any on the layers above.
@@ -308,7 +512,7 @@ export class Skiplist<
         let newLabel = this.monoid.neutral;
 
         for await (
-          const entry of this.kv.list<SkiplistValue<LiftedType>>(
+          const entry of this.kv.list<SkiplistValue<SummaryData>>(
             {
               start: [layer - 1, predecessor.key[this.valueKeyIndex]],
               end: previousPredecessor
@@ -330,12 +534,12 @@ export class Skiplist<
         batch.set(predecessor.key, [
           predecessor.value[0],
           newLabel,
-        ] as SkiplistValue<LiftedType>);
+        ] as SkiplistValue<SummaryData>);
 
         previousPredecessorComputedLabel = newLabel;
 
         previousPredecessor = {
-          key: predecessor.key[this.valueKeyIndex] as ValueType,
+          key: predecessor.key[this.valueKeyIndex] as LogicalKey,
           height: predecessor.value[0],
         };
 
@@ -358,27 +562,27 @@ export class Skiplist<
         batch.set([layer, previousOverarchingPredecessor.key], [
           previousOverarchingPredecessor.height,
           previousOverarchingPredecessorComputedLabel,
-        ] as SkiplistValue<LiftedType>);
+        ] as SkiplistValue<SummaryData>);
 
         continue;
       }
 
-      const overarchingPredecessor = await this.getLeftItem(layer, key);
+      const overarchingPredecessor = await this.getLeftNode(layer, key);
 
       if (!overarchingPredecessor) {
         // If there's no overarching predecessor here, there never will be.
         break;
       }
 
-      const overarchingSuccessor = await this.getRightItem(
+      const overarchingSuccessor = await this.getRightNode(
         layer,
-        overarchingPredecessor.key[this.valueKeyIndex] as ValueType,
+        overarchingPredecessor.key[this.valueKeyIndex] as LogicalKey,
       );
 
       let newLabel = this.monoid.neutral;
 
       for await (
-        const entry of this.kv.list<SkiplistValue<LiftedType>>(
+        const entry of this.kv.list<SkiplistValue<SummaryData>>(
           {
             start: [layer - 1, overarchingPredecessor.key[this.valueKeyIndex]],
             end: previousOverarchingPredecessor
@@ -388,9 +592,9 @@ export class Skiplist<
         )
       ) {
         const overarchingKey = overarchingPredecessor
-          .key[this.valueKeyIndex] as ValueType;
+          .key[this.valueKeyIndex] as LogicalKey;
 
-        if (this.compare(key, overarchingKey) === 0) {
+        if (this.logicalKeyCompare(key, overarchingKey) === 0) {
           continue;
         }
 
@@ -412,13 +616,13 @@ export class Skiplist<
 
       if (previousLayerSuccessor) {
         for await (
-          const entry of this.kv.list<SkiplistValue<LiftedType>>(
+          const entry of this.kv.list<SkiplistValue<SummaryData>>(
             {
               start: [layer - 1, previousLayerSuccessor.key],
               end: overarchingSuccessor
                 ? [
                   layer - 1,
-                  overarchingSuccessor.key[this.valueKeyIndex] as ValueType,
+                  overarchingSuccessor.key[this.valueKeyIndex] as LogicalKey,
                 ]
                 : [layer],
             },
@@ -431,13 +635,13 @@ export class Skiplist<
       batch.set(overarchingPredecessor.key, [
         overarchingPredecessor.value[0],
         newLabel,
-      ] as SkiplistValue<LiftedType>);
+      ] as SkiplistValue<SummaryData>);
 
       previousComputedLabel = undefined;
       previousLayerSuccessor = undefined;
 
       previousOverarchingPredecessor = {
-        key: overarchingPredecessor.key[this.valueKeyIndex] as ValueType,
+        key: overarchingPredecessor.key[this.valueKeyIndex] as LogicalKey,
         height: overarchingPredecessor.value[0],
       };
       previousOverarchingPredecessorComputedLabel = newLabel;
@@ -453,36 +657,36 @@ export class Skiplist<
     await batch.commit();
   }
 
-  private async getRightItem(
-    layer: number,
-    key: ValueType,
-    abstract = false,
-  ) {
-    const nextItems = this.kv.list<SkiplistValue<LiftedType>>({
-      start: [layer, key],
-      end: [layer + 1],
+  /**
+   * Get the node to the right of the given key in the skiplist. Returns undefined if the given key is the rightmost item of its layer.
+   */
+  private async getRightNode(
+    key: PhysicalKey<LogicalKey>,
+  ): Promise<Node<LogicalKey, LogicalValue, SummaryData> | undefined> {
+    const nextItems = this.kv.list({
+      start: key,
+      end: [key[0] + 1], // First node of the next higher layer.
     }, {
-      limit: abstract ? 1 : 2,
-      batchSize: abstract ? 1 : 2,
+      limit: 1,
+      batchSize: 1,
     });
 
-    let shouldReturn = abstract;
-
     for await (const next of nextItems) {
-      if (shouldReturn) {
-        return next;
-      } else {
-        shouldReturn = true;
-      }
+      return next;
     }
 
     return undefined;
   }
 
-  private async getLeftItem(layer: number, key: Deno.KvKeyPart) {
-    const nextItems = this.kv.list<SkiplistValue<LiftedType>>({
-      start: [layer],
-      end: [layer, key],
+  /**
+   * Get the node to the left of the given key in the skiplist. Returns undefined if the given key is the leftmost item of its layer.
+   */
+  private async getLeftNode(
+    key: PhysicalKey<LogicalKey>,
+  ): Promise<Node<LogicalKey, LogicalValue, SummaryData> | undefined> {
+    const nextItems = this.kv.list({
+      start: [key[0]], // First node on the same layer as `key`.
+      end: key,
     }, {
       reverse: true,
       limit: 1,
@@ -496,481 +700,483 @@ export class Skiplist<
     return undefined;
   }
 
-  async remove(key: ValueType) {
-    const toRemoveBase = await this.kv.get<SkiplistBaseValue<LiftedType>>([
-      0,
-      key,
-    ]);
-
-    if (!toRemoveBase) {
-      return false;
-    }
-
-    const batch = this.kv.batch();
-
-    const height = toRemoveBase[0];
-
-    let previousLabel: [ValueType, [LiftedType, number]] | null = null;
-    let previousSuccessor: ValueType | undefined;
-
-    for (let layer = 0; layer <= height; layer++) {
-      batch.delete([layer, key]);
-    }
-
-    for (let layer = 1; layer <= this._maxHeight; layer++) {
-      const predecessor = await this.getLeftItem(layer, key);
-
-      if (!predecessor) {
-        break;
-      }
-
-      const successor = await this.getRightItem(
-        layer,
-        layer <= height
-          ? key
-          : predecessor.key[this.valueKeyIndex] as ValueType,
-      );
-
-      if (layer - 1 === 0) {
-        const fromPredecessorToSuccessor = this.kv.list<
-          SkiplistBaseValue<LiftedType>
-        >({
-          start: [0, predecessor.key[this.valueKeyIndex]],
-          end: successor ? [0, successor.key[this.valueKeyIndex]] : [1],
-        });
-
-        let newLabel = this.monoid.neutral;
-
-        for await (const entry of fromPredecessorToSuccessor) {
-          const entryKey = entry.key[this.valueKeyIndex] as ValueType;
-          if (this.compare(entryKey, key) === 0) {
-            continue;
-          }
-
-          newLabel = this.monoid.combine(newLabel, entry.value[1]);
-        }
-
-        const predecessorVal = await this.get(
-          predecessor.key[this.valueKeyIndex] as ValueType,
-        );
-
-        batch.set(
-          predecessor.key,
-          [
-            predecessor.value[0],
-            newLabel,
-            predecessorVal,
-          ] as SkiplistBaseValue<LiftedType>,
-        );
-
-        previousLabel = [
-          predecessor.key[this.valueKeyIndex] as ValueType,
-          newLabel,
-        ];
-
-        previousSuccessor = successor
-          ? successor.key[this.valueKeyIndex] as ValueType
-          : undefined;
-
-        continue;
-      }
-
-      const predecessorIsSame = (!predecessor && !previousLabel) ||
-        predecessor && previousLabel &&
-          this.compare(
-              previousLabel[0],
-              predecessor.key[this.valueKeyIndex] as ValueType,
-            ) === 0;
-
-      const successorIsSame = (!successor && !previousSuccessor) ||
-        successor && previousSuccessor &&
-          this.compare(
-              previousSuccessor,
-              successor.key[this.valueKeyIndex] as ValueType,
-            ) === 0;
-
-      if (predecessorIsSame && successorIsSame && previousLabel) {
-        batch.set(
-          predecessor.key,
-          [predecessor.value[0], previousLabel[1]] as SkiplistValue<LiftedType>,
-        );
-
-        continue;
-      }
-
-      const fromPredecessorToSuccessor = this.kv.list<
-        SkiplistValue<LiftedType>
-      >({
-        start: [layer - 1, predecessor.key[this.valueKeyIndex]],
-        end: successor
-          ? [layer - 1, successor.key[this.valueKeyIndex]]
-          : [layer],
-      });
-
-      let newLabel = this.monoid.neutral;
-
-      for await (const entry of fromPredecessorToSuccessor) {
-        const entryValue = entry.key[this.valueKeyIndex] as ValueType;
-
-        if (this.compare) {
-          if (
-            previousLabel && this.compare(
-                entryValue,
-                previousLabel[0],
-              ) === 0
-          ) {
-            newLabel = this.monoid.combine(newLabel, previousLabel[1]);
-          } else if (this.compare(entryValue, key) === 0) {
-            continue;
-          } else {
-            newLabel = this.monoid.combine(newLabel, entry.value[1]);
-          }
-        }
-      }
-
-      batch.set(
-        predecessor.key,
-        [predecessor.value[0], newLabel] as SkiplistValue<LiftedType>,
-      );
-
-      previousLabel = [
-        predecessor.key[this.valueKeyIndex] as ValueType,
-        newLabel,
-      ];
-
-      previousSuccessor = successor
-        ? successor.key[this.valueKeyIndex] as ValueType
-        : undefined;
-
-      const remainingOnThisLayer = this.kv.list<ValueType>({
-        start: [layer],
-        end: [layer + 1],
-      }, {
-        limit: 1,
-      });
-
-      let canForgetLayer = true;
-
-      for await (const _result of remainingOnThisLayer) {
-        canForgetLayer = false;
-      }
-
-      if (canForgetLayer && layer > await this.maxHeight()) {
-        this.setMaxHeight(layer - 1);
-      }
-    }
-
-    await batch.commit();
-
-    return true;
-  }
-
-  async get(key: ValueType) {
-    const result = await this.kv.get<SkiplistBaseValue<LiftedType>>([
-      0,
-      key,
-    ]);
-
-    if (result) {
-      return result[2];
-    }
-
-    return undefined;
-  }
-
-  async summarise(
-    start: ValueType,
-    end: ValueType,
-  ): Promise<{ fingerprint: LiftedType; size: number }> {
-    // Get the first value.
-
-    // For each value you find, shoot up.
-
-    // Keep moving rightwards until you overshoot.
-
-    // Assemble the tail using start: key where things started to go wrong, end: end.
-
-    const accumulateUntilOvershoot = async (
-      start: ValueType | undefined,
-      end: ValueType | undefined,
-      layer: number,
-    ): Promise<
-      { label: [LiftedType, number]; overshootKey: ValueType | undefined }
-    > => {
-      const startUntilEnd = this.kv.list<SkiplistValue<LiftedType>>({
-        start: start ? [layer, start] : [layer],
-        end: end ? [layer, end] : [layer + 1],
-      });
-
-      let label = this.monoid.neutral;
-
-      let candidateLabel = this.monoid.neutral;
-      let overshootKey: ValueType | undefined;
-
-      for await (const entry of startUntilEnd) {
-        label = this.monoid.combine(label, candidateLabel);
-        candidateLabel = this.monoid.neutral;
-
-        const [entryHeight, entryLabel] = entry.value;
-
-        if (entryHeight <= layer) {
-          overshootKey = entry.key[this.valueKeyIndex] as ValueType;
-          candidateLabel = entryLabel;
-          continue;
-        }
-
-        const { label: aboveLabel, overshootKey: aboveOvershootKey } =
-          await accumulateUntilOvershoot(
-            start,
-            end,
-            entryHeight,
-          );
-
-        overshootKey = aboveOvershootKey;
-
-        label = this.monoid.combine(label, aboveLabel);
-
-        break;
-      }
-
-      // Now we must determine what to do with the leftover candidate.
-      const [, candidateSize] = candidateLabel;
-
-      if (candidateSize === 1 || end === undefined) {
-        label = this.monoid.combine(label, candidateLabel);
-        return { label, overshootKey: undefined };
-      }
-
-      return { label, overshootKey };
-    };
-
-    const getTail = async (
-      overshootLabel: ValueType,
-      end: ValueType | undefined,
-      layer: number,
-    ): Promise<[LiftedType, number]> => {
-      const endUntilOvershoot = this.kv.list<SkiplistValue<LiftedType>>({
-        start: [layer, overshootLabel],
-        end: end ? [layer, end] : [layer + 1],
-      }, {
-        reverse: true,
-      });
-
-      let label = this.monoid.neutral;
-
-      for await (const entry of endUntilOvershoot) {
-        const [entryHeight, entryLabel] = entry.value;
-
-        label = this.monoid.combine(entryLabel, label);
-
-        if (entryHeight <= layer) {
-          continue;
-        }
-
-        const entryValue = entry.key[this.valueKeyIndex] as ValueType;
-
-        const aboveLabel = await getTail(
-          overshootLabel,
-          entryValue,
-          entryHeight,
-        );
-
-        label = this.monoid.combine(aboveLabel, label);
-
-        break;
-      }
-
-      return label;
-    };
-
-    const accumulateLabel = async (
-      { start, end }: {
-        start?: ValueType;
-        end?: ValueType;
-      },
-    ) => {
-      const firstEntry = this.kv.list<SkiplistBaseValue<LiftedType>>({
-        start: start ? [0, start] : [0],
-        end: [1],
-      }, {
-        limit: 1,
-      });
-
-      for await (const first of firstEntry) {
-        const height = first.value[0];
-
-        const { label: headLabel, overshootKey } =
-          await accumulateUntilOvershoot(
-            start,
-            end,
-            height,
-          );
-
-        if (!overshootKey) {
-          // Very lucky.
-
-          return headLabel;
-        }
-
-        // Get the tail, return it.
-        const tailLabel = await getTail(overshootKey, end, 0);
-
-        return this.monoid.combine(headLabel, tailLabel);
-      }
-
-      return this.monoid.neutral;
-    };
-
-    const argOrder = this.compare(start, end);
-
-    if (argOrder < 0) {
-      const [fingerprint, size] = await accumulateLabel({ start, end });
-
-      return { fingerprint, size };
-    } else if (argOrder > 0) {
-      const firstHalf = await accumulateLabel({ end });
-
-      const secondHalf = await accumulateLabel({ start });
-
-      const [fingerprint, size] = this.monoid.combine(firstHalf, secondHalf);
-
-      return { fingerprint, size };
-    } else {
-      const [fingerprint, size] = await accumulateLabel({});
-
-      return { fingerprint, size };
-    }
-  }
-
-  async *entries(
-    start: ValueType | undefined,
-    end: ValueType | undefined,
-    opts?: {
-      limit?: number;
-      reverse?: boolean;
-    },
-  ): AsyncIterable<{ key: ValueType; value: Uint8Array }> {
-    let yielded = 0;
-    const hitLimit = () => {
-      if (opts?.limit) {
-        yielded++;
-
-        if (yielded >= opts.limit) {
-          return true;
-        }
-      }
-
-      return false;
-    };
-
-    if (!start && !end) {
-      for await (const result of this.allEntries(opts?.reverse)) {
-        yield result;
-        if (hitLimit()) break;
-      }
-
-      return;
-    }
-
-    const argOrder = start && end ? this.compare(start, end) : -1;
-
-    if (argOrder === 0) {
-      for await (const result of this.allEntries(opts?.reverse)) {
-        yield result;
-
-        if (hitLimit()) break;
-      }
-    } else if (argOrder < 0) {
-      const results = this.kv.list<SkiplistBaseValue<LiftedType>>({
-        start: start ? [0, start] : [0],
-        end: end ? [0, end] : [1],
-      }, {
-        limit: opts?.limit,
-        reverse: opts?.reverse,
-      });
-
-      for await (const entry of results) {
-        yield {
-          key: entry.key[this.valueKeyIndex] as ValueType,
-          value: entry.value[2],
-        };
-      }
-    } else if (opts?.reverse) {
-      const secondHalf = this.kv.list<SkiplistBaseValue<LiftedType>>({
-        start: start ? [0, start] : [0],
-        end: [1],
-      }, { reverse: true });
-
-      for await (const entry of secondHalf) {
-        yield {
-          key: entry.key[this.valueKeyIndex] as ValueType,
-          value: entry.value[2],
-        };
-
-        if (hitLimit()) break;
-      }
-
-      const firstHalf = this.kv.list<SkiplistBaseValue<LiftedType>>({
-        start: [0],
-        end: end ? [0, end] : [1],
-      }, { reverse: true });
-
-      for await (const entry of firstHalf) {
-        yield {
-          key: entry.key[this.valueKeyIndex] as ValueType,
-          value: entry.value[2],
-        };
-
-        if (hitLimit()) break;
-      }
-    } else {
-      const firstHalf = this.kv.list<SkiplistBaseValue<LiftedType>>({
-        start: [0],
-        end: end ? [0, end] : [1],
-      });
-
-      for await (const entry of firstHalf) {
-        yield {
-          key: entry.key[this.valueKeyIndex] as ValueType,
-          value: entry.value[2],
-        };
-
-        if (hitLimit()) break;
-      }
-
-      const secondHalf = this.kv.list<SkiplistBaseValue<LiftedType>>({
-        start: start ? [0, start] : [0],
-        end: [1],
-      });
-
-      for await (const entry of secondHalf) {
-        yield {
-          key: entry.key[this.valueKeyIndex] as ValueType,
-          value: entry.value[2],
-        };
-
-        if (hitLimit()) break;
-      }
-    }
-  }
-
-  async *allEntries(
-    reverse?: boolean,
-  ): AsyncIterable<{ key: ValueType; value: Uint8Array }> {
-    const iter = this.kv.list<SkiplistBaseValue<LiftedType>>({
-      start: [0],
-      end: [1],
-    }, {
-      reverse,
-    });
-
-    for await (const entry of iter) {
-      yield {
-        key: entry.key[this.valueKeyIndex] as ValueType,
-        value: entry.value[2],
-      };
-    }
-  }
+  // async remove(key: LogicalKey) {
+  //   const toRemoveBase = await this.kv.get<SkiplistBaseValue<SummaryData>>([
+  //     0,
+  //     key,
+  //   ]);
+
+  //   if (!toRemoveBase) {
+  //     return false;
+  //   }
+
+  //   const batch = this.kv.batch();
+
+  //   const height = toRemoveBase[0];
+
+  //   let previousLabel: [LogicalKey, [SummaryData, number]] | null = null;
+  //   let previousSuccessor: LogicalKey | undefined;
+
+  //   for (let layer = 0; layer <= height; layer++) {
+  //     batch.delete([layer, key]);
+  //   }
+
+  //   for (let layer = 1; layer <= this._maxHeight; layer++) {
+  //     const predecessor = await this.getLeftNode(layer, key);
+
+  //     if (!predecessor) {
+  //       break;
+  //     }
+
+  //     const successor = await this.getRightNode(
+  //       layer,
+  //       layer <= height
+  //         ? key
+  //         : predecessor.key[this.valueKeyIndex] as LogicalKey,
+  //     );
+
+  //     if (layer - 1 === 0) {
+  //       const fromPredecessorToSuccessor = this.kv.list<
+  //         SkiplistBaseValue<SummaryData>
+  //       >({
+  //         start: [0, predecessor.key[this.valueKeyIndex]],
+  //         end: successor ? [0, successor.key[this.valueKeyIndex]] : [1],
+  //       });
+
+  //       let newLabel = this.monoid.neutral;
+
+  //       for await (const entry of fromPredecessorToSuccessor) {
+  //         const entryKey = entry.key[this.valueKeyIndex] as LogicalKey;
+  //         if (this.compare(entryKey, key) === 0) {
+  //           continue;
+  //         }
+
+  //         newLabel = this.monoid.combine(newLabel, entry.value[1]);
+  //       }
+
+  //       const predecessorVal = await this.get(
+  //         predecessor.key[this.valueKeyIndex] as LogicalKey,
+  //       );
+
+  //       batch.set(
+  //         predecessor.key,
+  //         [
+  //           predecessor.value[0],
+  //           newLabel,
+  //           predecessorVal,
+  //         ] as SkiplistBaseValue<SummaryData>,
+  //       );
+
+  //       previousLabel = [
+  //         predecessor.key[this.valueKeyIndex] as LogicalKey,
+  //         newLabel,
+  //       ];
+
+  //       previousSuccessor = successor
+  //         ? successor.key[this.valueKeyIndex] as LogicalKey
+  //         : undefined;
+
+  //       continue;
+  //     }
+
+  //     const predecessorIsSame = (!predecessor && !previousLabel) ||
+  //       predecessor && previousLabel &&
+  //         this.compare(
+  //             previousLabel[0],
+  //             predecessor.key[this.valueKeyIndex] as LogicalKey,
+  //           ) === 0;
+
+  //     const successorIsSame = (!successor && !previousSuccessor) ||
+  //       successor && previousSuccessor &&
+  //         this.compare(
+  //             previousSuccessor,
+  //             successor.key[this.valueKeyIndex] as LogicalKey,
+  //           ) === 0;
+
+  //     if (predecessorIsSame && successorIsSame && previousLabel) {
+  //       batch.set(
+  //         predecessor.key,
+  //         [predecessor.value[0], previousLabel[1]] as SkiplistValue<
+  //           SummaryData
+  //         >,
+  //       );
+
+  //       continue;
+  //     }
+
+  //     const fromPredecessorToSuccessor = this.kv.list<
+  //       SkiplistValue<SummaryData>
+  //     >({
+  //       start: [layer - 1, predecessor.key[this.valueKeyIndex]],
+  //       end: successor
+  //         ? [layer - 1, successor.key[this.valueKeyIndex]]
+  //         : [layer],
+  //     });
+
+  //     let newLabel = this.monoid.neutral;
+
+  //     for await (const entry of fromPredecessorToSuccessor) {
+  //       const entryValue = entry.key[this.valueKeyIndex] as LogicalKey;
+
+  //       if (this.compare) {
+  //         if (
+  //           previousLabel && this.compare(
+  //               entryValue,
+  //               previousLabel[0],
+  //             ) === 0
+  //         ) {
+  //           newLabel = this.monoid.combine(newLabel, previousLabel[1]);
+  //         } else if (this.compare(entryValue, key) === 0) {
+  //           continue;
+  //         } else {
+  //           newLabel = this.monoid.combine(newLabel, entry.value[1]);
+  //         }
+  //       }
+  //     }
+
+  //     batch.set(
+  //       predecessor.key,
+  //       [predecessor.value[0], newLabel] as SkiplistValue<SummaryData>,
+  //     );
+
+  //     previousLabel = [
+  //       predecessor.key[this.valueKeyIndex] as LogicalKey,
+  //       newLabel,
+  //     ];
+
+  //     previousSuccessor = successor
+  //       ? successor.key[this.valueKeyIndex] as LogicalKey
+  //       : undefined;
+
+  //     const remainingOnThisLayer = this.kv.list<LogicalKey>({
+  //       start: [layer],
+  //       end: [layer + 1],
+  //     }, {
+  //       limit: 1,
+  //     });
+
+  //     let canForgetLayer = true;
+
+  //     for await (const _result of remainingOnThisLayer) {
+  //       canForgetLayer = false;
+  //     }
+
+  //     if (canForgetLayer && layer > await this.maxHeight()) {
+  //       this.setMaxHeight(layer - 1);
+  //     }
+  //   }
+
+  //   await batch.commit();
+
+  //   return true;
+  // }
+
+  // async get(key: LogicalKey) {
+  //   const result = await this.kv.get<SkiplistBaseValue<SummaryData>>([
+  //     0,
+  //     key,
+  //   ]);
+
+  //   if (result) {
+  //     return result[2];
+  //   }
+
+  //   return undefined;
+  // }
+
+  // async summarise(
+  //   start: LogicalKey,
+  //   end: LogicalKey,
+  // ): Promise<{ fingerprint: SummaryData; size: number }> {
+  //   // Get the first value.
+
+  //   // For each value you find, shoot up.
+
+  //   // Keep moving rightwards until you overshoot.
+
+  //   // Assemble the tail using start: key where things started to go wrong, end: end.
+
+  //   const accumulateUntilOvershoot = async (
+  //     start: LogicalKey | undefined,
+  //     end: LogicalKey | undefined,
+  //     layer: number,
+  //   ): Promise<
+  //     { label: [SummaryData, number]; overshootKey: LogicalKey | undefined }
+  //   > => {
+  //     const startUntilEnd = this.kv.list<SkiplistValue<SummaryData>>({
+  //       start: start ? [layer, start] : [layer],
+  //       end: end ? [layer, end] : [layer + 1],
+  //     });
+
+  //     let label = this.monoid.neutral;
+
+  //     let candidateLabel = this.monoid.neutral;
+  //     let overshootKey: LogicalKey | undefined;
+
+  //     for await (const entry of startUntilEnd) {
+  //       label = this.monoid.combine(label, candidateLabel);
+  //       candidateLabel = this.monoid.neutral;
+
+  //       const [entryHeight, entryLabel] = entry.value;
+
+  //       if (entryHeight <= layer) {
+  //         overshootKey = entry.key[this.valueKeyIndex] as LogicalKey;
+  //         candidateLabel = entryLabel;
+  //         continue;
+  //       }
+
+  //       const { label: aboveLabel, overshootKey: aboveOvershootKey } =
+  //         await accumulateUntilOvershoot(
+  //           start,
+  //           end,
+  //           entryHeight,
+  //         );
+
+  //       overshootKey = aboveOvershootKey;
+
+  //       label = this.monoid.combine(label, aboveLabel);
+
+  //       break;
+  //     }
+
+  //     // Now we must determine what to do with the leftover candidate.
+  //     const [, candidateSize] = candidateLabel;
+
+  //     if (candidateSize === 1 || end === undefined) {
+  //       label = this.monoid.combine(label, candidateLabel);
+  //       return { label, overshootKey: undefined };
+  //     }
+
+  //     return { label, overshootKey };
+  //   };
+
+  //   const getTail = async (
+  //     overshootLabel: LogicalKey,
+  //     end: LogicalKey | undefined,
+  //     layer: number,
+  //   ): Promise<[SummaryData, number]> => {
+  //     const endUntilOvershoot = this.kv.list<SkiplistValue<SummaryData>>({
+  //       start: [layer, overshootLabel],
+  //       end: end ? [layer, end] : [layer + 1],
+  //     }, {
+  //       reverse: true,
+  //     });
+
+  //     let label = this.monoid.neutral;
+
+  //     for await (const entry of endUntilOvershoot) {
+  //       const [entryHeight, entryLabel] = entry.value;
+
+  //       label = this.monoid.combine(entryLabel, label);
+
+  //       if (entryHeight <= layer) {
+  //         continue;
+  //       }
+
+  //       const entryValue = entry.key[this.valueKeyIndex] as LogicalKey;
+
+  //       const aboveLabel = await getTail(
+  //         overshootLabel,
+  //         entryValue,
+  //         entryHeight,
+  //       );
+
+  //       label = this.monoid.combine(aboveLabel, label);
+
+  //       break;
+  //     }
+
+  //     return label;
+  //   };
+
+  //   const accumulateLabel = async (
+  //     { start, end }: {
+  //       start?: LogicalKey;
+  //       end?: LogicalKey;
+  //     },
+  //   ) => {
+  //     const firstEntry = this.kv.list<SkiplistBaseValue<SummaryData>>({
+  //       start: start ? [0, start] : [0],
+  //       end: [1],
+  //     }, {
+  //       limit: 1,
+  //     });
+
+  //     for await (const first of firstEntry) {
+  //       const height = first.value[0];
+
+  //       const { label: headLabel, overshootKey } =
+  //         await accumulateUntilOvershoot(
+  //           start,
+  //           end,
+  //           height,
+  //         );
+
+  //       if (!overshootKey) {
+  //         // Very lucky.
+
+  //         return headLabel;
+  //       }
+
+  //       // Get the tail, return it.
+  //       const tailLabel = await getTail(overshootKey, end, 0);
+
+  //       return this.monoid.combine(headLabel, tailLabel);
+  //     }
+
+  //     return this.monoid.neutral;
+  //   };
+
+  //   const argOrder = this.compare(start, end);
+
+  //   if (argOrder < 0) {
+  //     const [fingerprint, size] = await accumulateLabel({ start, end });
+
+  //     return { fingerprint, size };
+  //   } else if (argOrder > 0) {
+  //     const firstHalf = await accumulateLabel({ end });
+
+  //     const secondHalf = await accumulateLabel({ start });
+
+  //     const [fingerprint, size] = this.monoid.combine(firstHalf, secondHalf);
+
+  //     return { fingerprint, size };
+  //   } else {
+  //     const [fingerprint, size] = await accumulateLabel({});
+
+  //     return { fingerprint, size };
+  //   }
+  // }
+
+  // async *entries(
+  //   start: LogicalKey | undefined,
+  //   end: LogicalKey | undefined,
+  //   opts?: {
+  //     limit?: number;
+  //     reverse?: boolean;
+  //   },
+  // ): AsyncIterable<{ key: LogicalKey; value: Uint8Array }> {
+  //   let yielded = 0;
+  //   const hitLimit = () => {
+  //     if (opts?.limit) {
+  //       yielded++;
+
+  //       if (yielded >= opts.limit) {
+  //         return true;
+  //       }
+  //     }
+
+  //     return false;
+  //   };
+
+  //   if (!start && !end) {
+  //     for await (const result of this.allEntries(opts?.reverse)) {
+  //       yield result;
+  //       if (hitLimit()) break;
+  //     }
+
+  //     return;
+  //   }
+
+  //   const argOrder = start && end ? this.compare(start, end) : -1;
+
+  //   if (argOrder === 0) {
+  //     for await (const result of this.allEntries(opts?.reverse)) {
+  //       yield result;
+
+  //       if (hitLimit()) break;
+  //     }
+  //   } else if (argOrder < 0) {
+  //     const results = this.kv.list<SkiplistBaseValue<SummaryData>>({
+  //       start: start ? [0, start] : [0],
+  //       end: end ? [0, end] : [1],
+  //     }, {
+  //       limit: opts?.limit,
+  //       reverse: opts?.reverse,
+  //     });
+
+  //     for await (const entry of results) {
+  //       yield {
+  //         key: entry.key[this.valueKeyIndex] as LogicalKey,
+  //         value: entry.value[2],
+  //       };
+  //     }
+  //   } else if (opts?.reverse) {
+  //     const secondHalf = this.kv.list<SkiplistBaseValue<SummaryData>>({
+  //       start: start ? [0, start] : [0],
+  //       end: [1],
+  //     }, { reverse: true });
+
+  //     for await (const entry of secondHalf) {
+  //       yield {
+  //         key: entry.key[this.valueKeyIndex] as LogicalKey,
+  //         value: entry.value[2],
+  //       };
+
+  //       if (hitLimit()) break;
+  //     }
+
+  //     const firstHalf = this.kv.list<SkiplistBaseValue<SummaryData>>({
+  //       start: [0],
+  //       end: end ? [0, end] : [1],
+  //     }, { reverse: true });
+
+  //     for await (const entry of firstHalf) {
+  //       yield {
+  //         key: entry.key[this.valueKeyIndex] as LogicalKey,
+  //         value: entry.value[2],
+  //       };
+
+  //       if (hitLimit()) break;
+  //     }
+  //   } else {
+  //     const firstHalf = this.kv.list<SkiplistBaseValue<SummaryData>>({
+  //       start: [0],
+  //       end: end ? [0, end] : [1],
+  //     });
+
+  //     for await (const entry of firstHalf) {
+  //       yield {
+  //         key: entry.key[this.valueKeyIndex] as LogicalKey,
+  //         value: entry.value[2],
+  //       };
+
+  //       if (hitLimit()) break;
+  //     }
+
+  //     const secondHalf = this.kv.list<SkiplistBaseValue<SummaryData>>({
+  //       start: start ? [0, start] : [0],
+  //       end: [1],
+  //     });
+
+  //     for await (const entry of secondHalf) {
+  //       yield {
+  //         key: entry.key[this.valueKeyIndex] as LogicalKey,
+  //         value: entry.value[2],
+  //       };
+
+  //       if (hitLimit()) break;
+  //     }
+  //   }
+  // }
+
+  // async *allEntries(
+  //   reverse?: boolean,
+  // ): AsyncIterable<{ key: LogicalKey; value: Uint8Array }> {
+  //   const iter = this.kv.list<SkiplistBaseValue<SummaryData>>({
+  //     start: [0],
+  //     end: [1],
+  //   }, {
+  //     reverse,
+  //   });
+
+  //   for await (const entry of iter) {
+  //     yield {
+  //       key: entry.key[this.valueKeyIndex] as LogicalKey,
+  //       value: entry.value[2],
+  //     };
+  //   }
+  // }
 }
 
 function randomHeight() {

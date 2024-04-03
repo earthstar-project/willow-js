@@ -1,5 +1,11 @@
-export type LiftingMonoid<KeyType, LiftedType> = {
-  lift: (key: KeyType, value: Uint8Array) => Promise<LiftedType>;
+/**
+ * This interface combines two bits of functionality:
+ * 
+ * 1. Lifting values of some type `BaseType` into the universe of a monoid (`LiftedType`).
+ * 2. Information about the moniod of universe `LiftedType` (the neutral element and the combine function).
+ */
+export type LiftingMonoid<BaseType, LiftedType> = {
+  lift: (base: BaseType) => Promise<LiftedType>;
   combine: (
     a: LiftedType,
     b: LiftedType,
@@ -13,8 +19,8 @@ export function combineMonoid<V, AL, BL>(
   b: LiftingMonoid<V, BL>,
 ): LiftingMonoid<V, [AL, BL]> {
   return {
-    lift: async (i, j) => {
-      return [await a.lift(i, j), await b.lift(i, j)];
+    lift: async (base) => {
+      return [await a.lift(base), await b.lift(base)];
     },
     combine: (ia, ib) => {
       const fst = a.combine(ia[0], ib[0]);

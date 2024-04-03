@@ -6,26 +6,24 @@ export type KeyPart =
   | boolean
   | symbol;
 
-export type Key = KeyPart[];
-
-export type KvBatch = {
-  set: (key: Key, value: unknown) => void;
+export type KvBatch<Key extends KeyPart[], Value> = {
+  set: (key: Key, value: Value) => void;
   delete: (key: Key) => void;
   commit: () => Promise<void>;
 };
 
-export interface KvDriver {
-  get<ValueType>(key: Key): Promise<ValueType | undefined>;
-  set(key: Key, value: unknown): Promise<void>;
+export interface KvDriver<Key extends KeyPart[], Value> {
+  get(key: Key): Promise<Value | undefined>;
+  set(key: Key, value: Value): Promise<void>;
   delete(key: Key): Promise<void>;
-  list<ValueType>(
+  list(
     selector: { start: Key; end: Key } | { prefix: Key },
     opts?: {
       reverse?: boolean;
       limit?: number;
       batchSize?: number;
     },
-  ): AsyncIterable<{ key: Key; value: ValueType }>;
+  ): AsyncIterable<{ key: Key; value: Value }>;
   clear(opts?: { prefix: Key; start: Key; end: Key }): Promise<void>;
-  batch(): KvBatch;
+  batch(): KvBatch<Key, Value>;
 }

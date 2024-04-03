@@ -35,11 +35,11 @@ const skiplist = new Skiplist(
 );
 
 const set: [string, number][] = [
-  ["w", 1],
-  ["f", 0],
+  // ["f", 0],
   ["n", 3],
+  ["w", 1],
   ["v", 0],
-  ["u", 1],
+  // ["u", 1],
 ];
 
 for (const [letter, level] of set) {
