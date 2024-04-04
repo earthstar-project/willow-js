@@ -1,4 +1,4 @@
-import { FIFO } from "../../../deps.ts";
+import { defaultEntry, Entry, FIFO } from "../../../deps.ts";
 import { WillowError } from "../../errors.ts";
 import {
   LogicalChannel,
@@ -9,6 +9,7 @@ import {
   MSG_CONTROL_FREE,
   MSG_CONTROL_ISSUE_GUARANTEE,
   MSG_CONTROL_PLEAD,
+  MSG_DATA_SEND_ENTRY,
   MSG_PAI_BIND_FRAGMENT,
   MSG_PAI_REPLY_FRAGMENT,
   MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
@@ -52,6 +53,7 @@ import {
   ReconcileMsgTracker,
   ReconcileMsgTrackerOpts,
 } from "../reconciliation/reconcile_msg_tracker.ts";
+import { encodeDataSendEntry } from "./data.ts";
 
 export type EncodedSyncMessage = {
   channel: LogicalChannel | null;
@@ -114,6 +116,11 @@ export class MessageEncoder<
         handle: bigint,
       ) => ReadCapPrivy<NamespaceId, SubspaceId>;
       getCap: (handle: bigint) => ReadCapability;
+      getCurrentlySentEntry: () => Entry<
+        NamespaceId,
+        SubspaceId,
+        PayloadDigest
+      >;
     } & ReconcileMsgTrackerOpts<NamespaceId, SubspaceId, PayloadDigest>,
   ) {
     this.reconcileMsgTracker = new ReconcileMsgTracker(opts);
@@ -323,6 +330,25 @@ export class MessageEncoder<
 
         this.reconcileMsgTracker.onSendEntry(message);
 
+        break;
+      }
+
+      // Data
+
+      case MSG_DATA_SEND_ENTRY: {
+        const bytes = encodeDataSendEntry(message, {
+          encodeNamespaceId: this.schemes.namespace.encode,
+          encodeDynamicToken:
+            this.schemes.authorisationToken.encodings.dynamicToken.encode,
+          encodeSubspaceId: this.schemes.subspace.encode,
+          encodePayloadDigest: this.schemes.payload.encode,
+          isEqualNamespace: this.schemes.namespace.isEqual,
+          orderSubspace: this.schemes.subspace.order,
+          pathScheme: this.schemes.path,
+          currentlySentEntry: this.opts.getCurrentlySentEntry(),
+        });
+
+        push(LogicalChannel.DataChannel, bytes);
         break;
       }
 

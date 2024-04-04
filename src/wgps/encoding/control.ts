@@ -17,6 +17,8 @@ export function channelMaskStart(
   switch (channel) {
     case LogicalChannel.ReconciliationChannel:
       return mask;
+    case LogicalChannel.DataChannel:
+      return mask | 0x20;
     case LogicalChannel.IntersectionChannel:
       return mask | 0x40;
     case LogicalChannel.CapabilityChannel:
@@ -32,6 +34,8 @@ export function channelMaskEnd(mask: number, channel: LogicalChannel): number {
   switch (channel) {
     case LogicalChannel.ReconciliationChannel:
       return mask;
+    case LogicalChannel.DataChannel:
+      return mask | 0x1;
     case LogicalChannel.IntersectionChannel:
       return mask | 0x2;
     case LogicalChannel.CapabilityChannel:

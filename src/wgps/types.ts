@@ -67,6 +67,8 @@ export enum HandleType {
 export enum LogicalChannel {
   /** Logical channel for performing 3d range-based set reconciliation. */
   ReconciliationChannel,
+  /** Logical channel for transmitting Entries and Payloads outside of 3d range-based set reconciliation. */
+  DataChannel,
   /** Logical channel for controlling the binding of new IntersectionHandles. */
   IntersectionChannel,
   /** Logical channel for controlling the binding of new CapabilityHandles. */
@@ -297,8 +299,11 @@ export type MsgReconciliationSendEntry<
   PayloadDigest,
 > = {
   kind: typeof MSG_RECONCILIATION_SEND_ENTRY;
+  /** The LengthyEntry itself. */
   entry: LengthyEntry<NamespaceId, SubspaceId, PayloadDigest>;
+  /** A StaticTokenHandle, bound by the sender of this message, that is bound to the static part of the entry’s AuthorisationToken. */
   staticTokenHandle: bigint;
+  /** The dynamic part of the entry’s AuthorisationToken. */
   dynamicToken: DynamicToken;
 };
 
@@ -317,6 +322,37 @@ export type ReconciliationMessage<
     SubspaceId,
     PayloadDigest
   >;
+
+export const MSG_DATA_SEND_ENTRY = Symbol("msg_data_send_entry");
+/** Transmit an AuthorisedEntry to the other peer, and optionally prepare transmission of its Payload. */
+export type MsgDataSendEntry<
+  DynamicToken,
+  NamespaceId,
+  SubspaceId,
+  PayloadDigest,
+> = {
+  kind: typeof MSG_DATA_SEND_ENTRY;
+  /** The Entry to transmit. */
+  entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+  /** A StaticTokenHandle bound to the StaticToken of the Entry to transmit. */
+  staticTokenHandle: bigint;
+  /** The DynamicToken of the Entry to transmit. */
+  dynamicToken: DynamicToken;
+  /** The offset in the Payload in bytes at which Payload transmission will begin. If this is equal to the Entry’s payload_length, the Payload will not be transmitted. */
+  offset: bigint;
+};
+
+export type DataMessage<
+  DynamicToken,
+  NamespaceId,
+  SubspaceId,
+  PayloadDigest,
+> = MsgDataSendEntry<
+  DynamicToken,
+  NamespaceId,
+  SubspaceId,
+  PayloadDigest
+>;
 
 export type SyncMessage<
   ReadCapability,
@@ -340,7 +376,8 @@ export type SyncMessage<
     NamespaceId,
     SubspaceId,
     PayloadDigest
-  >;
+  >
+  | DataMessage<DynamicToken, NamespaceId, SubspaceId, PayloadDigest>;
 
 // Encodings
 

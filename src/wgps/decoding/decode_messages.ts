@@ -1,4 +1,4 @@
-import { GrowingBytes } from "../../../deps.ts";
+import { Area, Entry, GrowingBytes } from "../../../deps.ts";
 import { ReadCapPrivy, SyncMessage, SyncSchemes, Transport } from "../types.ts";
 import { decodeCommitmentReveal } from "./commitment_reveal.ts";
 import {
@@ -29,6 +29,7 @@ import {
   ReconcileMsgTracker,
   ReconcileMsgTrackerOpts,
 } from "../reconciliation/reconcile_msg_tracker.ts";
+import { decodeDataSendEntry } from "./data.ts";
 
 export type DecodeMessagesOpts<
   ReadCapability,
@@ -76,6 +77,19 @@ export type DecodeMessagesOpts<
     handle: bigint,
   ) => ReadCapPrivy<NamespaceId, SubspaceId>;
   getCap: (handle: bigint) => Promise<ReadCapability>;
+  getCurrentlyReceivedEntry: () => Entry<
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest
+  >;
+  aoiHandlesToNamespace: (
+    senderHandle: bigint,
+    receivedHandle: bigint,
+  ) => NamespaceId;
+  aoiHandlesToArea: (
+    senderHandle: bigint,
+    receivedHandle: bigint,
+  ) => Area<SubspaceId>;
 } & ReconcileMsgTrackerOpts<NamespaceId, SubspaceId, PayloadDigest>;
 
 export async function* decodeMessages<
@@ -167,6 +181,19 @@ export async function* decodeMessages<
     } else if ((firstByte & 0x80) === 0x80) {
       // Control Issue Guarantee.
       yield await decodeControlIssueGuarantee(bytes);
+    } else if ((firstByte & 0x60) === 0x60) {
+      // Data send entry
+      yield await decodeDataSendEntry(bytes, {
+        decodeNamespaceId: opts.schemes.namespace.decodeStream,
+        decodeDynamicToken:
+          opts.schemes.authorisationToken.encodings.dynamicToken.decodeStream,
+        decodePayloadDigest: opts.schemes.payload.decodeStream,
+        decodeSubspaceId: opts.schemes.subspace.decodeStream,
+        pathScheme: opts.schemes.path,
+        currentlyReceivedEntry: opts.getCurrentlyReceivedEntry(),
+        aoiHandlesToNamespace: opts.aoiHandlesToNamespace,
+        aoiHandlesToArea: opts.aoiHandlesToArea,
+      });
     } else if ((firstByte & 0x50) === 0x50) {
       // Reconciliation Announce Entries
       // OR a send entry. It all depends on what we are expecting...
