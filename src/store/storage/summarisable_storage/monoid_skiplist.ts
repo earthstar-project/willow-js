@@ -34,6 +34,12 @@ function physicalKeyIncrementLayer<LogicalKey extends KeyPart[]>(
   return [physicalKeyGetLayer(pk) + 1, ...physicalKeyGetLogicalKey(pk)];
 }
 
+function physicalKeyDecrementLayer<LogicalKey extends KeyPart[]>(
+  pk: PhysicalKey<LogicalKey>,
+): PhysicalKey<LogicalKey> {
+  return [physicalKeyGetLayer(pk) - 1, ...physicalKeyGetLogicalKey(pk)];
+}
+
 /*
 Further, the skiplist is summarisable: you can efficiently query for a *summary* of arbitrary ranges, consisting of the number of items in that range, as well as some accumulated monoidal value (see the range-based set reconciliation paper for more details).
 To support this efficiently, each physical value consists not only of a logical value, but also of some metadata.
@@ -433,7 +439,7 @@ export class Skiplist<
       if (!currentLeft) {
         // Nothing to do here. Yay =)
       } else {
-        if (insertingCompletelyNew && (currentLayer <= insertionHeight)) {
+        if (!insertingCompletelyNew && (currentLayer <= insertionHeight)) {
           // We know the left labels to stay unchanged in these cases. Hence, nothing to do ^_^
         } else {
           // The label of `currentLeft` summarises everything from currentLeft to priorLeft, combined with the label of priorLeft (which summarises up until `current`).
@@ -490,263 +496,130 @@ export class Skiplist<
     await batch.commit();
   }
 
-  /**
-   * Get the node to the right of the given key in the skiplist. Returns undefined if the given key is the rightmost item of its layer.
-   */
-  private async getRightNode(
-    key: PhysicalKey<LogicalKey>,
-  ): Promise<Node<LogicalKey, LogicalValue, SummaryData> | undefined> {
-    const nextItems = this.kv.list({
-      start: key,
-      end: [key[0] + 1], // First node of the next higher layer.
-    }, {
-      limit: 1,
-      batchSize: 1,
-    });
+  async remove(key: LogicalKey): Promise<boolean> {
+    await this.isSetup;
 
-    for await (const next of nextItems) {
-      return next;
+    /*
+    Deletion employs similar techniques as insertion; you should read the comments in the `insert` functionif you want to make sense of this function too.
+    */
+
+    // Do we acually contain this key?
+    const layerZeroPhysicalKey: PhysicalKey<LogicalKey> = [0, ...key];
+    const got = await this.kv.get(layerZeroPhysicalKey);
+
+    if (!got) {
+      // Nothing to do but to report back if we didn't have the key in the first place.
+      return false;
     }
 
-    return undefined;
-  }
+    // While we still need to update labels above this layer, we can stop deleting nodes after this layer.
+    const itemMaxLayer = got.maxLayer;
 
-  /**
-   * Get the node to the left of the given key in the skiplist. Returns undefined if the given key is the leftmost item of its layer.
-   */
-  private async getLeftNode(
-    key: PhysicalKey<LogicalKey>,
-  ): Promise<Node<LogicalKey, LogicalValue, SummaryData> | undefined> {
-    const nextItems = this.kv.list({
-      start: [key[0]], // First node on the same layer as `key`.
-      end: key,
-    }, {
-      reverse: true,
-      limit: 1,
-      batchSize: 1,
-    });
+    // Queue deletion of the layer zero key (we handle all other layers later in a loop).
+    const batch = this.kv.batch();
+    batch.delete(layerZeroPhysicalKey);
 
-    for await (const next of nextItems) {
-      return next;
-    }
+    /*
+    Deletion is more simple than insertion, because we only need to update a single label per layer.
+    For efficiency, we cache priorLeft and priorRight similat to insertion. We don't need to cache `prior`.
+    */
 
-    return undefined;
-  }
+    let priorLeft = await this.getLeftNode(layerZeroPhysicalKey);
+    let priorRight = await this.getRightNode(layerZeroPhysicalKey);
+    let currentLeft = priorLeft; // Initialisation is not meaningful, will be overwritten before being read.
+    let currentRight = priorRight; // Initialisation is not meaningful, will be overwritten before being read.
 
-  /**
-   * Summarise nodes on a single layer until reaching a node whose logical key is >= `end` (the `end` node is *excluded*). If `end` is undefined, summarises untl the end of the layer.
-   *
-   * Returns the empty summary if the sequence of nodes in question is empty.
-   */
-  async summariseSingleLayer(
-    start: PhysicalKey<LogicalKey>,
-    end?: LogicalKey,
-  ): Promise<[SummaryData, number]> {
-    const layer = physicalKeyGetLayer(start);
-    let summary = this.monoid.neutral;
+    // There is no need to modify the left label on layer zero.
 
-    let currentKey = start;
-    let currentLogicalKey = physicalKeyGetLogicalKey(currentKey);
+    for (
+      let currentLayer = 1;
+      currentLayer <= LAYER_LEVEL_LIMIT;
+      currentLayer++
+    ) {
+      // The key to delete (at least until layer `itemMaxLayer`).
+      const currentKey: PhysicalKey<LogicalKey> = [currentLayer, ...key];
+      if (currentLayer <= itemMaxLayer) {
+        batch.delete(currentKey);
+      }
 
-    while (!end || this.logicalKeyCompare(currentLogicalKey, end) < 0) {
-      const next = await this.getRightNode(currentKey);
+      // It remains to update the label of currentLeft.
 
-      if (!next || physicalKeyGetLayer(next.key) > layer) {
-        break;
+      // First, update currentLeft and currentRight.
+      if (!priorLeft) {
+        currentLeft = undefined;
+      } else if (priorLeft.value.maxLayer <= currentLayer) {
+        currentLeft = nodeIncrementLayer(priorLeft);
       } else {
-        summary = this.monoid.combine(summary, next.value.summary);
+        // Query the kv store for the left node.
+        currentLeft = await this.getLeftNode(currentKey);
+      }
 
-        currentKey = next.key;
-        currentLogicalKey = physicalKeyGetLogicalKey(currentKey);
+      if (!priorRight) {
+        currentRight = undefined;
+      } else if (priorRight.value.maxLayer <= currentLayer) {
+        currentRight = nodeIncrementLayer(priorRight);
+      } else {
+        // Query the kv store for the right node.
+        currentRight = await this.getRightNode(currentKey);
+      }
+
+      // The new label of currentLeft summarises until currentRight.
+      // This is the same as summarising until priorLeft, from priorLeft to priorRight (this summary we have cached in the `priorLeft` variable), and from priorRight to currentRight (all on the previous layer).
+      let newCurrentLeftSummary = priorLeft
+        ? priorLeft.value.summary
+        : this.monoid.neutral;
+
+      // Nothing more to do if currentLeft is undefined.
+      if (currentLeft) {
+        // Otherwise, add summary from currentLeft to priorLeft to the summary.
+        newCurrentLeftSummary = this.monoid.combine(
+          await this.summariseSingleLayer(
+            physicalKeyDecrementLayer(currentLeft.key),
+            physicalKeyGetLogicalKey(priorLeft!.key), // currentLeft != undefined implies priorLeft != undefined.
+          ),
+          newCurrentLeftSummary,
+        );
+
+        if (priorRight) {
+          // Add summary from priorRight to currentRight to the summary.
+          this.monoid.combine(
+            newCurrentLeftSummary,
+            await this.summariseSingleLayer(
+              priorRight.key,
+              currentRight
+                ? physicalKeyGetLogicalKey(currentRight.key)
+                : undefined,
+            ),
+          );
+        }
+
+        // Update the currentLeft summary.
+        currentLeft.value.summary = newCurrentLeftSummary;
+        batch.set(currentLeft.key, currentLeft.value);
+      }
+
+      // Preparing for next iteration.
+      if (currentLayer > itemMaxLayer && currentLeft === undefined) {
+        // No more kv store modifications necessary.
+        return true;
+      } else {
+        priorLeft = currentLeft;
+        priorRight = currentRight;
       }
     }
 
-    return summary;
+    return true;
   }
 
-  // async remove(key: LogicalKey) {
-  //   const toRemoveBase = await this.kv.get<SkiplistBaseValue<SummaryData>>([
-  //     0,
-  //     key,
-  //   ]);
+  async get(key: LogicalKey): Promise<LogicalValue | undefined> {
+    const result = await this.kv.get([0, ...key]);
 
-  //   if (!toRemoveBase) {
-  //     return false;
-  //   }
-
-  //   const batch = this.kv.batch();
-
-  //   const height = toRemoveBase[0];
-
-  //   let previousLabel: [LogicalKey, [SummaryData, number]] | null = null;
-  //   let previousSuccessor: LogicalKey | undefined;
-
-  //   for (let layer = 0; layer <= height; layer++) {
-  //     batch.delete([layer, key]);
-  //   }
-
-  //   for (let layer = 1; layer <= this._maxHeight; layer++) {
-  //     const predecessor = await this.getLeftNode(layer, key);
-
-  //     if (!predecessor) {
-  //       break;
-  //     }
-
-  //     const successor = await this.getRightNode(
-  //       layer,
-  //       layer <= height
-  //         ? key
-  //         : predecessor.key[this.valueKeyIndex] as LogicalKey,
-  //     );
-
-  //     if (layer - 1 === 0) {
-  //       const fromPredecessorToSuccessor = this.kv.list<
-  //         SkiplistBaseValue<SummaryData>
-  //       >({
-  //         start: [0, predecessor.key[this.valueKeyIndex]],
-  //         end: successor ? [0, successor.key[this.valueKeyIndex]] : [1],
-  //       });
-
-  //       let newLabel = this.monoid.neutral;
-
-  //       for await (const entry of fromPredecessorToSuccessor) {
-  //         const entryKey = entry.key[this.valueKeyIndex] as LogicalKey;
-  //         if (this.compare(entryKey, key) === 0) {
-  //           continue;
-  //         }
-
-  //         newLabel = this.monoid.combine(newLabel, entry.value[1]);
-  //       }
-
-  //       const predecessorVal = await this.get(
-  //         predecessor.key[this.valueKeyIndex] as LogicalKey,
-  //       );
-
-  //       batch.set(
-  //         predecessor.key,
-  //         [
-  //           predecessor.value[0],
-  //           newLabel,
-  //           predecessorVal,
-  //         ] as SkiplistBaseValue<SummaryData>,
-  //       );
-
-  //       previousLabel = [
-  //         predecessor.key[this.valueKeyIndex] as LogicalKey,
-  //         newLabel,
-  //       ];
-
-  //       previousSuccessor = successor
-  //         ? successor.key[this.valueKeyIndex] as LogicalKey
-  //         : undefined;
-
-  //       continue;
-  //     }
-
-  //     const predecessorIsSame = (!predecessor && !previousLabel) ||
-  //       predecessor && previousLabel &&
-  //         this.compare(
-  //             previousLabel[0],
-  //             predecessor.key[this.valueKeyIndex] as LogicalKey,
-  //           ) === 0;
-
-  //     const successorIsSame = (!successor && !previousSuccessor) ||
-  //       successor && previousSuccessor &&
-  //         this.compare(
-  //             previousSuccessor,
-  //             successor.key[this.valueKeyIndex] as LogicalKey,
-  //           ) === 0;
-
-  //     if (predecessorIsSame && successorIsSame && previousLabel) {
-  //       batch.set(
-  //         predecessor.key,
-  //         [predecessor.value[0], previousLabel[1]] as SkiplistValue<
-  //           SummaryData
-  //         >,
-  //       );
-
-  //       continue;
-  //     }
-
-  //     const fromPredecessorToSuccessor = this.kv.list<
-  //       SkiplistValue<SummaryData>
-  //     >({
-  //       start: [layer - 1, predecessor.key[this.valueKeyIndex]],
-  //       end: successor
-  //         ? [layer - 1, successor.key[this.valueKeyIndex]]
-  //         : [layer],
-  //     });
-
-  //     let newLabel = this.monoid.neutral;
-
-  //     for await (const entry of fromPredecessorToSuccessor) {
-  //       const entryValue = entry.key[this.valueKeyIndex] as LogicalKey;
-
-  //       if (this.compare) {
-  //         if (
-  //           previousLabel && this.compare(
-  //               entryValue,
-  //               previousLabel[0],
-  //             ) === 0
-  //         ) {
-  //           newLabel = this.monoid.combine(newLabel, previousLabel[1]);
-  //         } else if (this.compare(entryValue, key) === 0) {
-  //           continue;
-  //         } else {
-  //           newLabel = this.monoid.combine(newLabel, entry.value[1]);
-  //         }
-  //       }
-  //     }
-
-  //     batch.set(
-  //       predecessor.key,
-  //       [predecessor.value[0], newLabel] as SkiplistValue<SummaryData>,
-  //     );
-
-  //     previousLabel = [
-  //       predecessor.key[this.valueKeyIndex] as LogicalKey,
-  //       newLabel,
-  //     ];
-
-  //     previousSuccessor = successor
-  //       ? successor.key[this.valueKeyIndex] as LogicalKey
-  //       : undefined;
-
-  //     const remainingOnThisLayer = this.kv.list<LogicalKey>({
-  //       start: [layer],
-  //       end: [layer + 1],
-  //     }, {
-  //       limit: 1,
-  //     });
-
-  //     let canForgetLayer = true;
-
-  //     for await (const _result of remainingOnThisLayer) {
-  //       canForgetLayer = false;
-  //     }
-
-  //     if (canForgetLayer && layer > await this.maxHeight()) {
-  //       this.setMaxHeight(layer - 1);
-  //     }
-  //   }
-
-  //   await batch.commit();
-
-  //   return true;
-  // }
-
-  // async get(key: LogicalKey) {
-  //   const result = await this.kv.get<SkiplistBaseValue<SummaryData>>([
-  //     0,
-  //     key,
-  //   ]);
-
-  //   if (result) {
-  //     return result[2];
-  //   }
-
-  //   return undefined;
-  // }
+    if (result) {
+      return result.logicalValue;
+    } else {
+      return undefined;
+    }
+  }
 
   // async summarise(
   //   start: LogicalKey,
@@ -911,6 +784,73 @@ export class Skiplist<
   //     return { fingerprint, size };
   //   }
   // }
+
+  /**
+   * Get the node to the right of the given key in the skiplist. Returns undefined if the given key is the rightmost item of its layer.
+   */
+  private async getRightNode(
+    key: PhysicalKey<LogicalKey>,
+  ): Promise<Node<LogicalKey, LogicalValue, SummaryData> | undefined> {
+    const nextItems = this.kv.list({
+      start: key,
+      end: [key[0] + 1], // First node of the next higher layer.
+    }, {
+      limit: 1,
+      batchSize: 1,
+    });
+
+    for await (const next of nextItems) {
+      return next;
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Get the node to the left of the given key in the skiplist. Returns undefined if the given key is the leftmost item of its layer.
+   */
+  private async getLeftNode(
+    key: PhysicalKey<LogicalKey>,
+  ): Promise<Node<LogicalKey, LogicalValue, SummaryData> | undefined> {
+    const nextItems = this.kv.list({
+      start: [key[0]], // First node on the same layer as `key`.
+      end: key,
+    }, {
+      reverse: true,
+      limit: 1,
+      batchSize: 1,
+    });
+
+    for await (const next of nextItems) {
+      return next;
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Summarise nodes on a single layer until reaching a node whose logical key is >= `end` (the `end` node is *excluded*). If `end` is undefined, summarises untl the end of the layer.
+   *
+   * Returns the empty summary if the sequence of nodes in question is empty.
+   */
+  async summariseSingleLayer(
+    start: PhysicalKey<LogicalKey>,
+    end?: LogicalKey,
+  ): Promise<[SummaryData, number]> {
+    const layer = physicalKeyGetLayer(start);
+    let summary = this.monoid.neutral;
+
+    for await (
+      const { value } of this.kv.list({
+        start,
+        end: end ? [layer, ...end] : [layer + 1],
+      })
+    ) {
+      summary = this.monoid.combine(summary, value.summary);
+    }
+
+    return summary;
+  }
 
   // async *entries(
   //   start: LogicalKey | undefined,
