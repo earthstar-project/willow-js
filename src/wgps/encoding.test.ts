@@ -14,6 +14,7 @@ import {
   MSG_CONTROL_PLEAD,
   MSG_DATA_SEND_ENTRY,
   MSG_DATA_SEND_PAYLOAD,
+  MSG_DATA_SET_EAGERNESS,
   MSG_PAI_BIND_FRAGMENT,
   MSG_PAI_REPLY_FRAGMENT,
   MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
@@ -447,6 +448,20 @@ const vectors: SyncMessage<
     kind: MSG_DATA_SEND_PAYLOAD,
     amount: 32n,
     bytes: crypto.getRandomValues(new Uint8Array(32)),
+  },
+
+  {
+    kind: MSG_DATA_SET_EAGERNESS,
+    isEager: true,
+    receiverHandle: 3n,
+    senderHandle: 579n,
+  },
+
+  {
+    kind: MSG_DATA_SET_EAGERNESS,
+    isEager: false,
+    receiverHandle: 0n,
+    senderHandle: 21555n,
   },
 ];
 

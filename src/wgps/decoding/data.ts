@@ -10,8 +10,10 @@ import {
 import {
   MSG_DATA_SEND_ENTRY,
   MSG_DATA_SEND_PAYLOAD,
+  MSG_DATA_SET_EAGERNESS,
   MsgDataSendEntry,
   MsgDataSendPayload,
+  MsgDataSetEagerness,
 } from "../types.ts";
 import { compactWidthFromEndOfByte } from "./util.ts";
 
@@ -189,5 +191,45 @@ export async function decodeDataSendPayload(
     kind: MSG_DATA_SEND_PAYLOAD,
     amount: BigInt(amount),
     bytes: msgBytes,
+  };
+}
+
+export async function decodeDataSetEagerness(
+  bytes: GrowingBytes,
+): Promise<MsgDataSetEagerness> {
+  await bytes.nextAbsolute(2);
+
+  const [firstByte, secondByte] = bytes.array;
+
+  const isEager = (firstByte & 0x2) === 0x2;
+
+  const compactWidthSenderHandle = compactWidthFromEndOfByte(secondByte >> 6);
+
+  const compactWidthReceiverHandle = compactWidthFromEndOfByte(secondByte >> 4);
+
+  await bytes.nextAbsolute(
+    2 + compactWidthSenderHandle + compactWidthReceiverHandle,
+  );
+
+  const senderHandle = BigInt(
+    decodeCompactWidth(bytes.array.subarray(2, 2 + compactWidthSenderHandle)),
+  );
+
+  const receiverHandle = BigInt(
+    decodeCompactWidth(
+      bytes.array.subarray(
+        2 + compactWidthSenderHandle,
+        2 + compactWidthSenderHandle + compactWidthReceiverHandle,
+      ),
+    ),
+  );
+
+  bytes.prune(2 + compactWidthSenderHandle + compactWidthReceiverHandle);
+
+  return {
+    kind: MSG_DATA_SET_EAGERNESS,
+    isEager,
+    receiverHandle,
+    senderHandle,
   };
 }

@@ -346,8 +346,22 @@ export const MSG_DATA_SEND_PAYLOAD = Symbol("msg_data_send_payload");
 /** Transmit some Payload bytes. */
 export type MsgDataSendPayload = {
   kind: typeof MSG_DATA_SEND_PAYLOAD;
+  /** The number of transmitted bytes. */
   amount: bigint;
+  /** amount many bytes, to be added to the Payload of the receiver’s currently_received_entry at offset currently_received_offset. */
   bytes: Uint8Array;
+};
+
+export const MSG_DATA_SET_EAGERNESS = Symbol("msg_data_set_eagerness");
+/** Express a preference whether the other peer should eagerly forward Payloads in the intersection of two AreaOfInterests. */
+export type MsgDataSetEagerness = {
+  kind: typeof MSG_DATA_SET_EAGERNESS;
+  /** Whether Payloads should be pushed. */
+  isEager: boolean;
+  /** An AreaOfInterestHandle, bound by the sender of this message. */
+  senderHandle: bigint;
+  /** An AreaOfInterestHandle, bound by the receiver of this message. */
+  receiverHandle: bigint;
 };
 
 export type DataMessage<
@@ -362,7 +376,8 @@ export type DataMessage<
     SubspaceId,
     PayloadDigest
   >
-  | MsgDataSendPayload;
+  | MsgDataSendPayload
+  | MsgDataSetEagerness;
 
 export type SyncMessage<
   ReadCapability,

@@ -7,7 +7,11 @@ import {
   PathScheme,
   TotalOrder,
 } from "../../../deps.ts";
-import { MsgDataSendEntry, MsgDataSendPayload } from "../types.ts";
+import {
+  MsgDataSendEntry,
+  MsgDataSendPayload,
+  MsgDataSetEagerness,
+} from "../types.ts";
 import { compactWidthOr } from "./util.ts";
 
 export function encodeDataSendEntry<
@@ -104,5 +108,24 @@ export function encodeDataSendPayload(msg: MsgDataSendPayload): Uint8Array {
     new Uint8Array([header]),
     encodedAmount,
     msg.bytes,
+  );
+}
+
+export function encodeDataSetEagerness(msg: MsgDataSetEagerness): Uint8Array {
+  const messageKind = 0x68;
+  const eagernessFlag = msg.isEager ? 0x2 : 0x0;
+
+  const firstByte = messageKind | eagernessFlag;
+
+  let secondByte = 0x0;
+
+  secondByte = compactWidthOr(secondByte, compactWidth(msg.senderHandle)) << 2;
+  secondByte = compactWidthOr(secondByte, compactWidth(msg.receiverHandle)) <<
+    4;
+
+  return concat(
+    new Uint8Array([firstByte, secondByte]),
+    encodeCompactWidth(msg.senderHandle),
+    encodeCompactWidth(msg.receiverHandle),
   );
 }
