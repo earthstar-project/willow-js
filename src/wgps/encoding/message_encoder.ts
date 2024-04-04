@@ -10,6 +10,7 @@ import {
   MSG_CONTROL_ISSUE_GUARANTEE,
   MSG_CONTROL_PLEAD,
   MSG_DATA_SEND_ENTRY,
+  MSG_DATA_SEND_PAYLOAD,
   MSG_PAI_BIND_FRAGMENT,
   MSG_PAI_REPLY_FRAGMENT,
   MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
@@ -53,7 +54,7 @@ import {
   ReconcileMsgTracker,
   ReconcileMsgTrackerOpts,
 } from "../reconciliation/reconcile_msg_tracker.ts";
-import { encodeDataSendEntry } from "./data.ts";
+import { encodeDataSendEntry, encodeDataSendPayload } from "./data.ts";
 
 export type EncodedSyncMessage = {
   channel: LogicalChannel | null;
@@ -348,6 +349,12 @@ export class MessageEncoder<
           currentlySentEntry: this.opts.getCurrentlySentEntry(),
         });
 
+        push(LogicalChannel.DataChannel, bytes);
+        break;
+      }
+
+      case MSG_DATA_SEND_PAYLOAD: {
+        const bytes = encodeDataSendPayload(message);
         push(LogicalChannel.DataChannel, bytes);
         break;
       }

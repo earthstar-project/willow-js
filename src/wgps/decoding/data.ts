@@ -7,7 +7,12 @@ import {
   GrowingBytes,
   PathScheme,
 } from "../../../deps.ts";
-import { MSG_DATA_SEND_ENTRY, MsgDataSendEntry } from "../types.ts";
+import {
+  MSG_DATA_SEND_ENTRY,
+  MSG_DATA_SEND_PAYLOAD,
+  MsgDataSendEntry,
+  MsgDataSendPayload,
+} from "../types.ts";
 import { compactWidthFromEndOfByte } from "./util.ts";
 
 export async function decodeDataSendEntry<
@@ -153,5 +158,36 @@ export async function decodeDataSendEntry<
     dynamicToken,
     offset,
     staticTokenHandle,
+  };
+}
+
+export async function decodeDataSendPayload(
+  bytes: GrowingBytes,
+): Promise<MsgDataSendPayload> {
+  await bytes.nextAbsolute(1);
+
+  const [header] = bytes.array;
+
+  const compactWidthAmount = compactWidthFromEndOfByte(header);
+
+  await bytes.nextAbsolute(1 + compactWidthAmount);
+
+  const amount = Number(
+    decodeCompactWidth(bytes.array.subarray(1, 1 + compactWidthAmount)),
+  );
+
+  await bytes.nextAbsolute(1 + compactWidthAmount + amount);
+
+  const msgBytes = bytes.array.slice(
+    1 + compactWidthAmount,
+    1 + compactWidthAmount + amount,
+  );
+
+  bytes.prune(1 + compactWidthAmount + amount);
+
+  return {
+    kind: MSG_DATA_SEND_PAYLOAD,
+    amount: BigInt(amount),
+    bytes: msgBytes,
   };
 }

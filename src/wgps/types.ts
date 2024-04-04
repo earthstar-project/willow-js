@@ -342,17 +342,27 @@ export type MsgDataSendEntry<
   offset: bigint;
 };
 
+export const MSG_DATA_SEND_PAYLOAD = Symbol("msg_data_send_payload");
+/** Transmit some Payload bytes. */
+export type MsgDataSendPayload = {
+  kind: typeof MSG_DATA_SEND_PAYLOAD;
+  amount: bigint;
+  bytes: Uint8Array;
+};
+
 export type DataMessage<
   DynamicToken,
   NamespaceId,
   SubspaceId,
   PayloadDigest,
-> = MsgDataSendEntry<
-  DynamicToken,
-  NamespaceId,
-  SubspaceId,
-  PayloadDigest
->;
+> =
+  | MsgDataSendEntry<
+    DynamicToken,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest
+  >
+  | MsgDataSendPayload;
 
 export type SyncMessage<
   ReadCapability,

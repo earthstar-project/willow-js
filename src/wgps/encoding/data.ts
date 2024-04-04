@@ -7,7 +7,7 @@ import {
   PathScheme,
   TotalOrder,
 } from "../../../deps.ts";
-import { MsgDataSendEntry } from "../types.ts";
+import { MsgDataSendEntry, MsgDataSendPayload } from "../types.ts";
 import { compactWidthOr } from "./util.ts";
 
 export function encodeDataSendEntry<
@@ -91,5 +91,18 @@ export function encodeDataSendEntry<
     encodedDynamicToken,
     encodedOffset,
     encodedEntry,
+  );
+}
+
+export function encodeDataSendPayload(msg: MsgDataSendPayload): Uint8Array {
+  const messageKindFlag = 0x64;
+  const header = compactWidthOr(messageKindFlag, compactWidth(msg.amount));
+
+  const encodedAmount = encodeCompactWidth(msg.amount);
+
+  return concat(
+    new Uint8Array([header]),
+    encodedAmount,
+    msg.bytes,
   );
 }

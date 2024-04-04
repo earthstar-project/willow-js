@@ -29,7 +29,7 @@ import {
   ReconcileMsgTracker,
   ReconcileMsgTrackerOpts,
 } from "../reconciliation/reconcile_msg_tracker.ts";
-import { decodeDataSendEntry } from "./data.ts";
+import { decodeDataSendEntry, decodeDataSendPayload } from "./data.ts";
 
 export type DecodeMessagesOpts<
   ReadCapability,
@@ -181,6 +181,9 @@ export async function* decodeMessages<
     } else if ((firstByte & 0x80) === 0x80) {
       // Control Issue Guarantee.
       yield await decodeControlIssueGuarantee(bytes);
+    } else if ((firstByte & 0x64) === 0x64) {
+      // Data Send payload
+      yield await decodeDataSendPayload(bytes);
     } else if ((firstByte & 0x60) === 0x60) {
       // Data send entry
       yield await decodeDataSendEntry(bytes, {
