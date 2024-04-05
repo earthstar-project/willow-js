@@ -30,6 +30,7 @@ import {
   ReconcileMsgTrackerOpts,
 } from "../reconciliation/reconcile_msg_tracker.ts";
 import {
+  decodeDataBindPayloadRequest,
   decodeDataSendEntry,
   decodeDataSendPayload,
   decodeDataSetEagerness,
@@ -185,6 +186,17 @@ export async function* decodeMessages<
     } else if ((firstByte & 0x80) === 0x80) {
       // Control Issue Guarantee.
       yield await decodeControlIssueGuarantee(bytes);
+    } else if ((firstByte & 0x6c) === 0x6c) {
+      // Data Bind Payload request
+      yield await decodeDataBindPayloadRequest(bytes, {
+        decodeNamespaceId: opts.schemes.namespace.decodeStream,
+        decodePayloadDigest: opts.schemes.payload.decodeStream,
+        decodeSubspaceId: opts.schemes.subspace.decodeStream,
+        pathScheme: opts.schemes.path,
+        currentlyReceivedEntry: opts.getCurrentlyReceivedEntry(),
+        aoiHandlesToNamespace: opts.aoiHandlesToNamespace,
+        aoiHandlesToArea: opts.aoiHandlesToArea,
+      });
     } else if ((firstByte & 0x68) === 0x68) {
       // Data Set Eagerness
       yield await decodeDataSetEagerness(bytes);

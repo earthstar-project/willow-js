@@ -12,6 +12,7 @@ import {
   MSG_CONTROL_FREE,
   MSG_CONTROL_ISSUE_GUARANTEE,
   MSG_CONTROL_PLEAD,
+  MSG_DATA_BIND_PAYLOAD_REQUEST,
   MSG_DATA_SEND_ENTRY,
   MSG_DATA_SEND_PAYLOAD,
   MSG_DATA_SET_EAGERNESS,
@@ -462,6 +463,34 @@ const vectors: SyncMessage<
     isEager: false,
     receiverHandle: 0n,
     senderHandle: 21555n,
+  },
+
+  {
+    kind: MSG_DATA_BIND_PAYLOAD_REQUEST,
+    capability: 43n,
+    entry: {
+      namespaceId: TestNamespace.Family,
+      path: [new Uint8Array([7, 3])],
+      payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+      payloadLength: 500n,
+      subspaceId: TestSubspace.Betty,
+      timestamp: 1000n,
+    },
+    offset: 0n,
+  },
+
+  {
+    kind: MSG_DATA_BIND_PAYLOAD_REQUEST,
+    capability: 1000n,
+    entry: {
+      namespaceId: TestNamespace.Family,
+      path: [],
+      payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+      payloadLength: 500n,
+      subspaceId: TestSubspace.Betty,
+      timestamp: 1000n,
+    },
+    offset: 25500n,
   },
 ];
 

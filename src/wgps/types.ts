@@ -364,6 +364,21 @@ export type MsgDataSetEagerness = {
   receiverHandle: bigint;
 };
 
+export const MSG_DATA_BIND_PAYLOAD_REQUEST = Symbol(
+  "msg_data_bind_payload_request",
+);
+/** Bind an Entry to a PayloadRequestHandle and request transmission of its Payload from an offset. */
+export type MsgDataBindPayloadRequest<NamespaceId, SubspaceId, PayloadDigest> =
+  {
+    kind: typeof MSG_DATA_BIND_PAYLOAD_REQUEST;
+    /** The Entry to request. */
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+    /** The offset in the Payload starting from which the sender would like to receive the Payload bytes. */
+    offset: bigint;
+    /** A resource handle for a ReadCapability bound by the sender that grants them read access to the bound Entry. */
+    capability: bigint;
+  };
+
 export type DataMessage<
   DynamicToken,
   NamespaceId,
@@ -377,7 +392,8 @@ export type DataMessage<
     PayloadDigest
   >
   | MsgDataSendPayload
-  | MsgDataSetEagerness;
+  | MsgDataSetEagerness
+  | MsgDataBindPayloadRequest<NamespaceId, SubspaceId, PayloadDigest>;
 
 export type SyncMessage<
   ReadCapability,

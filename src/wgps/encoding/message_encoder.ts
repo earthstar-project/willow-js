@@ -9,6 +9,7 @@ import {
   MSG_CONTROL_FREE,
   MSG_CONTROL_ISSUE_GUARANTEE,
   MSG_CONTROL_PLEAD,
+  MSG_DATA_BIND_PAYLOAD_REQUEST,
   MSG_DATA_SEND_ENTRY,
   MSG_DATA_SEND_PAYLOAD,
   MSG_DATA_SET_EAGERNESS,
@@ -56,6 +57,7 @@ import {
   ReconcileMsgTrackerOpts,
 } from "../reconciliation/reconcile_msg_tracker.ts";
 import {
+  encodeDataBindPayloadRequest,
   encodeDataSendEntry,
   encodeDataSendPayload,
   encodeDataSetEagerness,
@@ -366,6 +368,21 @@ export class MessageEncoder<
 
       case MSG_DATA_SET_EAGERNESS: {
         const bytes = encodeDataSetEagerness(message);
+        push(LogicalChannel.DataChannel, bytes);
+        break;
+      }
+
+      case MSG_DATA_BIND_PAYLOAD_REQUEST: {
+        const bytes = encodeDataBindPayloadRequest(message, {
+          encodeNamespaceId: this.schemes.namespace.encode,
+          encodeSubspaceId: this.schemes.subspace.encode,
+          encodePayloadDigest: this.schemes.payload.encode,
+          isEqualNamespace: this.schemes.namespace.isEqual,
+          orderSubspace: this.schemes.subspace.order,
+          pathScheme: this.schemes.path,
+          currentlySentEntry: this.opts.getCurrentlySentEntry(),
+        });
+
         push(LogicalChannel.DataChannel, bytes);
         break;
       }

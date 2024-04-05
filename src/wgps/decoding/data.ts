@@ -8,9 +8,11 @@ import {
   PathScheme,
 } from "../../../deps.ts";
 import {
+  MSG_DATA_BIND_PAYLOAD_REQUEST,
   MSG_DATA_SEND_ENTRY,
   MSG_DATA_SEND_PAYLOAD,
   MSG_DATA_SET_EAGERNESS,
+  MsgDataBindPayloadRequest,
   MsgDataSendEntry,
   MsgDataSendPayload,
   MsgDataSetEagerness,
@@ -231,5 +233,132 @@ export async function decodeDataSetEagerness(
     isEager,
     receiverHandle,
     senderHandle,
+  };
+}
+
+export async function decodeDataBindPayloadRequest<
+  NamespaceId,
+  SubspaceId,
+  PayloadDigest,
+>(
+  bytes: GrowingBytes,
+  opts: {
+    decodeNamespaceId: (bytes: GrowingBytes) => Promise<NamespaceId>;
+    decodeSubspaceId: (bytes: GrowingBytes) => Promise<SubspaceId>;
+    decodePayloadDigest: (bytes: GrowingBytes) => Promise<PayloadDigest>;
+    pathScheme: PathScheme;
+    currentlyReceivedEntry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+    aoiHandlesToArea: (
+      senderHandle: bigint,
+      receiverHandle: bigint,
+    ) => Area<SubspaceId>;
+    aoiHandlesToNamespace: (
+      senderHandle: bigint,
+      receiverHandle: bigint,
+    ) => NamespaceId;
+  },
+): Promise<MsgDataBindPayloadRequest<NamespaceId, SubspaceId, PayloadDigest>> {
+  await bytes.nextAbsolute(2);
+
+  const [firstByte, secondByte] = bytes.array;
+
+  const compactWidthCapability = compactWidthFromEndOfByte(firstByte);
+
+  const isOffsetEncoded = (secondByte & 0x80) === 0x80;
+
+  const compactWidthOffset = isOffsetEncoded
+    ? compactWidthFromEndOfByte((secondByte & 0x60) >> 5)
+    : 0;
+
+  const isEncodedRelativeToCurrEntry = (secondByte & 0x10) === 0x10;
+
+  const compactWidthSenderHandle = isEncodedRelativeToCurrEntry
+    ? 0
+    : compactWidthFromEndOfByte(secondByte >> 2);
+
+  const compactWidthReceiverHandle = isEncodedRelativeToCurrEntry
+    ? 0
+    : compactWidthFromEndOfByte(secondByte);
+
+  await bytes.nextAbsolute(2 + compactWidthCapability);
+
+  const capability = BigInt(decodeCompactWidth(
+    bytes.array.subarray(2, 2 + compactWidthCapability),
+  ));
+
+  let offset: bigint;
+
+  if (isOffsetEncoded) {
+    await bytes.nextAbsolute(2 + compactWidthCapability + compactWidthOffset);
+
+    offset = BigInt(
+      decodeCompactWidth(
+        bytes.array.subarray(
+          2 + compactWidthCapability,
+          2 + compactWidthCapability + compactWidthOffset,
+        ),
+      ),
+    );
+
+    bytes.prune(2 + compactWidthCapability + compactWidthOffset);
+  } else {
+    offset = 0n;
+
+    bytes.prune(2 + compactWidthCapability);
+  }
+
+  let entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+
+  if (isEncodedRelativeToCurrEntry) {
+    entry = await decodeStreamEntryRelativeEntry(
+      {
+        decodeStreamNamespace: opts.decodeNamespaceId,
+        decodeStreamSubspace: opts.decodeSubspaceId,
+        decodeStreamPayloadDigest: opts.decodePayloadDigest,
+        pathScheme: opts.pathScheme,
+      },
+      bytes,
+      opts.currentlyReceivedEntry,
+    );
+  } else if (
+    !isEncodedRelativeToCurrEntry && compactWidthSenderHandle > 0 &&
+    compactWidthReceiverHandle > 0
+  ) {
+    await bytes.nextAbsolute(
+      compactWidthSenderHandle + compactWidthReceiverHandle,
+    );
+
+    const senderHandle = BigInt(
+      decodeCompactWidth(bytes.array.subarray(0, compactWidthSenderHandle)),
+    );
+
+    const receiverHandle = BigInt(
+      decodeCompactWidth(
+        bytes.array.subarray(
+          compactWidthSenderHandle,
+          compactWidthSenderHandle + compactWidthReceiverHandle,
+        ),
+      ),
+    );
+
+    entry = await decodeStreamEntryInNamespaceArea(
+      {
+        decodeStreamSubspace: opts.decodeSubspaceId,
+        decodeStreamPayloadDigest: opts.decodePayloadDigest,
+        pathScheme: opts.pathScheme,
+      },
+      bytes,
+      opts.aoiHandlesToArea(senderHandle, receiverHandle),
+      opts.aoiHandlesToNamespace(senderHandle, receiverHandle),
+    );
+  } else {
+    throw new Error();
+  }
+
+  return {
+    kind: MSG_DATA_BIND_PAYLOAD_REQUEST,
+    capability,
+    entry,
+    offset,
   };
 }
