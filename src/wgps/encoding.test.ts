@@ -13,6 +13,7 @@ import {
   MSG_CONTROL_ISSUE_GUARANTEE,
   MSG_CONTROL_PLEAD,
   MSG_DATA_BIND_PAYLOAD_REQUEST,
+  MSG_DATA_REPLY_PAYLOAD,
   MSG_DATA_SEND_ENTRY,
   MSG_DATA_SEND_PAYLOAD,
   MSG_DATA_SET_EAGERNESS,
@@ -491,6 +492,11 @@ const vectors: SyncMessage<
       timestamp: 1000n,
     },
     offset: 25500n,
+  },
+
+  {
+    kind: MSG_DATA_REPLY_PAYLOAD,
+    handle: 400n,
   },
 ];
 

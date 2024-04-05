@@ -31,6 +31,7 @@ import {
 } from "../reconciliation/reconcile_msg_tracker.ts";
 import {
   decodeDataBindPayloadRequest,
+  decodeDataReplyPayload,
   decodeDataSendEntry,
   decodeDataSendPayload,
   decodeDataSetEagerness,
@@ -186,6 +187,9 @@ export async function* decodeMessages<
     } else if ((firstByte & 0x80) === 0x80) {
       // Control Issue Guarantee.
       yield await decodeControlIssueGuarantee(bytes);
+    } else if ((firstByte & 0x70) === 0x70) {
+      // Data Reply Payload
+      yield await decodeDataReplyPayload(bytes);
     } else if ((firstByte & 0x6c) === 0x6c) {
       // Data Bind Payload request
       yield await decodeDataBindPayloadRequest(bytes, {

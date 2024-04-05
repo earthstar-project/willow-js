@@ -379,6 +379,15 @@ export type MsgDataBindPayloadRequest<NamespaceId, SubspaceId, PayloadDigest> =
     capability: bigint;
   };
 
+export const MSG_DATA_REPLY_PAYLOAD = Symbol("msg_data_reply_payload");
+
+/** Set up the state for replying to a DataBindPayloadRequest message. */
+export type MsgDataReplyPayload = {
+  kind: typeof MSG_DATA_REPLY_PAYLOAD;
+  /** The PayloadRequestHandle to which to reply. */
+  handle: bigint;
+};
+
 export type DataMessage<
   DynamicToken,
   NamespaceId,
@@ -393,7 +402,8 @@ export type DataMessage<
   >
   | MsgDataSendPayload
   | MsgDataSetEagerness
-  | MsgDataBindPayloadRequest<NamespaceId, SubspaceId, PayloadDigest>;
+  | MsgDataBindPayloadRequest<NamespaceId, SubspaceId, PayloadDigest>
+  | MsgDataReplyPayload;
 
 export type SyncMessage<
   ReadCapability,

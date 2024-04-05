@@ -9,6 +9,7 @@ import {
 } from "../../../deps.ts";
 import {
   MsgDataBindPayloadRequest,
+  MsgDataReplyPayload,
   MsgDataSendEntry,
   MsgDataSendPayload,
   MsgDataSetEagerness,
@@ -189,5 +190,17 @@ export function encodeDataBindPayloadRequest<
     encodedCapability,
     encodedOffset,
     encodedEntry,
+  );
+}
+
+export function encodeDataReplyPayload(msg: MsgDataReplyPayload) {
+  const messageKindBits = 0x70;
+  const header = compactWidthOr(messageKindBits, compactWidth(msg.handle));
+
+  const encodedHandle = encodeCompactWidth(msg.handle);
+
+  return concat(
+    new Uint8Array([header]),
+    encodedHandle,
   );
 }

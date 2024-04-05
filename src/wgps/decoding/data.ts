@@ -9,10 +9,12 @@ import {
 } from "../../../deps.ts";
 import {
   MSG_DATA_BIND_PAYLOAD_REQUEST,
+  MSG_DATA_REPLY_PAYLOAD,
   MSG_DATA_SEND_ENTRY,
   MSG_DATA_SEND_PAYLOAD,
   MSG_DATA_SET_EAGERNESS,
   MsgDataBindPayloadRequest,
+  MsgDataReplyPayload,
   MsgDataSendEntry,
   MsgDataSendPayload,
   MsgDataSetEagerness,
@@ -360,5 +362,26 @@ export async function decodeDataBindPayloadRequest<
     capability,
     entry,
     offset,
+  };
+}
+
+export async function decodeDataReplyPayload(
+  bytes: GrowingBytes,
+): Promise<MsgDataReplyPayload> {
+  await bytes.nextAbsolute(1);
+
+  const compactWidthHandle = compactWidthFromEndOfByte(bytes.array[0]);
+
+  await bytes.nextAbsolute(1 + compactWidthHandle);
+
+  const handle = BigInt(
+    decodeCompactWidth(bytes.array.subarray(1, 1 + compactWidthHandle)),
+  );
+
+  bytes.prune(1 + compactWidthHandle);
+
+  return {
+    kind: MSG_DATA_REPLY_PAYLOAD,
+    handle,
   };
 }

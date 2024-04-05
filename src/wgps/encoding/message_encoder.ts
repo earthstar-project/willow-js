@@ -10,6 +10,7 @@ import {
   MSG_CONTROL_ISSUE_GUARANTEE,
   MSG_CONTROL_PLEAD,
   MSG_DATA_BIND_PAYLOAD_REQUEST,
+  MSG_DATA_REPLY_PAYLOAD,
   MSG_DATA_SEND_ENTRY,
   MSG_DATA_SEND_PAYLOAD,
   MSG_DATA_SET_EAGERNESS,
@@ -58,6 +59,7 @@ import {
 } from "../reconciliation/reconcile_msg_tracker.ts";
 import {
   encodeDataBindPayloadRequest,
+  encodeDataReplyPayload,
   encodeDataSendEntry,
   encodeDataSendPayload,
   encodeDataSetEagerness,
@@ -382,6 +384,13 @@ export class MessageEncoder<
           pathScheme: this.schemes.path,
           currentlySentEntry: this.opts.getCurrentlySentEntry(),
         });
+
+        push(LogicalChannel.DataChannel, bytes);
+        break;
+      }
+
+      case MSG_DATA_REPLY_PAYLOAD: {
+        const bytes = encodeDataReplyPayload(message);
 
         push(LogicalChannel.DataChannel, bytes);
         break;
