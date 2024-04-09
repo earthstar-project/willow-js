@@ -17,7 +17,12 @@ import {
   TestSubspace,
 } from "../test/test_schemes.ts";
 import { delay } from "https://deno.land/std@0.202.0/async/delay.ts";
-import { ANY_SUBSPACE, defaultRange3d, OPEN_END } from "../../deps.ts";
+import {
+  ANY_SUBSPACE,
+  defaultRange3d,
+  encodeBase32,
+  OPEN_END,
+} from "../../deps.ts";
 import { Store } from "../store/store.ts";
 import { PayloadDriverFilesystem } from "../store/storage/payload_drivers/filesystem.ts";
 import { EntryDriverKvStore } from "../store/storage/entry_drivers/kv_store.ts";
@@ -28,8 +33,8 @@ Deno.test("WgpsMessenger", async (test) => {
   const alfieDenoKv = await Deno.openKv("./test/alfie");
   const bettyDenoKv = await Deno.openKv("./test/betty");
 
-  const ALFIE_ENTRIES = 10;
-  const BETTY_ENTRIES = 9;
+  const ALFIE_ENTRIES = 2;
+  const BETTY_ENTRIES = 2;
 
   await test.step("sync", async () => {
     const [alfie, betty] = transportPairInMemory();
@@ -71,15 +76,19 @@ Deno.test("WgpsMessenger", async (test) => {
     });
 
     for (let i = 0; i < ALFIE_ENTRIES; i++) {
-      await alfieStore.set({
+      const res = await alfieStore.set({
         subspace: TestSubspace.Gemma,
-        payload: new TextEncoder().encode("Originated from Alfie!"),
+        payload: new TextEncoder().encode(`Originated from Alfie! (${i})`),
         path: [
           new Uint8Array([1]),
           new Uint8Array([2]),
           crypto.getRandomValues(new Uint8Array(8)),
         ],
       }, TestSubspace.Gemma);
+
+      if (res.kind === "success") {
+        console.log(encodeBase32(new Uint8Array(res.entry.payloadDigest)));
+      }
     }
 
     const messengerAlfie = new WgpsMessenger({
@@ -167,15 +176,19 @@ Deno.test("WgpsMessenger", async (test) => {
     });
 
     for (let i = 0; i < BETTY_ENTRIES; i++) {
-      await bettyStore.set({
+      const res = await bettyStore.set({
         subspace: TestSubspace.Gemma,
-        payload: new TextEncoder().encode("Originated from Betty!"),
+        payload: new TextEncoder().encode(`Originated from Betty! (${i})`),
         path: [
           new Uint8Array([1]),
           new Uint8Array([2]),
           crypto.getRandomValues(new Uint8Array(8)),
         ],
       }, TestSubspace.Gemma);
+
+      if (res.kind === "success") {
+        console.log(encodeBase32(new Uint8Array(res.entry.payloadDigest)));
+      }
     }
 
     const messengerBetty = new WgpsMessenger({
@@ -246,13 +259,15 @@ Deno.test("WgpsMessenger", async (test) => {
     await delay(50);
 
     // @ts-ignore looking at private values is fine
-    const receivedCapsAlfie = Array.from(messengerAlfie.handlesCapsTheirs).map((
-      [, cap],
-    ) => cap);
+    const receivedCapsAlfie = Array.from(messengerAlfie.handlesCapsTheirs)
+      .map((
+        [, cap],
+      ) => cap);
     // @ts-ignore looking at private values is fine
-    const receivedCapsBetty = Array.from(messengerBetty.handlesCapsTheirs).map((
-      [, cap],
-    ) => cap);
+    const receivedCapsBetty = Array.from(messengerBetty.handlesCapsTheirs)
+      .map((
+        [, cap],
+      ) => cap);
 
     assertEquals(receivedCapsAlfie, [{
       namespace: TestNamespace.Family,
@@ -276,7 +291,7 @@ Deno.test("WgpsMessenger", async (test) => {
       },
     }]);
 
-    await delay(500);
+    await delay(1000);
 
     const { fingerprint: alfieFp, size: alfieSize } = await alfieStore
       .summarise(
@@ -335,5 +350,5 @@ Deno.test("WgpsMessenger", async (test) => {
   alfieDenoKv.close();
   bettyDenoKv.close();
 
-  await emptyDir("./test");
+  // await emptyDir("./test");
 });

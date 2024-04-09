@@ -25,6 +25,8 @@ export function channelMaskStart(
       return mask | 0x60;
     case LogicalChannel.AreaOfInterestChannel:
       return mask | 0x80;
+    case LogicalChannel.PayloadRequestChannel:
+      return mask | 0xa0;
     case LogicalChannel.StaticTokenChannel:
       return mask | 0xc0;
   }
@@ -42,6 +44,8 @@ export function channelMaskEnd(mask: number, channel: LogicalChannel): number {
       return mask | 0x3;
     case LogicalChannel.AreaOfInterestChannel:
       return mask | 0x4;
+    case LogicalChannel.PayloadRequestChannel:
+      return mask | 0x5;
     case LogicalChannel.StaticTokenChannel:
       return mask | 0x6;
   }
@@ -55,6 +59,8 @@ export function handleMask(mask: number, handleType: HandleType): number {
       return mask | 0x20;
     case HandleType.AreaOfInterestHandle:
       return mask | 0x40;
+    case HandleType.PayloadRequestHandle:
+      return mask | 0x60;
     case HandleType.StaticTokenHandle:
       return mask | 0x80;
   }

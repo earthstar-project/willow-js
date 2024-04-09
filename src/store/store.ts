@@ -38,18 +38,18 @@ import { WillowError } from "../errors.ts";
  * https://willowprotocol.org/specs/data-model/index.html#store
  */
 export class Store<
-  NamespacePublicKey,
-  SubspacePublicKey,
+  NamespaceId,
+  SubspaceId,
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
   Fingerprint,
 > extends EventTarget {
-  namespace: NamespacePublicKey;
+  namespace: NamespaceId;
 
   private schemes: StoreSchemes<
-    NamespacePublicKey,
-    SubspacePublicKey,
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
     AuthorisationOpts,
     AuthorisationToken,
@@ -57,16 +57,16 @@ export class Store<
   >;
 
   private entryDriver: EntryDriver<
-    NamespacePublicKey,
-    SubspacePublicKey,
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
     Fingerprint
   >;
   private payloadDriver: PayloadDriver<PayloadDigest>;
 
   private storage: Storage3d<
-    NamespacePublicKey,
-    SubspacePublicKey,
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
     Fingerprint
   >;
@@ -75,8 +75,8 @@ export class Store<
 
   constructor(
     opts: StoreOpts<
-      NamespacePublicKey,
-      SubspacePublicKey,
+      NamespaceId,
+      SubspaceId,
       PayloadDigest,
       AuthorisationOpts,
       AuthorisationToken,
@@ -150,7 +150,7 @@ export class Store<
   /** Create a new authorised entry for a payload, and store both in the store. */
   async set(
     //
-    input: EntryInput<SubspacePublicKey>,
+    input: EntryInput<SubspaceId>,
     authorisation: AuthorisationOpts,
   ) {
     const timestamp = input.timestamp !== undefined
@@ -162,7 +162,7 @@ export class Store<
       input.payload,
     );
 
-    const entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest> = {
+    const entry: Entry<NamespaceId, SubspaceId, PayloadDigest> = {
       namespaceId: this.namespace,
       subspaceId: input.subspace,
       path: input.path,
@@ -202,13 +202,13 @@ export class Store<
    * Additionally, if the entry's path is a prefix of already-held older entries, those entries will be removed from the `Store`.
    */
   async ingestEntry(
-    entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
     authorisation: AuthorisationToken,
     externalSourceId?: string,
   ): Promise<
     IngestEvent<
-      NamespacePublicKey,
-      SubspacePublicKey,
+      NamespaceId,
+      SubspaceId,
       PayloadDigest,
       AuthorisationToken
     >
@@ -394,7 +394,7 @@ export class Store<
       authToken,
     }: {
       path: Path;
-      subspace: SubspacePublicKey;
+      subspace: SubspaceId;
       timestamp: bigint;
       hash: PayloadDigest;
       length: bigint;
@@ -497,7 +497,7 @@ export class Store<
     entryDetails: {
       path: Path;
       timestamp: bigint;
-      subspace: SubspacePublicKey;
+      subspace: SubspaceId;
     },
     payload: AsyncIterable<Uint8Array>,
     offset = 0,
@@ -533,7 +533,7 @@ export class Store<
     });
 
     if (
-      result.length > entry.payloadLength ||
+      result.length !== entry.payloadLength ||
       (result.length === entry.payloadLength &&
         this.schemes.payload.order(
             result.digest,
@@ -575,12 +575,12 @@ export class Store<
 
   /** Retrieve an asynchronous iterator of entry-payload-authorisation triples from the store for a given `Area`. */
   async *query(
-    areaOfInterest: AreaOfInterest<SubspacePublicKey>,
+    areaOfInterest: AreaOfInterest<SubspaceId>,
     order: QueryOrder,
     reverse = false,
   ): AsyncIterable<
     [
-      Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
+      Entry<NamespaceId, SubspaceId, PayloadDigest>,
       Payload | undefined,
       AuthorisationToken,
     ]
@@ -618,32 +618,32 @@ export class Store<
   }
 
   summarise(
-    range: Range3d<SubspacePublicKey>,
+    range: Range3d<SubspaceId>,
   ): Promise<{ fingerprint: Fingerprint; size: number }> {
     return this.storage.summarise(range);
   }
 
   splitRange(
-    range: Range3d<SubspacePublicKey>,
+    range: Range3d<SubspaceId>,
     knownSize: number,
   ): Promise<
-    [Range3d<SubspacePublicKey>, Range3d<SubspacePublicKey>]
+    [Range3d<SubspaceId>, Range3d<SubspaceId>]
   > {
     return this.storage.splitRange(range, knownSize);
   }
 
   areaOfInterestToRange(
-    areaOfInterest: AreaOfInterest<SubspacePublicKey>,
-  ): Promise<Range3d<SubspacePublicKey>> {
+    areaOfInterest: AreaOfInterest<SubspaceId>,
+  ): Promise<Range3d<SubspaceId>> {
     return this.storage.removeInterest(areaOfInterest);
   }
 
   async *queryRange(
-    range: Range3d<SubspacePublicKey>,
+    range: Range3d<SubspaceId>,
     order: "newest" | "oldest",
   ): AsyncIterable<
     [
-      Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
+      Entry<NamespaceId, SubspaceId, PayloadDigest>,
       Payload | undefined,
       AuthorisationToken,
     ]
@@ -672,5 +672,11 @@ export class Store<
 
       yield [entry, payload, authToken];
     }
+  }
+
+  getPayload(
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
+  ): Promise<Payload | undefined> {
+    return this.payloadDriver.get(entry.payloadDigest);
   }
 }

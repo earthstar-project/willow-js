@@ -1,7 +1,7 @@
 import { ValidationError, WillowError } from "../../../errors.ts";
 import { Payload, PayloadScheme } from "../../types.ts";
 import { PayloadDriver } from "../types.ts";
-import { join } from "https://deno.land/std@0.188.0/path/mod.ts";
+import { join, resolve } from "https://deno.land/std@0.188.0/path/mod.ts";
 import { ensureDir } from "https://deno.land/std@0.188.0/fs/ensure_dir.ts";
 import { move } from "https://deno.land/std@0.188.0/fs/move.ts";
 import { encodeBase32 } from "../../../../deps.ts";
@@ -172,18 +172,30 @@ export class PayloadDriverFilesystem<PayloadDigest>
 
       const filePath = join(this.path, key);
 
-      const file = await Deno.open(filePath, {
-        createNew: true,
-        write: true,
-      });
+      const file = await Deno.open(
+        filePath,
+        opts.offset === 0
+          ? {
+            create: true,
+            write: true,
+            truncate: true,
+            read: true,
+          }
+          : {
+            create: true,
+            append: true,
+            read: true,
+          },
+      );
 
-      await file.truncate(opts.offset);
-
-      await file.seek(opts.offset, Deno.SeekMode.Start);
+      if (opts.offset > 0) {
+        await file.truncate(opts.offset);
+        await file.seek(opts.offset, Deno.SeekMode.Start);
+      }
 
       const writer = file.writable.getWriter();
 
-      let receivedLength = BigInt(0);
+      let receivedLength = BigInt(opts.offset);
 
       for await (const chunk of opts.payload) {
         await writer.write(chunk);
@@ -199,16 +211,12 @@ export class PayloadDriverFilesystem<PayloadDigest>
 
       const digest = await this.payloadScheme.fromBytes(file.readable);
 
-      const stats = await file.stat();
-
-      const length = stats.size;
-
       return {
         digest,
-        length: BigInt(length),
+        length: BigInt(receivedLength),
       };
-    } catch {
-      throw new WillowError("Couldn't write data to the filesystem.");
+    } catch (err) {
+      throw new WillowError("Payload driver error: " + err);
     }
   }
 

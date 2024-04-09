@@ -1,5 +1,4 @@
 import { decodeCompactWidth, GrowingBytes } from "../../../deps.ts";
-import { WillowError } from "../../errors.ts";
 import {
   HandleType,
   LogicalChannel,
@@ -21,43 +20,51 @@ import { compactWidthFromEndOfByte } from "./util.ts";
 export function decodeChannelFromBeginningOfByte(byte: number): LogicalChannel {
   if ((byte & 0xc0) === 0xc0) {
     return LogicalChannel.StaticTokenChannel;
+  } else if ((byte & 0xa0) === 0xa0) {
+    return LogicalChannel.PayloadRequestChannel;
   } else if ((byte & 0x80) === 0x80) {
     return LogicalChannel.AreaOfInterestChannel;
   } else if ((byte & 0x60) === 0x60) {
     return LogicalChannel.CapabilityChannel;
   } else if ((byte & 0x40) === 0x40) {
     return LogicalChannel.IntersectionChannel;
-  } else if ((byte & 0x0) === 0x0) {
+  } else if ((byte & 0x20) === 0x20) {
+    return LogicalChannel.DataChannel;
+  } else {
     return LogicalChannel.ReconciliationChannel;
   }
-
-  throw new WillowError("Couldn't decode logical channel");
 }
 
 export function decodeChannelFromEndOfByte(byte: number): LogicalChannel {
   if ((byte & 0x6) === 0x6) {
     return LogicalChannel.StaticTokenChannel;
+  } else if ((byte & 0x5) === 0x5) {
+    return LogicalChannel.PayloadRequestChannel;
   } else if ((byte & 0x4) === 0x4) {
     return LogicalChannel.AreaOfInterestChannel;
   } else if ((byte & 0x3) === 0x3) {
     return LogicalChannel.CapabilityChannel;
   } else if ((byte & 0x2) === 0x2) {
     return LogicalChannel.IntersectionChannel;
-  } else if ((byte & 0x0) === 0x0) {
+  } else if ((byte & 0x1) === 0x1) {
+    return LogicalChannel.DataChannel;
+  } else {
     return LogicalChannel.ReconciliationChannel;
   }
-
-  throw new WillowError("Couldn't decode logical channel");
 }
 
 export function decodeHandleTypeFromBeginningOfByte(byte: number): HandleType {
-  if ((byte & 0x20) === 0x20) {
+  if ((byte & 0x80) === 0x80) {
+    return HandleType.StaticTokenHandle;
+  } else if ((byte & 0x60) === 0x60) {
+    return HandleType.PayloadRequestHandle;
+  } else if ((byte & 0x40) === 0x40) {
+    return HandleType.AreaOfInterestHandle;
+  } else if ((byte & 0x20) === 0x20) {
     return HandleType.CapabilityHandle;
-  } else if ((byte & 0x0) === 0x0) {
+  } else {
     return HandleType.IntersectionHandle;
   }
-
-  throw new WillowError("Couldn't decode handle type");
 }
 
 export async function decodeControlIssueGuarantee(

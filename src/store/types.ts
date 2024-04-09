@@ -196,7 +196,7 @@ export type Payload = {
 export type EntryInput<SubspacePublicKey> = {
   path: Path;
   subspace: SubspacePublicKey;
-  payload: Uint8Array | ReadableStream<Uint8Array>;
+  payload: Uint8Array | AsyncIterable<Uint8Array>;
   /** The desired timestamp for the new entry. If left undefined, uses the current time, OR if another entry exists at the same path will be that entry's timestamp + 1. */
   timestamp?: bigint;
 };

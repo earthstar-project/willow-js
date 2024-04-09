@@ -1,4 +1,4 @@
-import { defaultEntry, Entry, FIFO } from "../../../deps.ts";
+import { Entry, FIFO } from "../../../deps.ts";
 import { WillowError } from "../../errors.ts";
 import {
   LogicalChannel,
@@ -370,7 +370,7 @@ export class MessageEncoder<
 
       case MSG_DATA_SET_EAGERNESS: {
         const bytes = encodeDataSetEagerness(message);
-        push(LogicalChannel.DataChannel, bytes);
+        push(null, bytes);
         break;
       }
 
@@ -385,7 +385,7 @@ export class MessageEncoder<
           currentlySentEntry: this.opts.getCurrentlySentEntry(),
         });
 
-        push(LogicalChannel.DataChannel, bytes);
+        push(LogicalChannel.PayloadRequestChannel, bytes);
         break;
       }
 

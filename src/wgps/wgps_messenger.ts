@@ -1,17 +1,17 @@
 import {
   areaIsIncluded,
   AreaOfInterest,
+  defaultEntry,
   deferred,
+  Entry,
   entryPosition,
+  intersectArea,
   isIncluded3d,
+  isIncludedArea,
   orderBytes,
   Range3d,
 } from "../../deps.ts";
-import {
-  isErr,
-  ValidationError,
-  WgpsMessageValidationError,
-} from "../errors.ts";
+import { ValidationError, WgpsMessageValidationError } from "../errors.ts";
 import { decodeMessages } from "./decoding/decode_messages.ts";
 import { MessageEncoder } from "./encoding/message_encoder.ts";
 import { ReadyTransport } from "./ready_transport.ts";
@@ -28,6 +28,11 @@ import {
   MSG_CONTROL_FREE,
   MSG_CONTROL_ISSUE_GUARANTEE,
   MSG_CONTROL_PLEAD,
+  MSG_DATA_BIND_PAYLOAD_REQUEST,
+  MSG_DATA_REPLY_PAYLOAD,
+  MSG_DATA_SEND_ENTRY,
+  MSG_DATA_SEND_PAYLOAD,
+  MSG_DATA_SET_EAGERNESS,
   MSG_PAI_BIND_FRAGMENT,
   MSG_PAI_REPLY_FRAGMENT,
   MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
@@ -52,6 +57,9 @@ import { StoreDriverCallback, StoreMap } from "./store_map.ts";
 import { Reconciler } from "./reconciliation/reconciler.ts";
 import { ReconcilerMap } from "./reconciliation/reconciler_map.ts";
 import { Announcer } from "./reconciliation/announcer.ts";
+import { CapFinder } from "./cap_finder.ts";
+import { DataSender } from "./data/data_sender.ts";
+import { PayloadIngester } from "./data/payload_ingester.ts";
 
 export type WgpsMessengerOpts<
   ReadCapability,
@@ -167,9 +175,11 @@ export class WgpsMessenger<
     AuthorisationOpts
   >;
   private reconciliationChannel = new GuaranteedQueue();
+  private dataChannel = new GuaranteedQueue();
   private intersectionChannel = new GuaranteedQueue();
   private capabilityChannel = new GuaranteedQueue();
   private areaOfInterestChannel = new GuaranteedQueue();
+  private payloadRequestChannel = new GuaranteedQueue();
   private staticTokenChannel = new GuaranteedQueue();
 
   // Commitment scheme
@@ -264,6 +274,50 @@ export class WgpsMessenger<
     remaining: bigint;
   } | undefined;
 
+  // Data
+
+  private capFinder: CapFinder<
+    ReadCapability,
+    Receiver,
+    SyncSignature,
+    ReceiverSecretKey,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest
+  >;
+
+  private currentlySentEntry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+  private currentlyReceivedEntry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+  private currentlyReceivedOffset = 0n;
+
+  private handlesPayloadRequestsOurs = new HandleStore<{
+    offset: bigint;
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+  }>();
+  private handlesPayloadRequestsTheirs = new HandleStore<{
+    offset: bigint;
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+  }>();
+
+  private dataSender: DataSender<
+    Fingerprint,
+    AuthorisationToken,
+    DynamicToken,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts
+  >;
+
+  private payloadIngester: PayloadIngester<
+    Fingerprint,
+    AuthorisationToken,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts
+  >;
+
   constructor(
     opts: WgpsMessengerOpts<
       ReadCapability,
@@ -303,7 +357,7 @@ export class WgpsMessenger<
       );
 
       for (const aoi of areas) {
-        // Check that granted area is in granted area.
+        // Check that AOI area is in granted area.
         const isWithin = areaIsIncluded(
           opts.schemes.subspace.order,
           aoi.area,
@@ -359,6 +413,37 @@ export class WgpsMessenger<
       staticTokenHandleStoreOurs: this.handlesStaticTokensOurs,
     });
 
+    // Data
+
+    this.currentlyReceivedEntry = defaultEntry(
+      this.schemes.namespace.defaultNamespaceId,
+      this.schemes.subspace.minimalSubspaceId,
+      this.schemes.payload.defaultDigest,
+    );
+    this.currentlySentEntry = defaultEntry(
+      this.schemes.namespace.defaultNamespaceId,
+      this.schemes.subspace.minimalSubspaceId,
+      this.schemes.payload.defaultDigest,
+    );
+
+    this.capFinder = new CapFinder({
+      handleStoreOurs: this.handlesCapsOurs,
+      schemes: {
+        accessControl: this.schemes.accessControl,
+        namespace: this.schemes.namespace,
+        subspace: this.schemes.subspace,
+      },
+    });
+
+    this.dataSender = new DataSender({
+      handlesPayloadRequestsTheirs: this.handlesPayloadRequestsTheirs,
+      storeMap: this.storeMap,
+    });
+
+    this.payloadIngester = new PayloadIngester({
+      storeMap: this.storeMap,
+    });
+
     // Send encoded messages
 
     this.encoder = new MessageEncoder(opts.schemes, {
@@ -399,9 +484,16 @@ export class WgpsMessenger<
 
         return reconciler.range;
       },
+      getCurrentlySentEntry: () => {
+        return this.currentlySentEntry;
+      },
     });
 
     onAsyncIterate(this.reconciliationChannel, async (message) => {
+      await this.transport.send(message);
+    });
+
+    onAsyncIterate(this.dataChannel, async (message) => {
       await this.transport.send(message);
     });
 
@@ -417,6 +509,10 @@ export class WgpsMessenger<
       await this.transport.send(message);
     });
 
+    onAsyncIterate(this.payloadRequestChannel, async (message) => {
+      await this.transport.send(message);
+    });
+
     onAsyncIterate(this.staticTokenChannel, async (message) => {
       await this.transport.send(message);
     });
@@ -425,6 +521,10 @@ export class WgpsMessenger<
       switch (channel) {
         case LogicalChannel.ReconciliationChannel: {
           this.reconciliationChannel.push(message);
+          break;
+        }
+        case LogicalChannel.DataChannel: {
+          this.dataChannel.push(message);
           break;
         }
         case LogicalChannel.IntersectionChannel: {
@@ -437,6 +537,10 @@ export class WgpsMessenger<
         }
         case LogicalChannel.AreaOfInterestChannel: {
           this.areaOfInterestChannel.push(message);
+          break;
+        }
+        case LogicalChannel.PayloadRequestChannel: {
+          this.payloadRequestChannel.push(message);
           break;
         }
         case LogicalChannel.StaticTokenChannel: {
@@ -487,6 +591,48 @@ export class WgpsMessenger<
 
         return reconciler.range;
       },
+      // TODO: this might need to be async and use handleStore.getEventually
+      aoiHandlesToArea: (senderHandle, receiverHandle) => {
+        const senderAoi = this.handlesAoisTheirs.get(senderHandle);
+        const receiverAoi = this.handlesAoisOurs.get(receiverHandle);
+
+        if (!senderAoi) {
+          throw new WgpsMessageValidationError(
+            "Failed to retrieve unbound sender AOI handle",
+          );
+        }
+
+        if (!receiverAoi) {
+          throw new WgpsMessageValidationError(
+            "Failed to retrieve unbound receiver AOI handle",
+          );
+        }
+
+        const intersectingArea = intersectArea(
+          this.schemes.subspace.order,
+          senderAoi.area,
+          receiverAoi.area,
+        );
+
+        if (!intersectingArea) {
+          throw new WgpsMessageValidationError(
+            "No intersecting area between two AOI handles",
+          );
+        }
+
+        return intersectingArea;
+      },
+      aoiHandlesToNamespace: (senderHandle, receiverHandle) => {
+        const reconciler = this.reconcilerMap.getReconciler(
+          receiverHandle,
+          senderHandle,
+        );
+
+        return reconciler.store.namespace;
+      },
+      getCurrentlyReceivedEntry: () => {
+        return this.currentlyReceivedEntry;
+      },
     });
 
     // Begin handling decoded messages
@@ -500,6 +646,7 @@ export class WgpsMessenger<
 
     // Get this ball rolling.
     this.initiate();
+    this.setupData();
     this.setupReconciliation();
     this.setupPai(Array.from(opts.interests.keys()));
   }
@@ -532,6 +679,12 @@ export class WgpsMessenger<
 
     this.encoder.encode({
       kind: MSG_CONTROL_ISSUE_GUARANTEE,
+      channel: LogicalChannel.DataChannel,
+      amount: BigInt(Number.MAX_SAFE_INTEGER),
+    });
+
+    this.encoder.encode({
+      kind: MSG_CONTROL_ISSUE_GUARANTEE,
       channel: LogicalChannel.IntersectionChannel,
       amount: BigInt(Number.MAX_SAFE_INTEGER),
     });
@@ -545,6 +698,12 @@ export class WgpsMessenger<
     this.encoder.encode({
       kind: MSG_CONTROL_ISSUE_GUARANTEE,
       channel: LogicalChannel.AreaOfInterestChannel,
+      amount: BigInt(Number.MAX_SAFE_INTEGER),
+    });
+
+    this.encoder.encode({
+      kind: MSG_CONTROL_ISSUE_GUARANTEE,
+      channel: LogicalChannel.PayloadRequestChannel,
       amount: BigInt(Number.MAX_SAFE_INTEGER),
     });
 
@@ -623,6 +782,8 @@ export class WgpsMessenger<
         );
 
         const capHandle = this.handlesCapsOurs.bind(authorisation.capability);
+
+        this.capFinder.addCap(capHandle);
 
         // Send capability
         this.encoder.encode({
@@ -758,6 +919,12 @@ export class WgpsMessenger<
     );
   }
 
+  setupData() {
+    onAsyncIterate(this.dataSender.messages(), (msg) => {
+      this.encoder.encode(msg);
+    });
+  }
+
   private async handleMessage(
     message: SyncMessage<
       ReadCapability,
@@ -819,6 +986,9 @@ export class WgpsMessenger<
           case LogicalChannel.ReconciliationChannel:
             this.reconciliationChannel.addGuarantees(message.amount);
             break;
+          case LogicalChannel.DataChannel:
+            this.dataChannel.addGuarantees(message.amount);
+            break;
           case LogicalChannel.IntersectionChannel:
             this.intersectionChannel.addGuarantees(message.amount);
             break;
@@ -827,6 +997,9 @@ export class WgpsMessenger<
             break;
           case LogicalChannel.AreaOfInterestChannel:
             this.areaOfInterestChannel.addGuarantees(message.amount);
+            break;
+          case LogicalChannel.PayloadRequestChannel:
+            this.payloadRequestChannel.addGuarantees(message.amount);
             break;
           case LogicalChannel.StaticTokenChannel:
             this.staticTokenChannel.addGuarantees(message.amount);
@@ -1022,7 +1195,7 @@ export class WgpsMessenger<
           message.senderHandle,
         );
 
-        // DO WE AWAIT THIS???
+        // TODO: DO WE AWAIT THIS???
         await reconciler.respond(message.range, message.fingerprint);
 
         break;
@@ -1048,8 +1221,6 @@ export class WgpsMessenger<
           namespace: reconciler.store.namespace,
           range: message.range,
         };
-
-        console.log(message);
 
         // If a response is wanted... queue up announcement
         if (message.wantResponse) {
@@ -1112,17 +1283,151 @@ export class WgpsMessenger<
           "TODO_DEFINE_THIS_WHEN_PLUMTREES_GROW",
         );
 
-        if (isErr(result)) {
+        if (result.kind === "failure") {
           throw new WgpsMessageValidationError(
             `Entry ingestion FAILED: ${result.message}`,
           );
         }
 
         this.currentlyReceivingEntries.remaining -= 1n;
-        console.log(
-          "expecting another",
-          this.currentlyReceivingEntries.remaining,
+
+        if (
+          result.kind === "success" &&
+          message.entry.available === message.entry.entry.payloadLength
+        ) {
+          // Request the payload.
+
+          const capHandle = this.capFinder.findCapHandle(message.entry.entry);
+
+          if (capHandle === undefined) {
+            throw new WillowError(
+              "Couldn't get a capability for a given entry",
+            );
+          }
+
+          this.handlesPayloadRequestsOurs.bind({
+            entry: message.entry.entry,
+            offset: 0n,
+          });
+
+          this.encoder.encode({
+            kind: MSG_DATA_BIND_PAYLOAD_REQUEST,
+            entry: message.entry.entry,
+            offset: 0n,
+            capability: capHandle,
+          });
+        }
+
+        break;
+      }
+
+      // Data
+
+      case MSG_DATA_SEND_ENTRY: {
+        const staticToken = await this.handlesStaticTokensTheirs.getEventually(
+          message.staticTokenHandle,
         );
+
+        const authToken = this.schemes.authorisationToken.recomposeAuthToken(
+          staticToken,
+          message.dynamicToken,
+        );
+
+        const store = this.storeMap.get(message.entry.namespaceId);
+
+        const result = await store.ingestEntry(message.entry, authToken);
+
+        if (result.kind === "failure") {
+          throw new WgpsMessageValidationError(result.message);
+        }
+
+        this.currentlyReceivedEntry = message.entry;
+        this.currentlyReceivedOffset = message.offset;
+
+        this.payloadIngester.target(message.entry);
+
+        break;
+      }
+
+      case MSG_DATA_SEND_PAYLOAD: {
+        if (
+          message.amount + this.currentlyReceivedOffset >
+            this.currentlyReceivedEntry.payloadLength
+        ) {
+          throw new WgpsMessageValidationError("Partner sent too many bytes.");
+        }
+
+        const endHere = this.currentlyReceivedOffset ===
+          this.currentlyReceivedEntry.payloadLength;
+
+        this.payloadIngester.push(message.bytes, endHere);
+
+        this.currentlyReceivedOffset += message.amount;
+
+        break;
+      }
+
+      case MSG_DATA_SET_EAGERNESS: {
+        // Do nothing (for now);
+        break;
+      }
+
+      case MSG_DATA_BIND_PAYLOAD_REQUEST: {
+        // Check cap matches entry.
+        const cap = await this.handlesCapsTheirs.getEventually(
+          message.capability,
+        );
+
+        const grantedNamespace = this.schemes.accessControl.getGrantedNamespace(
+          cap,
+        );
+
+        if (
+          !this.schemes.namespace.isEqual(
+            message.entry.namespaceId,
+            grantedNamespace,
+          )
+        ) {
+          throw new WgpsMessageValidationError("Cap did not match entry");
+        }
+
+        const position = entryPosition(message.entry);
+
+        const grantedArea = this.schemes.accessControl.getGrantedArea(cap);
+
+        const isEntryWithinCap = isIncludedArea(
+          this.schemes.subspace.order,
+          grantedArea,
+          position,
+        );
+
+        if (!isEntryWithinCap) {
+          throw new WgpsMessageValidationError("Cap did not match entry");
+        }
+
+        const handle = this.handlesPayloadRequestsTheirs.bind({
+          entry: message.entry,
+          offset: message.offset,
+        });
+
+        this.dataSender.queuePayloadRequest(handle);
+
+        break;
+      }
+
+      case MSG_DATA_REPLY_PAYLOAD: {
+        const result = this.handlesPayloadRequestsOurs.get(message.handle);
+
+        if (!result) {
+          throw new WgpsMessageValidationError(
+            "Could not dereference payload request handle",
+          );
+        }
+
+        this.currentlyReceivedEntry = result.entry;
+        this.currentlyReceivedOffset = result.offset;
+
+        this.payloadIngester.target(result.entry);
 
         break;
       }

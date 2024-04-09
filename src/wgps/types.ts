@@ -58,6 +58,8 @@ export enum HandleType {
   CapabilityHandle,
   /** Resource handle for AreaOfInterests that peers wish to sync. */
   AreaOfInterestHandle,
+  /** Resource handle that controls the matching from Payload transmissions to Payload requests. */
+  PayloadRequestHandle,
   /** Resource handle for StaticTokens that peers need to transmit. */
   StaticTokenHandle,
 }
@@ -75,6 +77,8 @@ export enum LogicalChannel {
   CapabilityChannel,
   /** Logical channel for controlling the binding of new AreaOfInterestHandles. */
   AreaOfInterestChannel,
+  /** Logical channel for controlling the binding of new PayloadRequestHandles. */
+  PayloadRequestChannel,
   /** Logical channel for controlling the binding of new StaticTokenHandles. */
   StaticTokenChannel,
 }
