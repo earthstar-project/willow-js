@@ -123,7 +123,7 @@ export class Skiplist<
   LogicalKey extends KeyPart[],
   LogicalValue,
   SummaryData,
-> //implements SummarisableStorage<LogicalKey, SummaryData>
+> implements SummarisableStorage<LogicalKey, LogicalValue, SummaryData>
 {
   private logicalKeyCompare: (a: LogicalKey, b: LogicalKey) => number;
   private logicalValueEq: (a: LogicalValue, b: LogicalValue) => boolean;
@@ -459,12 +459,12 @@ export class Skiplist<
             batch.set(currentKey, current.value);
           } else {
             // On the kv store, we need to summarise not only until `current`, but until `currentRight`.
-            const actualRightValue = { ...currentLeft.value };
-            actualRightValue.summary = this.monoid.combine(
+            const actualLeftValue = { ...currentLeft.value };
+            actualLeftValue.summary = this.monoid.combine(
               currentLeft.value.summary,
               current.value.summary,
             );
-            batch.set(currentLeft.key, actualRightValue);
+            batch.set(currentLeft.key, actualLeftValue);
           }
         }
       }
@@ -475,8 +475,7 @@ export class Skiplist<
       Can we break early?
       */
       if (
-        currentLeft === undefined && currentLayer > insertionHeight &&
-        currentRight === undefined
+        currentLeft === undefined && currentLayer > insertionHeight
       ) {
         break;
       }
@@ -621,169 +620,163 @@ export class Skiplist<
     }
   }
 
-  // async summarise(
-  //   start: LogicalKey,
-  //   end: LogicalKey,
-  // ): Promise<{ fingerprint: SummaryData; size: number }> {
-  //   // Get the first value.
+  async summarise(
+    start: LogicalKey,
+    end: LogicalKey,
+  ): Promise<{ fingerprint: SummaryData; size: number }> {
+    // Get the first value.
 
-  //   // For each value you find, shoot up.
+    // For each value you find, shoot up.
 
-  //   // Keep moving rightwards until you overshoot.
+    // Keep moving rightwards until you overshoot.
 
-  //   // Assemble the tail using start: key where things started to go wrong, end: end.
+    // Assemble the tail using start: key where things started to go wrong, end: end.
 
-  //   const accumulateUntilOvershoot = async (
-  //     start: LogicalKey | undefined,
-  //     end: LogicalKey | undefined,
-  //     layer: number,
-  //   ): Promise<
-  //     { label: [SummaryData, number]; overshootKey: LogicalKey | undefined }
-  //   > => {
-  //     const startUntilEnd = this.kv.list<SkiplistValue<SummaryData>>({
-  //       start: start ? [layer, start] : [layer],
-  //       end: end ? [layer, end] : [layer + 1],
-  //     });
+    const accumulateUntilOvershoot = async (
+      start: LogicalKey | undefined,
+      end: LogicalKey | undefined,
+      layer: number,
+    ): Promise<
+      { label: [SummaryData, number]; overshootKey: LogicalKey | undefined }
+    > => {
+      const startUntilEnd = this.kv.list({
+        start: start ? [layer, ...start] : [layer],
+        end: end ? [layer, ...end] : [layer + 1],
+      });
 
-  //     let label = this.monoid.neutral;
+      let label = this.monoid.neutral;
 
-  //     let candidateLabel = this.monoid.neutral;
-  //     let overshootKey: LogicalKey | undefined;
+      let candidateLabel = this.monoid.neutral;
+      let overshootKey: LogicalKey | undefined;
 
-  //     for await (const entry of startUntilEnd) {
-  //       label = this.monoid.combine(label, candidateLabel);
-  //       candidateLabel = this.monoid.neutral;
+      for await (const entry of startUntilEnd) {
+        label = this.monoid.combine(label, candidateLabel);
+        candidateLabel = this.monoid.neutral;
 
-  //       const [entryHeight, entryLabel] = entry.value;
+        if (entry.value.maxLayer <= layer) {
+          overshootKey = physicalKeyGetLogicalKey(entry.key);
+          candidateLabel = entry.value.summary;
+          continue;
+        }
 
-  //       if (entryHeight <= layer) {
-  //         overshootKey = entry.key[this.valueKeyIndex] as LogicalKey;
-  //         candidateLabel = entryLabel;
-  //         continue;
-  //       }
+        const { label: aboveLabel, overshootKey: aboveOvershootKey } =
+          await accumulateUntilOvershoot(
+            start,
+            end,
+            entry.value.maxLayer,
+          );
 
-  //       const { label: aboveLabel, overshootKey: aboveOvershootKey } =
-  //         await accumulateUntilOvershoot(
-  //           start,
-  //           end,
-  //           entryHeight,
-  //         );
+        overshootKey = aboveOvershootKey;
 
-  //       overshootKey = aboveOvershootKey;
+        label = this.monoid.combine(label, aboveLabel);
 
-  //       label = this.monoid.combine(label, aboveLabel);
+        break;
+      }
 
-  //       break;
-  //     }
+      // Now we must determine what to do with the leftover candidate.
+      const [, candidateSize] = candidateLabel;
 
-  //     // Now we must determine what to do with the leftover candidate.
-  //     const [, candidateSize] = candidateLabel;
+      if (candidateSize === 1 || end === undefined) {
+        label = this.monoid.combine(label, candidateLabel);
+        return { label, overshootKey: undefined };
+      }
 
-  //     if (candidateSize === 1 || end === undefined) {
-  //       label = this.monoid.combine(label, candidateLabel);
-  //       return { label, overshootKey: undefined };
-  //     }
+      return { label, overshootKey };
+    };
 
-  //     return { label, overshootKey };
-  //   };
+    const getTail = async (
+      overshootLabel: LogicalKey,
+      end: LogicalKey | undefined,
+      layer: number,
+    ): Promise<[SummaryData, number]> => {
+      const endUntilOvershoot = this.kv.list({
+        start: [layer, ...overshootLabel],
+        end: end ? [layer, ...end] : [layer + 1],
+      }, {
+        reverse: true,
+      });
 
-  //   const getTail = async (
-  //     overshootLabel: LogicalKey,
-  //     end: LogicalKey | undefined,
-  //     layer: number,
-  //   ): Promise<[SummaryData, number]> => {
-  //     const endUntilOvershoot = this.kv.list<SkiplistValue<SummaryData>>({
-  //       start: [layer, overshootLabel],
-  //       end: end ? [layer, end] : [layer + 1],
-  //     }, {
-  //       reverse: true,
-  //     });
+      let label = this.monoid.neutral;
 
-  //     let label = this.monoid.neutral;
+      for await (const entry of endUntilOvershoot) {
+        label = this.monoid.combine(entry.value.summary, label);
 
-  //     for await (const entry of endUntilOvershoot) {
-  //       const [entryHeight, entryLabel] = entry.value;
+        if (entry.value.maxLayer <= layer) {
+          continue;
+        }
 
-  //       label = this.monoid.combine(entryLabel, label);
+        const entryValue = physicalKeyGetLogicalKey(entry.key);
 
-  //       if (entryHeight <= layer) {
-  //         continue;
-  //       }
+        const aboveLabel = await getTail(
+          overshootLabel,
+          entryValue,
+          entry.value.maxLayer,
+        );
 
-  //       const entryValue = entry.key[this.valueKeyIndex] as LogicalKey;
+        label = this.monoid.combine(aboveLabel, label);
 
-  //       const aboveLabel = await getTail(
-  //         overshootLabel,
-  //         entryValue,
-  //         entryHeight,
-  //       );
+        break;
+      }
 
-  //       label = this.monoid.combine(aboveLabel, label);
+      return label;
+    };
 
-  //       break;
-  //     }
+    const accumulateLabel = async (
+      { start, end }: {
+        start?: LogicalKey;
+        end?: LogicalKey;
+      },
+    ) => {
+      const firstEntry = this.kv.list({
+        start: start ? [0, ...start] : [0],
+        end: [1],
+      }, {
+        limit: 1,
+      });
 
-  //     return label;
-  //   };
+      for await (const first of firstEntry) {
+        const { label: headLabel, overshootKey } =
+          await accumulateUntilOvershoot(
+            start,
+            end,
+            first.value.maxLayer,
+          );
 
-  //   const accumulateLabel = async (
-  //     { start, end }: {
-  //       start?: LogicalKey;
-  //       end?: LogicalKey;
-  //     },
-  //   ) => {
-  //     const firstEntry = this.kv.list<SkiplistBaseValue<SummaryData>>({
-  //       start: start ? [0, start] : [0],
-  //       end: [1],
-  //     }, {
-  //       limit: 1,
-  //     });
+        if (!overshootKey) {
+          // Very lucky.
 
-  //     for await (const first of firstEntry) {
-  //       const height = first.value[0];
+          return headLabel;
+        }
 
-  //       const { label: headLabel, overshootKey } =
-  //         await accumulateUntilOvershoot(
-  //           start,
-  //           end,
-  //           height,
-  //         );
+        // Get the tail, return it.
+        const tailLabel = await getTail(overshootKey, end, 0);
 
-  //       if (!overshootKey) {
-  //         // Very lucky.
+        return this.monoid.combine(headLabel, tailLabel);
+      }
 
-  //         return headLabel;
-  //       }
+      return this.monoid.neutral;
+    };
 
-  //       // Get the tail, return it.
-  //       const tailLabel = await getTail(overshootKey, end, 0);
+    const argOrder = this.logicalKeyCompare(start, end);
 
-  //       return this.monoid.combine(headLabel, tailLabel);
-  //     }
+    if (argOrder < 0) {
+      const [fingerprint, size] = await accumulateLabel({ start, end });
 
-  //     return this.monoid.neutral;
-  //   };
+      return { fingerprint, size };
+    } else if (argOrder > 0) {
+      const firstHalf = await accumulateLabel({ end });
 
-  //   const argOrder = this.compare(start, end);
+      const secondHalf = await accumulateLabel({ start });
 
-  //   if (argOrder < 0) {
-  //     const [fingerprint, size] = await accumulateLabel({ start, end });
+      const [fingerprint, size] = this.monoid.combine(firstHalf, secondHalf);
 
-  //     return { fingerprint, size };
-  //   } else if (argOrder > 0) {
-  //     const firstHalf = await accumulateLabel({ end });
+      return { fingerprint, size };
+    } else {
+      const [fingerprint, size] = await accumulateLabel({});
 
-  //     const secondHalf = await accumulateLabel({ start });
-
-  //     const [fingerprint, size] = this.monoid.combine(firstHalf, secondHalf);
-
-  //     return { fingerprint, size };
-  //   } else {
-  //     const [fingerprint, size] = await accumulateLabel({});
-
-  //     return { fingerprint, size };
-  //   }
-  // }
+      return { fingerprint, size };
+    }
+  }
 
   /**
    * Get the node to the right of the given key in the skiplist. Returns undefined if the given key is the rightmost item of its layer.
@@ -852,135 +845,135 @@ export class Skiplist<
     return summary;
   }
 
-  // async *entries(
-  //   start: LogicalKey | undefined,
-  //   end: LogicalKey | undefined,
-  //   opts?: {
-  //     limit?: number;
-  //     reverse?: boolean;
-  //   },
-  // ): AsyncIterable<{ key: LogicalKey; value: Uint8Array }> {
-  //   let yielded = 0;
-  //   const hitLimit = () => {
-  //     if (opts?.limit) {
-  //       yielded++;
+  async *entries(
+    start: LogicalKey | undefined,
+    end: LogicalKey | undefined,
+    opts?: {
+      limit?: number;
+      reverse?: boolean;
+    },
+  ): AsyncIterable<{ key: LogicalKey; value: LogicalValue }> {
+    let yielded = 0;
+    const hitLimit = () => {
+      if (opts?.limit) {
+        yielded++;
 
-  //       if (yielded >= opts.limit) {
-  //         return true;
-  //       }
-  //     }
+        if (yielded >= opts.limit) {
+          return true;
+        }
+      }
 
-  //     return false;
-  //   };
+      return false;
+    };
 
-  //   if (!start && !end) {
-  //     for await (const result of this.allEntries(opts?.reverse)) {
-  //       yield result;
-  //       if (hitLimit()) break;
-  //     }
+    if (!start && !end) {
+      for await (const result of this.allEntries(opts?.reverse)) {
+        yield result;
+        if (hitLimit()) break;
+      }
 
-  //     return;
-  //   }
+      return;
+    }
 
-  //   const argOrder = start && end ? this.compare(start, end) : -1;
+    const argOrder = start && end ? this.logicalKeyCompare(start, end) : -1;
 
-  //   if (argOrder === 0) {
-  //     for await (const result of this.allEntries(opts?.reverse)) {
-  //       yield result;
+    if (argOrder === 0) {
+      for await (const result of this.allEntries(opts?.reverse)) {
+        yield result;
 
-  //       if (hitLimit()) break;
-  //     }
-  //   } else if (argOrder < 0) {
-  //     const results = this.kv.list<SkiplistBaseValue<SummaryData>>({
-  //       start: start ? [0, start] : [0],
-  //       end: end ? [0, end] : [1],
-  //     }, {
-  //       limit: opts?.limit,
-  //       reverse: opts?.reverse,
-  //     });
+        if (hitLimit()) break;
+      }
+    } else if (argOrder < 0) {
+      const results = this.kv.list({
+        start: start ? [0, ...start] : [0],
+        end: end ? [0, ...end] : [1],
+      }, {
+        limit: opts?.limit,
+        reverse: opts?.reverse,
+      });
 
-  //     for await (const entry of results) {
-  //       yield {
-  //         key: entry.key[this.valueKeyIndex] as LogicalKey,
-  //         value: entry.value[2],
-  //       };
-  //     }
-  //   } else if (opts?.reverse) {
-  //     const secondHalf = this.kv.list<SkiplistBaseValue<SummaryData>>({
-  //       start: start ? [0, start] : [0],
-  //       end: [1],
-  //     }, { reverse: true });
+      for await (const entry of results) {
+        yield {
+          key: physicalKeyGetLogicalKey(entry.key),
+          value: entry.value.logicalValue!,
+        };
+      }
+    } else if (opts?.reverse) {
+      const secondHalf = this.kv.list({
+        start: start ? [0, ...start] : [0],
+        end: [1],
+      }, { reverse: true });
 
-  //     for await (const entry of secondHalf) {
-  //       yield {
-  //         key: entry.key[this.valueKeyIndex] as LogicalKey,
-  //         value: entry.value[2],
-  //       };
+      for await (const entry of secondHalf) {
+        yield {
+          key: physicalKeyGetLogicalKey(entry.key),
+          value: entry.value.logicalValue!,
+        };
 
-  //       if (hitLimit()) break;
-  //     }
+        if (hitLimit()) break;
+      }
 
-  //     const firstHalf = this.kv.list<SkiplistBaseValue<SummaryData>>({
-  //       start: [0],
-  //       end: end ? [0, end] : [1],
-  //     }, { reverse: true });
+      const firstHalf = this.kv.list({
+        start: [0],
+        end: end ? [0, ...end] : [1],
+      }, { reverse: true });
 
-  //     for await (const entry of firstHalf) {
-  //       yield {
-  //         key: entry.key[this.valueKeyIndex] as LogicalKey,
-  //         value: entry.value[2],
-  //       };
+      for await (const entry of firstHalf) {
+        yield {
+          key: physicalKeyGetLogicalKey(entry.key),
+          value: entry.value.logicalValue!,
+        };
 
-  //       if (hitLimit()) break;
-  //     }
-  //   } else {
-  //     const firstHalf = this.kv.list<SkiplistBaseValue<SummaryData>>({
-  //       start: [0],
-  //       end: end ? [0, end] : [1],
-  //     });
+        if (hitLimit()) break;
+      }
+    } else {
+      const firstHalf = this.kv.list({
+        start: [0],
+        end: end ? [0, ...end] : [1],
+      });
 
-  //     for await (const entry of firstHalf) {
-  //       yield {
-  //         key: entry.key[this.valueKeyIndex] as LogicalKey,
-  //         value: entry.value[2],
-  //       };
+      for await (const entry of firstHalf) {
+        yield {
+          key: physicalKeyGetLogicalKey(entry.key),
+          value: entry.value.logicalValue!,
+        };
 
-  //       if (hitLimit()) break;
-  //     }
+        if (hitLimit()) break;
+      }
 
-  //     const secondHalf = this.kv.list<SkiplistBaseValue<SummaryData>>({
-  //       start: start ? [0, start] : [0],
-  //       end: [1],
-  //     });
+      const secondHalf = this.kv.list({
+        start: start ? [0, ...start] : [0],
+        end: [1],
+      });
 
-  //     for await (const entry of secondHalf) {
-  //       yield {
-  //         key: entry.key[this.valueKeyIndex] as LogicalKey,
-  //         value: entry.value[2],
-  //       };
+      for await (const entry of secondHalf) {
+        yield {
+          key: physicalKeyGetLogicalKey(entry.key),
+          value: entry.value.logicalValue!,
+        };
 
-  //       if (hitLimit()) break;
-  //     }
-  //   }
-  // }
+        if (hitLimit()) break;
+      }
+    }
+  }
 
-  // async *allEntries(
-  //   reverse?: boolean,
-  // ): AsyncIterable<{ key: LogicalKey; value: Uint8Array }> {
-  //   const iter = this.kv.list<SkiplistBaseValue<SummaryData>>({
-  //     start: [0],
-  //     end: [1],
-  //   }, {
-  //     reverse,
-  //   });
+  async *allEntries(
+    reverse?: boolean,
+  ): AsyncIterable<{ key: LogicalKey; value: LogicalValue }> {
+    const iter = this.kv.list({
+      start: [0],
+      end: [1],
+    }, {
+      reverse,
+    });
 
-  //   for await (const entry of iter) {
-  //     yield {
-  //       key: entry.key[this.valueKeyIndex] as LogicalKey,
-  //       value: entry.value[2],
-  //     };
-  //   }
-  // }
+    for await (const entry of iter) {
+      yield {
+        key: physicalKeyGetLogicalKey(entry.key),
+        value: entry.value.logicalValue!,
+      };
+    }
+  }
 }
 
 function randomHeight() {
