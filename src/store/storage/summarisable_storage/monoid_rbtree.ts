@@ -12,46 +12,47 @@ const debug = false;
 
 /** A node for a FingerprintTree, augmented with a label and lifted value. Can update the labels of its ancestors. */
 class MonoidTreeNode<
-  ValueType = string,
-  LiftType = string,
-> extends RedBlackNode<ValueType> {
-  declare parent: MonoidTreeNode<ValueType, LiftType> | null;
-  declare left: MonoidTreeNode<ValueType, LiftType> | null;
-  declare right: MonoidTreeNode<ValueType, LiftType> | null;
+  Key = string,
+  Value = Uint8Array,
+  Summary = string,
+> extends RedBlackNode<Key> {
+  declare parent: MonoidTreeNode<Key, Value, Summary> | null;
+  declare left: MonoidTreeNode<Key, Value, Summary> | null;
+  declare right: MonoidTreeNode<Key, Value, Summary> | null;
 
-  label: LiftType;
-  liftedValue: LiftType;
+  label: Summary;
+  liftedValue: Summary;
 
   isReady = deferred();
 
-  private monoid: LiftingMonoid<ValueType, LiftType>;
-  private valueMapping: Map<ValueType, Uint8Array>;
+  private monoid: LiftingMonoid<[Key, Value], Summary>;
+  private valueMapping: Map<Key, Value>;
 
   constructor(
-    parent: MonoidTreeNode<ValueType, LiftType> | null,
-    value: ValueType,
-    monoid: LiftingMonoid<ValueType, LiftType>,
-    valueMapping: Map<ValueType, Uint8Array>,
+    parent: MonoidTreeNode<Key, Value, Summary> | null,
+    key: Key,
+    monoid: LiftingMonoid<[Key, Value], Summary>,
+    valueMapping: Map<Key, Value>,
   ) {
-    super(parent, value);
+    super(parent, key);
 
     this.label = monoid.neutral;
     this.liftedValue = monoid.neutral;
     this.monoid = monoid;
     this.valueMapping = valueMapping;
 
-    const data = valueMapping.get(value) as Uint8Array;
+    const data = valueMapping.get(key)!;
 
-    this.monoid.lift(value, data).then((liftedValue) => {
+    this.monoid.lift([key, data]).then((liftedValue) => {
       this.liftedValue = liftedValue;
       this.isReady.resolve();
     });
   }
 
   async updateLiftedValue() {
-    const data = this.valueMapping.get(this.value) as Uint8Array;
+    const data = this.valueMapping.get(this.value)!;
 
-    this.liftedValue = await this.monoid.lift(this.value, data);
+    this.liftedValue = await this.monoid.lift([this.value, data]);
 
     this.updateLabel(true, "updated lifted value");
   }
@@ -111,53 +112,53 @@ type CombinedLabel<V, L> = [L, [number, V]];
 type NodeType<V, L> = MonoidTreeNode<V, CombinedLabel<V, L>>;
 
 /** A self-balancing tree which can return fingerprints for ranges of items it holds using a provided monoid. */
-class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
+class RbTreeBase<Key, Value, Summary> extends RedBlackTree<Key> {
   declare protected root:
-    | NodeType<ValueType, LiftedType>
+    | NodeType<Key, Summary>
     | null;
 
   monoid: LiftingMonoid<
-    ValueType,
-    CombinedLabel<ValueType, LiftedType>
+    [Key, Value],
+    CombinedLabel<Key, Summary>
   >;
 
-  private cachedMinNode: NodeType<ValueType, LiftedType> | null = null;
+  private cachedMinNode: NodeType<Key, Summary> | null = null;
 
-  private valueMapping: Map<ValueType, Uint8Array>;
+  private valueMapping: Map<Key, Value>;
 
   constructor(
     /** The lifting monoid which is used to label nodes and derive fingerprints from ranges. */
-    monoid: LiftingMonoid<ValueType, LiftedType>,
+    monoid: LiftingMonoid<[Key, Value], Summary>,
     /** A function to sort values by. Will use JavaScript's default comparison if not provided. */
-    compare: (a: ValueType, b: ValueType) => number,
-    valueMapping: Map<ValueType, Uint8Array>,
+    compare: (a: Key, b: Key) => number,
+    valueMapping: Map<Key, Value>,
   ) {
     super(compare);
 
     this.valueMapping = valueMapping;
 
     const maxMonoid = {
-      lift: (v: ValueType) => Promise.resolve(v),
+      lift: (v: [Key, Value]) => Promise.resolve(v),
       combine: (
-        a: ValueType | undefined,
-        b: ValueType | undefined,
-      ): ValueType => {
+        a: [Key, Value] | undefined,
+        b: [Key, Value] | undefined,
+      ): [Key, Value] => {
         if (a === undefined && b === undefined) {
           return undefined as never;
         }
 
         if (b === undefined) {
-          return a as ValueType;
+          return a as [Key, Value];
         }
 
         if (a === undefined) {
           return b;
         }
 
-        return compare(a, b) > 0 ? a : b;
+        return compare(a[0], b[0]) > 0 ? a : b;
       },
-      neutral: undefined as ValueType,
-    } as LiftingMonoid<ValueType, ValueType>;
+      neutral: undefined as [Key, Value],
+    } as LiftingMonoid<[Key, Value], [Key, Value]>;
 
     this.monoid = combineMonoid(
       monoid,
@@ -165,7 +166,7 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
     );
   }
 
-  print(node?: NodeType<ValueType, LiftedType>) {
+  print(node?: NodeType<Key, Summary>) {
     const nodeToUse = node || this.root;
 
     if (!nodeToUse) {
@@ -193,7 +194,7 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
   }
 
   /** Return the lowest value within this tree. Useful for constructing the maximum range of the tree, which will be [x, x) where x is the result of this function. */
-  getLowestValue(): ValueType {
+  getLowestValue(): Key {
     if (!this.root) {
       throw new Error("Can't get a range from a tree with no items");
     }
@@ -206,7 +207,7 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
   }
 
   rotateNode(
-    node: NodeType<ValueType, LiftedType>,
+    node: NodeType<Key, Summary>,
     direction: Direction,
   ) {
     const replacementDirection: Direction = direction === "left"
@@ -222,7 +223,7 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
       console.group("Rotating", direction);
     }
 
-    const replacement: NodeType<ValueType, LiftedType> =
+    const replacement: NodeType<Key, Summary> =
       node[replacementDirection]!;
     node[replacementDirection] = replacement[direction] ?? null;
 
@@ -262,15 +263,15 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
   }
 
   removeFixup(
-    parent: NodeType<ValueType, LiftedType> | null,
-    current: NodeType<ValueType, LiftedType> | null,
+    parent: NodeType<Key, Summary> | null,
+    current: NodeType<Key, Summary> | null,
   ) {
     while (parent && !current?.red) {
       const direction: Direction = parent.left === current ? "left" : "right";
       const siblingDirection: Direction = direction === "right"
         ? "left"
         : "right";
-      let sibling: NodeType<ValueType, LiftedType> | null =
+      let sibling: NodeType<Key, Summary> | null =
         parent[siblingDirection];
 
       if (sibling?.red) {
@@ -304,8 +305,8 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
   }
 
   private async insertFingerprintNode(
-    value: ValueType,
-  ): Promise<NodeType<ValueType, LiftedType> | null> {
+    value: Key,
+  ): Promise<NodeType<Key, Summary> | null> {
     if (!this.root) {
       const newNode = new MonoidTreeNode(
         null,
@@ -319,7 +320,7 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
       this.cachedMinNode = this.root;
       return this.root;
     } else {
-      let node: NodeType<ValueType, LiftedType> = this.root;
+      let node: NodeType<Key, Summary> = this.root;
 
       let isMinNode = true;
 
@@ -362,7 +363,7 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
   }
 
   /** Insert a value into the tree. Will create a lifted value for the resulting node, and update the labels of all rotated and parent nodes in the tree. */
-  async insertMonoid(value: ValueType): Promise<boolean> {
+  async insertMonoid(value: Key): Promise<boolean> {
     const originalNode = await this.insertFingerprintNode(
       value,
     );
@@ -371,7 +372,7 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
 
     if (node) {
       while (node.parent?.red) {
-        let parent: NodeType<ValueType, LiftedType> = node
+        let parent: NodeType<Key, Summary> = node
           .parent!;
         const parentDirection: Direction = parent.directionFromParent()!;
         const uncleDirection: Direction = parentDirection === "right"
@@ -380,7 +381,7 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
 
         // The uncle is the sibling on the same side of the parent's parent.
         const uncle:
-          | NodeType<ValueType, LiftedType>
+          | NodeType<Key, Summary>
           | null = parent.parent![uncleDirection] ??
             null;
 
@@ -413,20 +414,20 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
   }
 
   async removeMonoidNode(
-    node: NodeType<ValueType, LiftedType>,
-  ): Promise<NodeType<ValueType, LiftedType> | null> {
+    node: NodeType<Key, Summary>,
+  ): Promise<NodeType<Key, Summary> | null> {
     /**
      * The node to physically remove from the tree.
      * Guaranteed to have at most one child.
      */
 
-    const flaggedNode: NodeType<ValueType, LiftedType> | null =
+    const flaggedNode: NodeType<Key, Summary> | null =
       !node.left || !node.right
         ? node
-        : node.findSuccessorNode()! as NodeType<ValueType, LiftedType>;
+        : node.findSuccessorNode()! as NodeType<Key, Summary>;
 
     /** Replaces the flagged node. */
-    const replacementNode: NodeType<ValueType, LiftedType> | null =
+    const replacementNode: NodeType<Key, Summary> | null =
       flaggedNode.left ??
         flaggedNode.right;
 
@@ -451,8 +452,8 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
       node === this.cachedMinNode
     ) {
       this.cachedMinNode = this.root?.findMinNode() as NodeType<
-        ValueType,
-        LiftedType
+        Key,
+        Summary
       >;
     }
 
@@ -463,10 +464,10 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
   }
 
   /** Remove a value frem the tree. Will recalculate labels for all rotated and parent nodes. */
-  async removeMonoid(value: ValueType): Promise<boolean> {
+  async removeMonoid(value: Key): Promise<boolean> {
     const node = this.findNode(
       value,
-    ) as (NodeType<ValueType, LiftedType> | null);
+    ) as (NodeType<Key, Summary> | null);
 
     if (!node) {
       return false;
@@ -475,7 +476,7 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
     this.valueMapping.delete(value);
 
     const removedNode = await this.removeMonoidNode(node) as (
-      | NodeType<ValueType, LiftedType>
+      | NodeType<Key, Summary>
       | null
     );
 
@@ -491,16 +492,16 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
 
   /** Calculates a fingerprint of items within the given range, inclusive of xx and exclusive of y. Also returns the size of the range, the items contained within it, */
   async getFingerprint(
-    x: ValueType,
-    y: ValueType,
-    nextTree?: NodeType<ValueType, LiftedType>,
+    x: Key,
+    y: Key,
+    nextTree?: NodeType<Key, Summary>,
   ): Promise<{
     /** The fingeprint of this range. */
-    fingerprint: LiftedType;
+    fingerprint: Summary;
     /** The size of the range. */
     size: number;
     /** A tree to be used for a subsequent call of `getFingerprint`, where the given y param for the previous call is the x param for the next one. */
-    nextTree: NodeType<ValueType, LiftedType> | null;
+    nextTree: NodeType<Key, Summary> | null;
   }> {
     if (this.root === null) {
       return {
@@ -526,7 +527,7 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
 
       const nodeToPass = nextTree || minNode || this.findGteNode(
         x,
-      ) as NodeType<ValueType, LiftedType>;
+      ) as NodeType<Key, Summary>;
 
       const { label, nextTree: nextNextTree } = this.aggregateUntil(
         nodeToPass,
@@ -552,24 +553,24 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
 
     if (willHaveHead && willHaveTail) {
       const { label: firstLabel, nextTree: firstTree } = this.aggregateUntil(
-        minNode as NodeType<ValueType, LiftedType>,
+        minNode as NodeType<Key, Summary>,
         minNode.value,
         y,
       );
 
       const maxLifted = await this.monoid.lift(
         maxValue,
-        this.valueMapping.get(maxValue) as Uint8Array,
+        this.valueMapping.get(maxValue),
       );
 
       const synthesisedLabel = [maxLifted[0], [1, maxValue]] as CombinedLabel<
-        ValueType,
-        LiftedType
+        Key,
+        Summary
       >;
 
       const nodeToPass = nextTree || this.findGteNode(
         x,
-      ) as NodeType<ValueType, LiftedType>;
+      ) as NodeType<Key, Summary>;
 
       const { label: lastLabel } = this.aggregateUntil(
         nodeToPass,
@@ -591,7 +592,7 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
       };
     } else if (willHaveHead) {
       const { label, nextTree } = this.aggregateUntil(
-        minNode as NodeType<ValueType, LiftedType>,
+        minNode as NodeType<Key, Summary>,
         minNode.value,
         y,
       );
@@ -599,13 +600,13 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
       if (this.compare(x, maxValue) === 0) {
         const maxLifted = await this.monoid.lift(
           maxValue,
-          this.valueMapping.get(maxValue) as Uint8Array,
+          this.valueMapping.get(maxValue),
         );
 
         const synthesisedLabel = [maxLifted[0], [
           1,
           maxValue,
-        ]] as CombinedLabel<ValueType, LiftedType>;
+        ]] as CombinedLabel<Key, Summary>;
 
         const combinedLabel = this.monoid.combine(
           label,
@@ -631,7 +632,7 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
 
       const nodeToPass = nextTree || minNode || this.findGteNode(
         x,
-      ) as NodeType<ValueType, LiftedType>;
+      ) as NodeType<Key, Summary>;
 
       const { label } = this.aggregateUntil(
         nodeToPass,
@@ -641,12 +642,12 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
 
       const maxLifted = await this.monoid.lift(
         maxValue,
-        this.valueMapping.get(maxValue) as Uint8Array,
+        this.valueMapping.get(maxValue),
       );
 
       const synthesisedLabel = [maxLifted[0], [1, maxValue]] as CombinedLabel<
-        ValueType,
-        LiftedType
+        Key,
+        Summary
       >;
 
       const combinedLabel = this.monoid.combine(
@@ -670,9 +671,9 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
 
   /** Find the first node holding a value greater than or equal to the given value. */
   private findGteNode(
-    value: ValueType,
-  ): NodeType<ValueType, LiftedType> | null {
-    let node: NodeType<ValueType, LiftedType> | null = this.root;
+    value: Key,
+  ): NodeType<Key, Summary> | null {
+    let node: NodeType<Key, Summary> | null = this.root;
     while (node) {
       const order: number = this.compare(value, node.value);
       if (order === 0) break;
@@ -688,12 +689,12 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
   }
 
   private aggregateUntil(
-    node: NodeType<ValueType, LiftedType>,
-    x: ValueType,
-    y: ValueType,
+    node: NodeType<Key, Summary>,
+    x: Key,
+    y: Key,
   ): {
-    label: CombinedLabel<ValueType, LiftedType>;
-    nextTree: NodeType<ValueType, LiftedType> | null;
+    label: CombinedLabel<Key, Summary>;
+    nextTree: NodeType<Key, Summary> | null;
   } {
     const { label, nextTree } = this.aggregateUp(node, x, y);
 
@@ -709,14 +710,14 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
   }
 
   private aggregateUp(
-    node: NodeType<ValueType, LiftedType>,
-    x: ValueType,
-    y: ValueType,
+    node: NodeType<Key, Summary>,
+    x: Key,
+    y: Key,
   ): {
-    label: CombinedLabel<ValueType, LiftedType>;
-    nextTree: NodeType<ValueType, LiftedType> | null;
+    label: CombinedLabel<Key, Summary>;
+    nextTree: NodeType<Key, Summary> | null;
   } {
-    let acc: CombinedLabel<ValueType, LiftedType> = this.monoid.neutral;
+    let acc: CombinedLabel<Key, Summary> = this.monoid.neutral;
     let tree = node;
 
     while (this.compare(tree.label[1][1], y) < 0) {
@@ -741,12 +742,12 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
   }
 
   private aggregateDown(
-    node: NodeType<ValueType, LiftedType> | null,
-    y: ValueType,
-    acc: CombinedLabel<ValueType, LiftedType>,
+    node: NodeType<Key, Summary> | null,
+    y: Key,
+    acc: CombinedLabel<Key, Summary>,
   ): {
-    label: CombinedLabel<ValueType, LiftedType>;
-    nextTree: NodeType<ValueType, LiftedType> | null;
+    label: CombinedLabel<Key, Summary>;
+    nextTree: NodeType<Key, Summary> | null;
   } {
     let tree = node;
     let acc2 = acc;
@@ -779,18 +780,18 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
     return { label: acc2, nextTree: null };
   }
 
-  isValueEqual(a: ValueType, b: ValueType): boolean {
+  isValueEqual(a: Key, b: Key): boolean {
     return this.compare(a, b) === 0;
   }
 
   *values(
-    start: ValueType | undefined,
-    end: ValueType | undefined,
+    start: Key | undefined,
+    end: Key | undefined,
     opts?: {
       limit?: number;
       reverse?: boolean;
     },
-  ): Iterable<ValueType> {
+  ): Iterable<Key> {
     let yielded = 0;
     const hitLimit = () => {
       if (opts?.limit) {
@@ -828,8 +829,8 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
     if (opts?.reverse) {
       if (argOrder === -1) {
         // Collect from right to left, ignoring nodes lower than start and greater or equal to end.
-        const nodes: NodeType<ValueType, LiftedType>[] = [];
-        let node: NodeType<ValueType, LiftedType> | null = this.root;
+        const nodes: NodeType<Key, Summary>[] = [];
+        let node: NodeType<Key, Summary> | null = this.root;
 
         while (nodes.length || node) {
           if (node) {
@@ -856,8 +857,8 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
         // second half
         // collect from right to left, ignoring values less than the start
         {
-          const nodes: NodeType<ValueType, LiftedType>[] = [];
-          let node: NodeType<ValueType, LiftedType> | null = this.root;
+          const nodes: NodeType<Key, Summary>[] = [];
+          let node: NodeType<Key, Summary> | null = this.root;
 
           while (nodes.length || node) {
             if (node) {
@@ -882,8 +883,8 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
         // first half
         // collect from right to left, ignoring values greater than the end
         {
-          const nodes: NodeType<ValueType, LiftedType>[] = [];
-          let node: NodeType<ValueType, LiftedType> | null = this.root;
+          const nodes: NodeType<Key, Summary>[] = [];
+          let node: NodeType<Key, Summary> | null = this.root;
 
           while (nodes.length || node) {
             if (node) {
@@ -910,8 +911,8 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
     }
 
     if (argOrder === -1) {
-      const nodes: NodeType<ValueType, LiftedType>[] = [];
-      let node: NodeType<ValueType, LiftedType> | null = this.root;
+      const nodes: NodeType<Key, Summary>[] = [];
+      let node: NodeType<Key, Summary> | null = this.root;
 
       // Collect from left to right, ignoring nodes lower than start and greater or equal to end.
       while (nodes.length || node) {
@@ -937,8 +938,8 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
       }
     } else {
       {
-        const nodes: NodeType<ValueType, LiftedType>[] = [];
-        let node: NodeType<ValueType, LiftedType> | null = this.root;
+        const nodes: NodeType<Key, Summary>[] = [];
+        let node: NodeType<Key, Summary> | null = this.root;
 
         while (nodes.length || node) {
           if (node) {
@@ -961,8 +962,8 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
       }
 
       {
-        const nodes: NodeType<ValueType, LiftedType>[] = [];
-        let node: NodeType<ValueType, LiftedType> | null = this.root;
+        const nodes: NodeType<Key, Summary>[] = [];
+        let node: NodeType<Key, Summary> | null = this.root;
 
         while (nodes.length || node) {
           if (node) {
@@ -987,23 +988,23 @@ class RbTreeBase<ValueType, LiftedType> extends RedBlackTree<ValueType> {
   }
 }
 
-type MonoidRbTreeOpts<ValueType, LiftedType> = {
+type MonoidRbTreeOpts<Key, Value, Summary> = {
   /** The lifting monoid which is used to label nodes and derive fingerprints from ranges. */
-  monoid: LiftingMonoid<ValueType, LiftedType>;
-  compare: (a: ValueType, b: ValueType) => number;
+  monoid: LiftingMonoid<Key, Summary>;
+  compare: (a: Key, b: Key) => number;
 };
 
-export class MonoidRbTree<ValueType, LiftedType>
-  implements SummarisableStorage<ValueType, LiftedType> {
-  private tree: RbTreeBase<ValueType, LiftedType>;
+export class MonoidRbTree<Key, Value, Summary>
+  implements SummarisableStorage<Key, Value, Summary> {
+  private tree: RbTreeBase<Key, Summary>;
 
-  private valueMapping = new Map<ValueType, Uint8Array>();
+  private valueMapping = new Map<Key, Value>();
 
-  constructor(opts: MonoidRbTreeOpts<ValueType, LiftedType>) {
+  constructor(opts: MonoidRbTreeOpts<Key, Value, Summary>) {
     this.tree = new RbTreeBase(opts.monoid, opts.compare, this.valueMapping);
   }
 
-  get(key: ValueType): Promise<Uint8Array | undefined> {
+  get(key: Key): Promise<Value | undefined> {
     const res = this.tree.find(key);
 
     if (res) {
@@ -1013,40 +1014,40 @@ export class MonoidRbTree<ValueType, LiftedType>
     return Promise.resolve(undefined);
   }
 
-  async insert(key: ValueType, value: Uint8Array): Promise<void> {
+  async insert(key: Key, value: Value): Promise<void> {
     this.valueMapping.set(key, value);
     await this.tree.insertMonoid(key);
   }
 
   async summarise(
-    start: ValueType,
-    end: ValueType,
-  ): Promise<{ fingerprint: LiftedType; size: number }> {
+    start: Key,
+    end: Key,
+  ): Promise<{ fingerprint: Summary; size: number }> {
     const res = await this.tree.getFingerprint(start, end);
 
     return { fingerprint: res.fingerprint, size: res.size };
   }
 
-  remove(key: ValueType): Promise<boolean> {
+  remove(key: Key): Promise<boolean> {
     return this.tree.removeMonoid(key);
   }
 
   async *entries(
-    start: ValueType | undefined,
-    end: ValueType | undefined,
+    start: Key | undefined,
+    end: Key | undefined,
     opts?: {
       reverse?: boolean;
       limit?: number;
     },
-  ): AsyncIterable<{ key: ValueType; value: Uint8Array }> {
+  ): AsyncIterable<{ key: Key; value: Value }> {
     for (const key of this.tree.values(start, end, opts)) {
-      yield { key, value: this.valueMapping.get(key) as Uint8Array };
+      yield { key, value: this.valueMapping.get(key) as Value };
     }
   }
 
-  async *allEntries(): AsyncIterable<{ key: ValueType; value: Uint8Array }> {
+  async *allEntries(): AsyncIterable<{ key: Key; value: Value }> {
     for (const key of this.tree.lnrValues()) {
-      yield { key, value: this.valueMapping.get(key) as Uint8Array };
+      yield { key, value: this.valueMapping.get(key) as Value };
     }
   }
 
