@@ -30,6 +30,7 @@ import {
 } from "../../deps.ts";
 import { Storage3d } from "./storage/storage_3d/types.ts";
 import { WillowError } from "../errors.ts";
+import Mutex from "./mutex.ts";
 
 /** A local set of a particular namespace's entries to be written to, read from, and synced with other `Store`s.
  *
@@ -73,6 +74,8 @@ export class Store<
 
   private checkedWriteAheadFlag = deferred();
 
+  private ingestionMutex = new Mutex();
+
   constructor(
     opts: StoreOpts<
       NamespaceId,
@@ -115,7 +118,6 @@ export class Store<
     const existingRemove = await this.entryDriver.writeAheadFlag.wasRemoving();
 
     if (existingInsert) {
-      // TODO(AUTH): Get the encoded authtoken out of payload driver.
       const encodedAuthToken = await this.payloadDriver.get(
         existingInsert.authTokenHash,
       );
@@ -215,8 +217,7 @@ export class Store<
   > {
     await this.checkedWriteAheadFlag;
 
-    // TODO: Add prefix lock.
-    // The idea: a lock for items with a common prefix.
+    const acquisitionId = await this.ingestionMutex.acquire();
 
     // Check if the entry belongs to this namespace.
     if (
@@ -225,6 +226,8 @@ export class Store<
         entry.namespaceId,
       )
     ) {
+      this.ingestionMutex.release(acquisitionId);
+
       return {
         kind: "failure",
         reason: "invalid_entry",
@@ -239,6 +242,8 @@ export class Store<
         authorisation,
       ) === false
     ) {
+      this.ingestionMutex.release(acquisitionId);
+
       return {
         kind: "failure",
         reason: "invalid_entry",
@@ -261,6 +266,8 @@ export class Store<
       const prefixTimestamp = view.getBigUint64(0);
 
       if (prefixTimestamp >= entry.timestamp) {
+        this.ingestionMutex.release(acquisitionId);
+
         return {
           kind: "no_op",
           reason: "newer_prefix_found",
@@ -307,6 +314,8 @@ export class Store<
 
       //  If there is something existing and the timestamp is greater than ours, we have a no-op.
       if (otherEntry.timestamp > entry.timestamp) {
+        this.ingestionMutex.release(acquisitionId);
+
         return {
           kind: "no_op",
           reason: "obsolete_from_same_subspace",
@@ -323,6 +332,8 @@ export class Store<
         otherEntry.timestamp === entry.timestamp &&
         payloadDigestOrder === -1
       ) {
+        this.ingestionMutex.release(acquisitionId);
+
         return {
           kind: "no_op",
           reason: "obsolete_from_same_subspace",
@@ -337,6 +348,8 @@ export class Store<
         otherEntry.timestamp === entry.timestamp &&
         payloadDigestOrder === 0 && otherPayloadLengthIsGreater
       ) {
+        this.ingestionMutex.release(acquisitionId);
+
         return {
           kind: "no_op",
           reason: "obsolete_from_same_subspace",
@@ -375,6 +388,8 @@ export class Store<
     if (externalSourceId) {
       this.dispatchEvent(new EntryIngestEvent(entry, authorisation));
     }
+
+    this.ingestionMutex.release(acquisitionId);
 
     return {
       kind: "success",
