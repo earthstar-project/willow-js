@@ -182,6 +182,7 @@ export class KvDriverInMemory<Key extends KeyPart[], Value>
   }
 
   set(key: Key, value: Value): Promise<void> {
+    this.tree.remove({ key, value: "unused" as Value });
     this.tree.insert({ key, value });
     return Promise.resolve();
   }
@@ -205,14 +206,14 @@ export class KvDriverInMemory<Key extends KeyPart[], Value>
           this.tree.keyCmp(k, selector.end) < 0
         )
         : this.tree.findGreatestMatching((k) =>
-          this.isKeyPrefixOf(selector.prefix, k)
+          (this.tree.keyCmp(k, selector.prefix) <= 0) || this.isKeyPrefixOf(selector.prefix, k)
         ))
       : ("start" in selector
         ? this.tree.findLeastMatching((k) =>
-          this.tree.keyCmp(k, selector.end) >= 0
+          this.tree.keyCmp(k, selector.start) >= 0
         )
         : this.tree.findLeastMatching((k) =>
-          this.isKeyPrefixOf(selector.prefix, k)
+          (this.tree.keyCmp(k, selector.prefix) >= 0) || this.isKeyPrefixOf(selector.prefix, k)
         ));
 
     const stillInRange = (k: Key) => {
