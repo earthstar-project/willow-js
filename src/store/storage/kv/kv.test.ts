@@ -6,7 +6,6 @@ import { KvDriverInMemory } from "./kv_driver_in_memory.ts";
 Deno.test("Test in-memory kv store", async (t) => {
   const store = new KvDriverInMemory<number[], string>(
     compareNumberArrays,
-    isPrefix,
   );
   await testKvStore(t, store);
 });
@@ -26,20 +25,6 @@ function compareNumberArrays(a: number[], b: number[]): number {
     return 1;
   } else {
     return 0;
-  }
-}
-
-function isPrefix(a: number[], b: number[]): boolean {
-  if (a.length > b.length) {
-    return false;
-  } else {
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) {
-        return false;
-      }
-    }
-
-    return true;
   }
 }
 

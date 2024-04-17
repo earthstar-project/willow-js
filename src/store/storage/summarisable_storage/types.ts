@@ -4,8 +4,8 @@ export interface SummarisableStorage<LogicalKey, LogicalValue, SummaryData> {
   remove(key: LogicalKey): Promise<boolean>;
 
   summarise(
-    start: LogicalKey,
-    end: LogicalKey,
+    start?: LogicalKey,
+    end?: LogicalKey,
   ): Promise<{ fingerprint: SummaryData; size: number }>;
 
   entries(

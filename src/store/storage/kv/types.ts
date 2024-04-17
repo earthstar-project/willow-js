@@ -15,15 +15,18 @@ export type KvBatch<Key extends KeyPart[], Value> = {
 export interface KvDriver<Key extends KeyPart[], Value> {
   get(key: Key): Promise<Value | undefined>;
   set(key: Key, value: Value): Promise<void>;
-  delete(key: Key): Promise<void>;
+  /**
+   * Return `true` if something was deleted.
+   */
+  delete(key: Key): Promise<boolean>;
   list(
-    selector: { start: Key; end: Key } | { prefix: Key },
+    selector: { start?: Key; end?: Key; prefix?: Key },
     opts?: {
       reverse?: boolean;
       limit?: number;
       batchSize?: number;
     },
   ): AsyncIterable<{ key: Key; value: Value }>;
-  clear(opts?: { prefix: Key; start: Key; end: Key }): Promise<void>;
+  clear(opts?: { prefix?: Key; start?: Key; end?: Key }): Promise<void>;
   batch(): KvBatch<Key, Value>;
 }

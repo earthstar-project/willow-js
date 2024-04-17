@@ -170,10 +170,21 @@ export class KvDriverInMemory<Key extends KeyPart[], Value>
 
   constructor(
     keyCompare: (a: Key, b: Key) => number,
-    isKeyPrefixOf: (possiblePrefix: Key, keyToCompareTo: Key) => boolean,
   ) {
     this.tree = new UsefulTree<Key, Value>(keyCompare);
-    this.isKeyPrefixOf = isKeyPrefixOf;
+    this.isKeyPrefixOf = (a: Key, b: Key) => {
+      if (a.length > b.length) {
+        return false;
+      } else {
+        for (let i = 0; i < a.length; i++) {
+          if (a[i] !== b[i]) {
+            return false;
+          }
+        }
+    
+        return true;
+      }
+    };
   }
 
   get(key: Key): Promise<Value | undefined> {
@@ -187,43 +198,35 @@ export class KvDriverInMemory<Key extends KeyPart[], Value>
     return Promise.resolve();
   }
 
-  delete(key: Key): Promise<void> {
-    this.tree.remove({ key, value: "unused" as Value });
-    return Promise.resolve();
+  delete(key: Key): Promise<boolean> {
+    return Promise.resolve(this.tree.remove({ key, value: "unused" as Value }));
   }
 
   async *list(
-    selector: { start: Key; end: Key } | { prefix: Key },
+    selector: { start?: Key; end?: Key; prefix?: Key },
     opts: {
       reverse?: boolean | undefined;
       limit?: number | undefined;
       batchSize?: number | undefined;
     } | undefined = { reverse: false, limit: undefined, batchSize: undefined },
   ): AsyncIterable<{ key: Key; value: Value }> {
+    const prefix = selector.prefix ?? <Key> <unknown> [];
     const first = opts.reverse
-      ? ("end" in selector
-        ? this.tree.findGreatestMatching((k) =>
-          this.tree.keyCmp(k, selector.end) < 0
-        )
-        : this.tree.findGreatestMatching((k) =>
-          (this.tree.keyCmp(k, selector.prefix) <= 0) || this.isKeyPrefixOf(selector.prefix, k)
-        ))
-      : ("start" in selector
-        ? this.tree.findLeastMatching((k) =>
-          this.tree.keyCmp(k, selector.start) >= 0
-        )
-        : this.tree.findLeastMatching((k) =>
-          (this.tree.keyCmp(k, selector.prefix) >= 0) || this.isKeyPrefixOf(selector.prefix, k)
-        ));
+      ? this.tree.findGreatestMatching((k) =>
+        (selector.end ? this.tree.keyCmp(k, selector.end) < 0 : true) &&
+        ((this.tree.keyCmp(k, prefix) <= 0) || this.isKeyPrefixOf(prefix, k))
+      )
+      : this.tree.findLeastMatching((k) =>
+        (selector.start ? this.tree.keyCmp(k, selector.start) >= 0 : true) &&
+        ((this.tree.keyCmp(k, prefix) >= 0) || this.isKeyPrefixOf(prefix, k))
+      );
 
     const stillInRange = (k: Key) => {
       return opts.reverse
-        ? ("start" in selector
-          ? (this.tree.keyCmp(k, selector.start) >= 0)
-          : (this.isKeyPrefixOf(selector.prefix, k)))
-        : ("end" in selector
-          ? (this.tree.keyCmp(k, selector.end) < 0)
-          : (this.isKeyPrefixOf(selector.prefix, k)));
+        ? (this.isKeyPrefixOf(prefix, k) &&
+          (selector.start ? this.tree.keyCmp(k, selector.start) >= 0 : true))
+        : (this.isKeyPrefixOf(prefix, k) &&
+          (selector.end ? this.tree.keyCmp(k, selector.end) < 0 : true));
     };
 
     let count = 0;
@@ -243,19 +246,21 @@ export class KvDriverInMemory<Key extends KeyPart[], Value>
   }
 
   clear(
-    opts?: { prefix: Key; start: Key; end: Key } | undefined,
+    opts?: { prefix?: Key; start?: Key; end?: Key } | undefined,
   ): Promise<void> {
     if (opts === undefined) {
       this.tree.clear();
     } else {
+      const prefix = opts.prefix ?? <Key> <unknown> [];
       const predicate = (k: Key) => {
-        return this.isKeyPrefixOf(opts.prefix, k) &&
-          (this.tree.keyCmp(k, opts.start) >= 0);
+        return this.isKeyPrefixOf(prefix, k) &&
+          (opts.start ? (this.tree.keyCmp(k, opts.start) >= 0) : true);
       };
 
       let node = this.tree.findLeastMatching(predicate);
       while (
-        node !== null && (this.tree.keyCmp(node.value.key, opts.end) < 0)
+        node !== null &&
+        (opts.end ? this.tree.keyCmp(node.value.key, opts.end) < 0 : true)
       ) {
         this.tree.remove(node.value);
         node = this.tree.findLeastMatching(predicate);

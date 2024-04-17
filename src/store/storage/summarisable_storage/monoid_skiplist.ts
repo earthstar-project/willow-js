@@ -11,7 +11,7 @@ A pair of a logical key and its logical value is called a *logical entry*, a pai
 On the key value store, we create a physical entry for each node in the skip list. We sort these entries by layer first, logical key second.
 */
 
-type PhysicalKey<LogicalKey extends KeyPart[]> = [
+export type PhysicalKey<LogicalKey extends KeyPart[]> = [
   number, /* which layer? */
   ...LogicalKey,
 ] | [number /* which layer? */];
@@ -45,7 +45,7 @@ Further, the skiplist is summarisable: you can efficiently query for a *summary*
 To support this efficiently, each physical value consists not only of a logical value, but also of some metadata.
 */
 
-type PhysicalValue<LogicalValue, SummaryData> = {
+export type PhysicalValue<LogicalValue, SummaryData> = {
   /**
    * The LogicalValue that this entry stores. The only piece of non-metadata.
    *
@@ -97,7 +97,7 @@ const LAYER_INSERT_PROBABILITY = 0.5;
 // Hard limit on the number of layers, never insert above this.
 const LAYER_LEVEL_LIMIT = 64;
 
-type SkiplistOpts<
+export type SkiplistOpts<
   LogicalKey extends KeyPart[],
   LogicalValue,
   SummaryData,
@@ -116,16 +116,14 @@ type SkiplistOpts<
     PhysicalKey<LogicalKey>,
     PhysicalValue<LogicalValue, SummaryData>
   >;
-  monoid: LiftingMonoid<LogicalKey, SummaryData>;
+  monoid: LiftingMonoid<[LogicalKey, LogicalValue], SummaryData>;
 };
 
 export class Skiplist<
   LogicalKey extends KeyPart[],
   LogicalValue,
   SummaryData,
-> implements SummarisableStorage<LogicalKey, LogicalValue, SummaryData>
-{
-  private logicalKeyCompare: (a: LogicalKey, b: LogicalKey) => number;
+> implements SummarisableStorage<LogicalKey, LogicalValue, SummaryData> {
   private logicalValueEq: (a: LogicalValue, b: LogicalValue) => boolean;
   private kv: KvDriver<
     PhysicalKey<LogicalKey>,
@@ -133,15 +131,11 @@ export class Skiplist<
   >;
   private _maxHeight = 0;
   private isSetup = deferred();
-  private monoid: LiftingMonoid<LogicalKey, [SummaryData, number]>;
-
-  private layerKeyIndex = 0;
-  private valueKeyIndex = 1;
+  private monoid: LiftingMonoid<[LogicalKey, LogicalValue], [SummaryData, number]>;
 
   constructor(opts: SkiplistOpts<LogicalKey, LogicalValue, SummaryData>) {
     this.kv = opts.kv;
 
-    this.logicalKeyCompare = opts.logicalKeyCompare;
     this.logicalValueEq = opts.logicalValueEq;
     this.monoid = combineMonoid(opts.monoid, sizeMonoid);
 
@@ -223,7 +217,7 @@ export class Skiplist<
     let level = 0;
 
     for await (const entry of lastEntry) {
-      level = entry.key[this.layerKeyIndex] as number;
+      level = physicalKeyGetLayer(entry.key);
     }
 
     this._maxHeight = level;
@@ -249,7 +243,7 @@ export class Skiplist<
       // Use this number as the layer up to which to insert, instead of choosing one at random.
       layer?: number;
     },
-  ) {
+  ): Promise<void> {
     await this.isSetup;
 
     /*
@@ -314,7 +308,7 @@ export class Skiplist<
     const layerZeroPhysicalValue: PhysicalValue<LogicalValue, SummaryData> = {
       logicalValue: value, // On layer zero, we include the physical value. We won't on higher layers.
       maxLayer: insertionHeight,
-      summary: await this.monoid.lift(key),
+      summary: await this.monoid.lift([key, value]),
     };
 
     batch.set(layerZeroPhysicalKey, layerZeroPhysicalValue);
@@ -621,8 +615,8 @@ export class Skiplist<
   }
 
   async summarise(
-    start: LogicalKey,
-    end: LogicalKey,
+    start?: LogicalKey,
+    end?: LogicalKey,
   ): Promise<{ fingerprint: SummaryData; size: number }> {
     // Get the first value.
 
@@ -757,25 +751,9 @@ export class Skiplist<
       return this.monoid.neutral;
     };
 
-    const argOrder = this.logicalKeyCompare(start, end);
+    const [fingerprint, size] = await accumulateLabel({ start, end });
 
-    if (argOrder < 0) {
-      const [fingerprint, size] = await accumulateLabel({ start, end });
-
-      return { fingerprint, size };
-    } else if (argOrder > 0) {
-      const firstHalf = await accumulateLabel({ end });
-
-      const secondHalf = await accumulateLabel({ start });
-
-      const [fingerprint, size] = this.monoid.combine(firstHalf, secondHalf);
-
-      return { fingerprint, size };
-    } else {
-      const [fingerprint, size] = await accumulateLabel({});
-
-      return { fingerprint, size };
-    }
+    return { fingerprint, size };
   }
 
   /**
@@ -826,7 +804,7 @@ export class Skiplist<
    *
    * Returns the empty summary if the sequence of nodes in question is empty.
    */
-  async summariseSingleLayer(
+  private async summariseSingleLayer(
     start: PhysicalKey<LogicalKey>,
     end?: LogicalKey,
   ): Promise<[SummaryData, number]> {
@@ -853,126 +831,30 @@ export class Skiplist<
       reverse?: boolean;
     },
   ): AsyncIterable<{ key: LogicalKey; value: LogicalValue }> {
-    let yielded = 0;
-    const hitLimit = () => {
-      if (opts?.limit) {
-        yielded++;
+    const physicalStart: PhysicalKey<LogicalKey> | undefined = start
+      ? [0, ...start]
+      : undefined;
+    const physicalEnd: PhysicalKey<LogicalKey> | undefined = end
+      ? [0, ...end]
+      : undefined;
 
-        if (yielded >= opts.limit) {
-          return true;
-        }
-      }
-
-      return false;
-    };
-
-    if (!start && !end) {
-      for await (const result of this.allEntries(opts?.reverse)) {
-        yield result;
-        if (hitLimit()) break;
-      }
-
-      return;
-    }
-
-    const argOrder = start && end ? this.logicalKeyCompare(start, end) : -1;
-
-    if (argOrder === 0) {
-      for await (const result of this.allEntries(opts?.reverse)) {
-        yield result;
-
-        if (hitLimit()) break;
-      }
-    } else if (argOrder < 0) {
-      const results = this.kv.list({
-        start: start ? [0, ...start] : [0],
-        end: end ? [0, ...end] : [1],
-      }, {
-        limit: opts?.limit,
-        reverse: opts?.reverse,
-      });
-
-      for await (const entry of results) {
-        yield {
-          key: physicalKeyGetLogicalKey(entry.key),
-          value: entry.value.logicalValue!,
-        };
-      }
-    } else if (opts?.reverse) {
-      const secondHalf = this.kv.list({
-        start: start ? [0, ...start] : [0],
-        end: [1],
-      }, { reverse: true });
-
-      for await (const entry of secondHalf) {
-        yield {
-          key: physicalKeyGetLogicalKey(entry.key),
-          value: entry.value.logicalValue!,
-        };
-
-        if (hitLimit()) break;
-      }
-
-      const firstHalf = this.kv.list({
-        start: [0],
-        end: end ? [0, ...end] : [1],
-      }, { reverse: true });
-
-      for await (const entry of firstHalf) {
-        yield {
-          key: physicalKeyGetLogicalKey(entry.key),
-          value: entry.value.logicalValue!,
-        };
-
-        if (hitLimit()) break;
-      }
-    } else {
-      const firstHalf = this.kv.list({
-        start: [0],
-        end: end ? [0, ...end] : [1],
-      });
-
-      for await (const entry of firstHalf) {
-        yield {
-          key: physicalKeyGetLogicalKey(entry.key),
-          value: entry.value.logicalValue!,
-        };
-
-        if (hitLimit()) break;
-      }
-
-      const secondHalf = this.kv.list({
-        start: start ? [0, ...start] : [0],
-        end: [1],
-      });
-
-      for await (const entry of secondHalf) {
-        yield {
-          key: physicalKeyGetLogicalKey(entry.key),
-          value: entry.value.logicalValue!,
-        };
-
-        if (hitLimit()) break;
-      }
+    for await (
+      const physicalEntry of this.kv.list({
+        start: physicalStart,
+        end: physicalEnd,
+      }, opts)
+    ) {
+      yield {
+        key: physicalKeyGetLogicalKey(physicalEntry.key),
+        value: physicalEntry.value.logicalValue!,
+      };
     }
   }
 
-  async *allEntries(
+  allEntries(
     reverse?: boolean,
   ): AsyncIterable<{ key: LogicalKey; value: LogicalValue }> {
-    const iter = this.kv.list({
-      start: [0],
-      end: [1],
-    }, {
-      reverse,
-    });
-
-    for await (const entry of iter) {
-      yield {
-        key: physicalKeyGetLogicalKey(entry.key),
-        value: entry.value.logicalValue!,
-      };
-    }
+    return this.entries(undefined, undefined, { reverse });
   }
 }
 
