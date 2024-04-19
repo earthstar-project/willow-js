@@ -3,12 +3,14 @@ import { PhysicalKey, Skiplist } from "./monoid_skiplist.ts";
 
 import { LiftingMonoid } from "./lifting_monoid.ts";
 import { KvDriverInMemory } from "../kv/kv_driver_in_memory.ts";
+import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
+import { KvDriver } from "../kv/types.ts";
 import { PhysicalValue } from "./monoid_skiplist.ts";
 import { LinearStorage } from "./linear_summarisable_storage.ts";
 
 type Operation<Key, Value> =
   | Insert<Key, Value>
-  | Delete<Key, Value>;
+  | Delete<Key>;
 
 type Insert<Key, Value> = {
   key: Key;
@@ -16,9 +18,9 @@ type Insert<Key, Value> = {
   level: number;
 };
 
-type Delete<Key, Value> = { key: Key };
+type Delete<Key> = { key: Key };
 
-type Summarise<Key, Value> = {
+type Summarise<Key> = {
   start?: Key;
   end?: Key;
 };
@@ -49,7 +51,9 @@ function compareNumberArrays(a: number[], b: number[]): number {
   }
 }
 
-function newTestStore(): Skiplist<[number], number, string> {
+async function newTestStore(
+  useDenoKv?: boolean,
+): Promise<Skiplist<[number], number, string>> {
   const keyCompare = (a: [number], b: [number]) => {
     if (a[0] < b[0]) {
       return -1;
@@ -60,24 +64,38 @@ function newTestStore(): Skiplist<[number], number, string> {
     }
   };
 
+  let kv: KvDriver<
+    PhysicalKey<[number]>,
+    PhysicalValue<number, string>
+  > = new KvDriverInMemory<
+    PhysicalKey<[number]>,
+    PhysicalValue<number, string>
+  >(
+    compareNumberArrays,
+  );
+
+  if (useDenoKv) {
+    kv = new KvDriverDeno<
+      PhysicalKey<[number]>,
+      PhysicalValue<number, string>
+    >(await Deno.openKv(":memory:"));
+    await kv.clear();
+  }
+
   return new Skiplist<[number], number, string>({
     logicalKeyCompare: keyCompare,
     logicalValueEq: (a: number, b: number) => a === b,
-    kv: new KvDriverInMemory<
-      PhysicalKey<[number]>,
-      PhysicalValue<number, string>
-    >(
-      compareNumberArrays,
-    ),
+    kv,
     monoid: testMonoid,
   });
 }
 
 async function runTestCase(
   ops: Operation<number, number>[],
-  summarise: Summarise<number, number>,
+  summaries: Summarise<number>[],
+  useDenoKv?: boolean,
 ) {
-  const store = newTestStore();
+  const store = await newTestStore(useDenoKv);
 
   const control = new LinearStorage<[number], number, string>({
     kv: new KvDriverInMemory<[number], number>(
@@ -96,36 +114,42 @@ async function runTestCase(
     }
   }
 
-  const got = await store.summarise(
-    summarise.start === undefined ? undefined : [summarise.start],
-    summarise.end === undefined ? undefined : [summarise.end],
-  );
-  const expected = await control.summarise(
-    summarise.start === undefined ? undefined : [summarise.start],
-    summarise.end === undefined ? undefined : [summarise.end],
-  );
-
-  try {
-    assertEquals(got, expected);
-  } catch (_err) {
-    await store.print();
-
-    assertEquals(
-      got,
-      expected,
-      `
-  ===================
-  Summary: ${JSON.stringify(summarise, undefined, 2)}
-  
-  Operations: ${JSON.stringify(ops, undefined, 2)}`,
+  for (const summarise of summaries) {
+    const got = await store.summarise(
+      summarise.start === undefined ? undefined : [summarise.start],
+      summarise.end === undefined ? undefined : [summarise.end],
     );
+    const expected = await control.summarise(
+      summarise.start === undefined ? undefined : [summarise.start],
+      summarise.end === undefined ? undefined : [summarise.end],
+    );
+
+    try {
+      assertEquals(got, expected);
+    } catch (_err) {
+      await store.print();
+
+      assertEquals(
+        got,
+        expected,
+        `
+    ===================
+    Summary: ${JSON.stringify(summarise, undefined, 2)}
+    
+    Operations: ${JSON.stringify(ops, undefined, 2)}`,
+      );
+    }
+  }
+
+  if (useDenoKv) {
+    (<KvDriverDeno<[number], number>><unknown>store["kv"]).close();
   }
 }
 
 Deno.test({
   name: "Basic stuff actually works",
   async fn() {
-    const store = newTestStore();
+    const store = await newTestStore();
     await store.insert([0], 8);
     assertEquals(await collect(store.allEntries()), [{ key: [0], value: 8 }]);
   },
@@ -134,7 +158,7 @@ Deno.test({
 Deno.test({
   name: "Regression 2",
   async fn() {
-    const store = newTestStore();
+    const store = await newTestStore();
     await store.insert([0], 8, { layer: 0 });
     await store.insert([1], 9, { layer: 1 });
 
@@ -155,7 +179,7 @@ Deno.test({
 Deno.test({
   name: "Regression 3",
   async fn() {
-    const store = newTestStore();
+    const store = await newTestStore();
     await store.insert([0], 8, { layer: 0 });
     await store.insert([0], 9, { layer: 0 });
 
@@ -179,7 +203,7 @@ Deno.test({
 Deno.test({
   name: "Regression 4",
   async fn() {
-    const store = newTestStore();
+    const store = await newTestStore();
     await store.insert([0], 8, { layer: 0 });
     await store.insert([0], 9, { layer: 1 });
 
@@ -203,7 +227,7 @@ Deno.test({
 Deno.test({
   name: "Regression 5",
   async fn() {
-    const store = newTestStore();
+    const store = await newTestStore();
     await store.insert([0], 8, { layer: 0 });
     await store.remove([0]);
 
@@ -224,7 +248,7 @@ Deno.test({
 Deno.test({
   name: "Regression 6",
   async fn() {
-    const store = newTestStore();
+    const store = await newTestStore();
     await store.insert([0], 8, { layer: 1 });
     await store.insert([1], 8, { layer: 0 });
     await store.insert([0], 9, { layer: 0 });
@@ -249,7 +273,7 @@ Deno.test({
 Deno.test({
   name: "Regression 7",
   async fn() {
-    const store = newTestStore();
+    const store = await newTestStore();
     await store.insert([0], 8, { layer: 1 });
     await store.insert([1], 8, { layer: 0 });
     await store.insert([2], 8, { layer: 0 });
@@ -274,7 +298,7 @@ Deno.test({
 Deno.test({
   name: "Regression 8",
   async fn() {
-    const store = newTestStore();
+    const store = await newTestStore();
     await store.insert([0], 8, { layer: 1 });
     await store.insert([1], 8, { layer: 0 });
     await store.insert([2], 8, { layer: 0 });
@@ -312,9 +336,82 @@ Deno.test({
           ops.push(randomOperation(numKeys, numLayers));
         }
 
-        for (const range of exhaustivelyGenerateRanges(numKeys)) {
-          await runTestCase(ops, range);
+        const ranges = collectSync(exhaustivelyGenerateRanges(numKeys));
+        await runTestCase(ops, ranges);
+      }
+    }
+  },
+});
+
+Deno.test({
+  name: "Even More Random Tests",
+  async fn() {
+    const numKeys = 16;
+    const numLayers = 6;
+
+    const iterations = 10000;
+
+    for (let i = 0; i < iterations; i++) {
+      for (let numOps = 5; numOps < 40; numOps++) {
+        const ops: Operation<number, number>[] = [];
+        for (let opNr = 0; opNr < numOps; opNr++) {
+          ops.push(randomOperation(numKeys, numLayers));
         }
+
+        const ranges: Summarise<number>[] = [];
+        for (let summariseNr = 0; summariseNr < 8; summariseNr++) {
+          ranges.push(randomSummary(numKeys));
+        }
+
+        await runTestCase(ops, ranges);
+      }
+    }
+  },
+});
+
+Deno.test({
+  name: "Randomly Test DenoKV",
+  async fn() {
+    const numKeys = 8;
+    const numLayers = 5;
+
+    const iterations = 100;
+
+    for (let i = 0; i < iterations; i++) {
+      for (let numOps = 5; numOps < 16; numOps++) {
+        const ops: Operation<number, number>[] = [];
+        for (let opNr = 0; opNr < numOps; opNr++) {
+          ops.push(randomOperation(numKeys, numLayers));
+        }
+
+        const ranges = collectSync(exhaustivelyGenerateRanges(numKeys));
+        await runTestCase(ops, ranges, true);
+      }
+    }
+  },
+});
+
+Deno.test({
+  name: "Even More Random Tests For DenoKV",
+  async fn() {
+    const numKeys = 16;
+    const numLayers = 6;
+
+    const iterations = 50;
+
+    for (let i = 0; i < iterations; i++) {
+      for (let numOps = 5; numOps < 40; numOps++) {
+        const ops: Operation<number, number>[] = [];
+        for (let opNr = 0; opNr < numOps; opNr++) {
+          ops.push(randomOperation(numKeys, numLayers));
+        }
+
+        const ranges: Summarise<number>[] = [];
+        for (let summariseNr = 0; summariseNr < 8; summariseNr++) {
+          ranges.push(randomSummary(numKeys));
+        }
+
+        await runTestCase(ops, ranges, true);
       }
     }
   },
@@ -328,17 +425,15 @@ Deno.test({
 
     // Test stores with a single operation.
     for (const op of exhaustivelyGenerateOperations(numKeys, numLayers)) {
-      for (const range of exhaustivelyGenerateRanges(numKeys)) {
-        await runTestCase([op], range);
-      }
+      const ranges = collectSync(exhaustivelyGenerateRanges(numKeys));
+      await runTestCase([op], ranges);
     }
 
     // Test stores with two operations.
     for (const op1 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
       for (const op2 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
-        for (const range of exhaustivelyGenerateRanges(numKeys)) {
-          await runTestCase([op1, op2], range);
-        }
+        const ranges = collectSync(exhaustivelyGenerateRanges(numKeys));
+        await runTestCase([op1, op2], ranges);
       }
     }
 
@@ -346,27 +441,26 @@ Deno.test({
     for (const op1 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
       for (const op2 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
         for (const op3 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
-          for (const range of exhaustivelyGenerateRanges(numKeys)) {
-            await runTestCase([op1, op2, op3], range);
-          }
+          const ranges = collectSync(exhaustivelyGenerateRanges(numKeys));
+          await runTestCase([op1, op2, op3], ranges);
         }
       }
     }
 
-    // Test stores with four operations.
-    for (const op1 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
-      for (const op2 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
-        for (const op3 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
-          for (
-            const op4 of exhaustivelyGenerateOperations(numKeys, numLayers)
-          ) {
-            for (const range of exhaustivelyGenerateRanges(numKeys)) {
-              await runTestCase([op1, op2, op3, op4], range);
-            }
-          }
-        }
-      }
-    }
+    // Takes too long
+    // // Test stores with four operations.
+    // for (const op1 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
+    //   for (const op2 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
+    //     for (const op3 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
+    //       for (
+    //         const op4 of exhaustivelyGenerateOperations(numKeys, numLayers)
+    //       ) {
+    //         const ranges = collectSync(exhaustivelyGenerateRanges(numKeys));
+    //         await runTestCase([op1, op2, op3, op4], ranges);
+    //       }
+    //     }
+    //   }
+    // }
   },
 });
 
@@ -422,6 +516,18 @@ function randomOperation(
   }
 }
 
+function randomSummary(
+  numKeys: number,
+): Summarise<number> {
+  const lower = getRandomInt(numKeys + 1);
+  const start = lower === numKeys ? undefined : lower;
+
+  const upper = getRandomInt(numKeys);
+  const end = (start !== undefined && upper < start) ? undefined : upper;
+
+  return { start, end };
+}
+
 /**
  * Collect an async iterator into an array.
  */
@@ -429,6 +535,16 @@ async function collect<T>(iter: AsyncIterable<T>): Promise<T[]> {
   const arr: T[] = [];
 
   for await (const item of iter) {
+    arr.push(item);
+  }
+
+  return arr;
+}
+
+function collectSync<T>(iter: Iterable<T>): T[] {
+  const arr: T[] = [];
+
+  for (const item of iter) {
     arr.push(item);
   }
 

@@ -1,14 +1,19 @@
-import { Key, KvBatch, KvDriver } from "./types.ts";
+import { KeyPart, KvBatch, KvDriver } from "./types.ts";
 
-export class KvDriverDeno implements KvDriver {
+export class KvDriverDeno<Key extends KeyPart[], Value>
+  implements KvDriver<Key, Value> {
   private kv: Deno.Kv;
 
   constructor(kv: Deno.Kv) {
     this.kv = kv;
   }
 
-  async get<ValueType>(key: Key): Promise<ValueType | undefined> {
-    const res = await this.kv.get<ValueType>(key);
+  close(): void {
+    this.kv.close();
+  }
+
+  async get(key: Key): Promise<Value | undefined> {    
+    const res = await this.kv.get<Value>(key);
 
     if (res.value) {
       return res.value;
@@ -17,23 +22,36 @@ export class KvDriverDeno implements KvDriver {
     return undefined;
   }
 
-  async set(key: Key, value: unknown): Promise<void> {
+  async set(key: Key, value: Value): Promise<void> {
     await this.kv.set(key, value);
   }
 
-  delete(key: Key): Promise<void> {
-    return this.kv.delete(key);
+  async delete(key: Key): Promise<boolean> {
+    const hadIt = (await this.kv.get<Value>(key)) === undefined;
+    await this.kv.delete(key);
+    return Promise.resolve(hadIt);
   }
 
-  async *list<ValueType>(
-    selector: { start: Key; end: Key } | { prefix: Key },
+  async *list(
+    selector_: { start?: Key; end?: Key; prefix?: Key },
     opts?: {
       reverse?: boolean;
       limit?: number;
       batchSize?: number;
     },
-  ): AsyncIterable<{ key: Key; value: ValueType }> {
-    const iter = this.kv.list<ValueType>(selector, {
+  ): AsyncIterable<{ key: Key; value: Value }> {
+    const selector =
+      (selector_.start !== undefined && selector_.end !== undefined)
+        ? { start: selector_.start, end: selector_.end }
+        : {
+          prefix: (selector_.prefix === undefined)
+            ? <Key> <unknown> []
+            : selector_.prefix,
+          start: selector_.start,
+          end: selector_.end,
+        };
+
+    const iter = this.kv.list<Value>(selector, {
       reverse: opts?.reverse,
       limit: opts?.limit,
       batchSize: opts?.batchSize,
@@ -44,27 +62,36 @@ export class KvDriverDeno implements KvDriver {
     }
   }
 
-  async clear<ValueType>(
-    opts?: { prefix: Key; start: Key; end: Key } | undefined,
-  ): Promise<void> {
+  async clear(opts?: { prefix?: Key; start?: Key; end?: Key }): Promise<void> {
     if (!opts) {
-      const iter = this.kv.list<ValueType>({ prefix: [] });
+      const iter = this.kv.list<Value>({ prefix: <Key> <unknown> [] });
 
       for await (const entry of iter) {
         await this.delete(entry.key as Key);
       }
 
       return;
-    }
+    } else {
+      const selector =
+      (opts.start !== undefined && opts.end !== undefined)
+        ? { start: opts.start, end: opts.end }
+        : {
+          prefix: (opts.prefix === undefined)
+            ? <Key> <unknown> []
+            : opts.prefix,
+          start: opts.start,
+          end: opts.end,
+        };
 
-    const iter = this.kv.list<ValueType>(opts);
+      const iter = this.kv.list<Value>(selector);
 
-    for await (const entry of iter) {
-      await this.delete(entry.key as Key);
+      for await (const entry of iter) {
+        await this.delete(entry.key as Key);
+      }
     }
   }
 
-  batch(): KvBatch {
+  batch(): KvBatch<Key, Value> {
     const OPS_LIMIT = 1000;
 
     let currentAtomicOperation = this.kv.atomic();
@@ -83,11 +110,11 @@ export class KvDriverDeno implements KvDriver {
     };
 
     return {
-      set(key, value) {
+      set(key: Key, value: Value) {
         currentAtomicOperation.set(key, value);
         incrementAtomic();
       },
-      delete(key) {
+      delete(key: Key) {
         currentAtomicOperation.delete(key);
         incrementAtomic();
       },
