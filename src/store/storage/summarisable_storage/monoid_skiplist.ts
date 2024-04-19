@@ -88,7 +88,7 @@ function nodeIncrementLayer<
 ): Node<LogicalKey, LogicalValue, SummaryData> {
   return {
     key: physicalKeyIncrementLayer(node.key),
-    value: node.value,
+    value: { ...node.value },
   };
 }
 
@@ -124,6 +124,7 @@ export class Skiplist<
   LogicalValue,
   SummaryData,
 > implements SummarisableStorage<LogicalKey, LogicalValue, SummaryData> {
+  private logicalKeyCompare: (a: LogicalKey, b: LogicalKey) => number;
   private logicalValueEq: (a: LogicalValue, b: LogicalValue) => boolean;
   private kv: KvDriver<
     PhysicalKey<LogicalKey>,
@@ -131,11 +132,15 @@ export class Skiplist<
   >;
   private _maxHeight = 0;
   private isSetup = deferred();
-  private monoid: LiftingMonoid<[LogicalKey, LogicalValue], [SummaryData, number]>;
+  private monoid: LiftingMonoid<
+    [LogicalKey, LogicalValue],
+    [SummaryData, number]
+  >;
 
   constructor(opts: SkiplistOpts<LogicalKey, LogicalValue, SummaryData>) {
     this.kv = opts.kv;
 
+    this.logicalKeyCompare = opts.logicalKeyCompare;
     this.logicalValueEq = opts.logicalValueEq;
     this.monoid = combineMonoid(opts.monoid, sizeMonoid);
 
@@ -146,25 +151,19 @@ export class Skiplist<
     console.group("Skiplist contents");
 
     const map: Map<
-      LogicalKey,
+      string,
       Record<number, PhysicalValue<LogicalValue, SummaryData>>
     > = new Map();
 
-    for await (
-      const entry of this.kv.list(
-        {
-          start: [0],
-          end: [await this.maxHeight() + 1],
-        },
-      )
-    ) {
+    for await (const entry of this.kv.list({})) {
       const layer = physicalKeyGetLayer(entry.key);
       const key = physicalKeyGetLogicalKey(entry.key);
+      const keyJson = JSON.stringify(key);
 
-      const valueEntry = map.get(key);
+      const valueEntry = map.get(keyJson);
 
       if (valueEntry) {
-        map.set(key, {
+        map.set(keyJson, {
           ...valueEntry,
           [layer]: entry.value,
         });
@@ -172,17 +171,19 @@ export class Skiplist<
         continue;
       }
 
-      map.set(key, {
+      map.set(keyJson, {
         [layer]: entry.value,
       });
     }
+
+    // console.log(map);
 
     for (let i = await this.maxHeight(); i >= 0; i--) {
       const line = [`${i}`];
 
       for (const value of map.values()) {
         if (value) {
-          const str = value[i] ? `${value[i]}` : "";
+          const str = value[i] ? `${value[i].summary}` : "";
 
           line.push(str.padEnd(12));
         }
@@ -246,6 +247,8 @@ export class Skiplist<
   ): Promise<void> {
     await this.isSetup;
 
+    // console.log("\n====\nentering insert for key", key, " and value ", value);
+
     /*
     Three things to know about insertion:
 
@@ -277,6 +280,7 @@ export class Skiplist<
     }
 
     const insertingCompletelyNew = !got;
+    const oldInsertionHeight = got ? got.maxLayer : undefined;
 
     /*
     Unfortunately, we need to do some actual work.
@@ -286,9 +290,9 @@ export class Skiplist<
     const batch = this.kv.batch();
 
     // Determine up to which skip list layer to insert physical nodes.
-    const insertionHeight = opts?.layer !== undefined
-      ? opts.layer
-      : randomHeight();
+    const insertionHeight = oldInsertionHeight === undefined
+      ? (opts?.layer !== undefined ? opts.layer : randomHeight())
+      : oldInsertionHeight;
 
     /*
     Now, the fun begins. Modification of the skiplist has two separate parts:
@@ -312,7 +316,6 @@ export class Skiplist<
     };
 
     batch.set(layerZeroPhysicalKey, layerZeroPhysicalValue);
-
     /*
     That is all kv mutation for layer zero, now we need to prepare the information-from-the-layer-below for layer one.
     Which information is that? So glad you asked, let's define some things!
@@ -372,13 +375,15 @@ export class Skiplist<
 
       const currentKey: PhysicalKey<LogicalKey> = [currentLayer, ...key];
 
+      // console.log("insert loop iteration with currentKey:", currentKey);      
+
       /*
       If the maxLayer of priorRight is greater than or equal to the currentLayer, then currentRight is simply the node above priorRight.
       If priorRight is undefined, then currentRight will also be undefined.
       */
       if (!priorRight) {
         currentRight = undefined;
-      } else if (priorRight.value.maxLayer <= currentLayer) {
+      } else if (priorRight.value.maxLayer > currentLayer) {
         currentRight = nodeIncrementLayer(priorRight);
       } else {
         // Query the kv store for the right node.
@@ -419,12 +424,15 @@ export class Skiplist<
       */
       if (!priorLeft) {
         currentLeft = undefined;
-      } else if (priorLeft.value.maxLayer <= currentLayer) {
+      } else if (priorLeft.value.maxLayer > currentLayer) {
         currentLeft = nodeIncrementLayer(priorLeft);
       } else {
         // Query the kv store for the left node.
         currentLeft = await this.getLeftNode(currentKey);
       }
+
+      // console.log("currentLeft", currentLeft);  
+      // console.log("priorLeft", priorLeft);      
 
       /*
       Now for computing (the label of) `currentLeft`.
@@ -439,7 +447,7 @@ export class Skiplist<
           // The label of `currentLeft` summarises everything from currentLeft to priorLeft, combined with the label of priorLeft (which summarises up until `current`).
           const newCurrentLeftSummary = this.monoid.combine(
             await this.summariseSingleLayer(
-              currentLeft.key,
+              physicalKeyDecrementLayer(currentLeft.key),
               physicalKeyGetLogicalKey(priorLeft!.key),
             ),
             priorLeft!.value.summary,
@@ -492,6 +500,8 @@ export class Skiplist<
   async remove(key: LogicalKey): Promise<boolean> {
     await this.isSetup;
 
+    // console.log("\n====\nentering delete for key", key);
+
     /*
     Deletion employs similar techniques as insertion; you should read the comments in the `insert` functionif you want to make sense of this function too.
     */
@@ -535,12 +545,14 @@ export class Skiplist<
         batch.delete(currentKey);
       }
 
+      // console.log("delete loop iteration with currentKey:", currentKey);
+
       // It remains to update the label of currentLeft.
 
       // First, update currentLeft and currentRight.
       if (!priorLeft) {
         currentLeft = undefined;
-      } else if (priorLeft.value.maxLayer <= currentLayer) {
+      } else if (priorLeft.value.maxLayer > currentLayer) {
         currentLeft = nodeIncrementLayer(priorLeft);
       } else {
         // Query the kv store for the left node.
@@ -549,12 +561,17 @@ export class Skiplist<
 
       if (!priorRight) {
         currentRight = undefined;
-      } else if (priorRight.value.maxLayer <= currentLayer) {
+      } else if (priorRight.value.maxLayer > currentLayer) {
         currentRight = nodeIncrementLayer(priorRight);
       } else {
         // Query the kv store for the right node.
         currentRight = await this.getRightNode(currentKey);
       }
+
+      // console.log("currentLeft", currentLeft);
+      // console.log("priorLeft", priorLeft); 
+      // console.log("currentRight", currentRight);
+      // console.log("priorRight", priorRight); 
 
       // The new label of currentLeft summarises until currentRight.
       // This is the same as summarising until priorLeft, from priorLeft to priorRight (this summary we have cached in the `priorLeft` variable), and from priorRight to currentRight (all on the previous layer).
@@ -575,7 +592,7 @@ export class Skiplist<
 
         if (priorRight) {
           // Add summary from priorRight to currentRight to the summary.
-          this.monoid.combine(
+          newCurrentLeftSummary = this.monoid.combine(
             newCurrentLeftSummary,
             await this.summariseSingleLayer(
               priorRight.key,
@@ -594,6 +611,8 @@ export class Skiplist<
       // Preparing for next iteration.
       if (currentLayer > itemMaxLayer && currentLeft === undefined) {
         // No more kv store modifications necessary.
+        // Write mutations to the kv store.
+        await batch.commit();
         return true;
       } else {
         priorLeft = currentLeft;
@@ -601,6 +620,8 @@ export class Skiplist<
       }
     }
 
+    // Write mutations to the kv store.
+    await batch.commit();
     return true;
   }
 
@@ -766,12 +787,21 @@ export class Skiplist<
       start: key,
       end: [key[0] + 1], // First node of the next higher layer.
     }, {
-      limit: 1,
-      batchSize: 1,
+      limit: 2,
+      batchSize: 2,
     });
 
     for await (const next of nextItems) {
-      return next;
+      if (
+        this.logicalKeyCompare(
+          physicalKeyGetLogicalKey(next.key),
+          physicalKeyGetLogicalKey(key),
+        ) === 0
+      ) {
+        continue;
+      } else {
+        return next;
+      }
     }
 
     return undefined;
@@ -833,10 +863,10 @@ export class Skiplist<
   ): AsyncIterable<{ key: LogicalKey; value: LogicalValue }> {
     const physicalStart: PhysicalKey<LogicalKey> | undefined = start
       ? [0, ...start]
-      : undefined;
+      : [0];
     const physicalEnd: PhysicalKey<LogicalKey> | undefined = end
       ? [0, ...end]
-      : undefined;
+      : [1];
 
     for await (
       const physicalEntry of this.kv.list({

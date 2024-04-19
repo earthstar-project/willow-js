@@ -1,10 +1,6 @@
 import { assertEquals } from "https://deno.land/std@0.202.0/assert/mod.ts";
-import { shuffle } from "https://deno.land/x/proc@0.21.9/mod3.ts";
 import { PhysicalKey, Skiplist } from "./monoid_skiplist.ts";
 
-import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
-import { SummarisableStorage } from "./types.ts";
-import { SimpleKv } from "./simple_kv.ts";
 import { LiftingMonoid } from "./lifting_monoid.ts";
 import { KvDriverInMemory } from "../kv/kv_driver_in_memory.ts";
 import { PhysicalValue } from "./monoid_skiplist.ts";
@@ -35,10 +31,25 @@ const testMonoid: LiftingMonoid<[[number], number], string> = {
   neutral: "",
 };
 
-async function runTestCase(
-  ops: Operation<number, number>[],
-  summaries: Summarise<number, number>[],
-) {
+function compareNumberArrays(a: number[], b: number[]): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    if (a[i] < b[i]) {
+      return -1;
+    } else if (a[i] > b[i]) {
+      return 1;
+    }
+  }
+
+  if (a.length < b.length) {
+    return -1;
+  } else if (a.length > b.length) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+function newTestStore(): Skiplist<[number], number, string> {
   const keyCompare = (a: [number], b: [number]) => {
     if (a[0] < b[0]) {
       return -1;
@@ -49,25 +60,7 @@ async function runTestCase(
     }
   };
 
-  const compareNumberArrays = (a: number[], b: number[]) => {
-    for (let i = 0; i < Math.min(a.length, b.length); i++) {
-      if (a[i] < b[i]) {
-        return -1;
-      } else if (a[i] > b[i]) {
-        return 1;
-      }
-    }
-
-    if (a.length < b.length) {
-      return -1;
-    } else if (a.length > b.length) {
-      return 1;
-    } else {
-      return 0;
-    }
-  };
-
-  const store = new Skiplist<[number], number, string>({
+  return new Skiplist<[number], number, string>({
     logicalKeyCompare: keyCompare,
     logicalValueEq: (a: number, b: number) => a === b,
     kv: new KvDriverInMemory<
@@ -78,6 +71,13 @@ async function runTestCase(
     ),
     monoid: testMonoid,
   });
+}
+
+async function runTestCase(
+  ops: Operation<number, number>[],
+  summarise: Summarise<number, number>,
+) {
+  const store = newTestStore();
 
   const control = new LinearStorage<[number], number, string>({
     kv: new KvDriverInMemory<[number], number>(
@@ -88,31 +88,237 @@ async function runTestCase(
 
   for (const op of ops) {
     if ("value" in op) {
-      store.insert([op.key], op.value, { layer: op.level });
-      control.insert([op.key], op.value);
+      await store.insert([op.key], op.value, { layer: op.level });
+      await control.insert([op.key], op.value);
     } else {
-      store.remove([op.key]);
-      control.remove([op.key]);
+      await store.remove([op.key]);
+      await control.remove([op.key]);
     }
   }
 
-  for (const summarise of summaries) {
-    const got = await store.summarise(
-      summarise.start === undefined ? undefined : [summarise.start],
-      summarise.end === undefined ? undefined : [summarise.end],
-    );
-    const expected = await control.summarise(
-      summarise.start === undefined ? undefined : [summarise.start],
-      summarise.end === undefined ? undefined : [summarise.end],
-    );
+  const got = await store.summarise(
+    summarise.start === undefined ? undefined : [summarise.start],
+    summarise.end === undefined ? undefined : [summarise.end],
+  );
+  const expected = await control.summarise(
+    summarise.start === undefined ? undefined : [summarise.start],
+    summarise.end === undefined ? undefined : [summarise.end],
+  );
 
-    assertEquals(got, expected, `
-===================
-Summary: ${JSON.stringify(summarise, undefined, 2)}
+  try {
+    assertEquals(got, expected);
+  } catch (_err) {
+    await store.print();
 
-Operations: ${JSON.stringify(ops, undefined, 2)}`);
+    assertEquals(
+      got,
+      expected,
+      `
+  ===================
+  Summary: ${JSON.stringify(summarise, undefined, 2)}
+  
+  Operations: ${JSON.stringify(ops, undefined, 2)}`,
+    );
   }
 }
+
+Deno.test({
+  name: "Basic stuff actually works",
+  async fn() {
+    const store = newTestStore();
+    await store.insert([0], 8);
+    assertEquals(await collect(store.allEntries()), [{ key: [0], value: 8 }]);
+  },
+});
+
+Deno.test({
+  name: "Regression 2",
+  async fn() {
+    const store = newTestStore();
+    await store.insert([0], 8, { layer: 0 });
+    await store.insert([1], 9, { layer: 1 });
+
+    const got = await collect(store.allEntries());
+    const expected = [{ key: [0], value: 8 }, { key: [1], value: 9 }];
+
+    try {
+      assertEquals(got, expected);
+    } catch (_err) {
+      await store.print();
+      console.log(got);
+      console.log(expected);
+      assertEquals(got, expected);
+    }
+  },
+});
+
+Deno.test({
+  name: "Regression 3",
+  async fn() {
+    const store = newTestStore();
+    await store.insert([0], 8, { layer: 0 });
+    await store.insert([0], 9, { layer: 0 });
+
+    const got = await store.summarise();
+    const expected = {
+      fingerprint: "0_9;",
+      size: 1,
+    };
+
+    try {
+      assertEquals(got, expected);
+    } catch (_err) {
+      await store.print();
+      console.log(got);
+      console.log(expected);
+      assertEquals(got, expected);
+    }
+  },
+});
+
+Deno.test({
+  name: "Regression 4",
+  async fn() {
+    const store = newTestStore();
+    await store.insert([0], 8, { layer: 0 });
+    await store.insert([0], 9, { layer: 1 });
+
+    const got = await store.summarise();
+    const expected = {
+      fingerprint: "0_9;",
+      size: 1,
+    };
+
+    try {
+      assertEquals(got, expected);
+    } catch (_err) {
+      await store.print();
+      console.log(got);
+      console.log(expected);
+      assertEquals(got, expected);
+    }
+  },
+});
+
+Deno.test({
+  name: "Regression 5",
+  async fn() {
+    const store = newTestStore();
+    await store.insert([0], 8, { layer: 0 });
+    await store.remove([0]);
+
+    const got = await collect(store.allEntries());
+    const expected: { key: [number]; value: number }[] = [];
+
+    try {
+      assertEquals(got, expected);
+    } catch (_err) {
+      await store.print();
+      console.log(got);
+      console.log(expected);
+      assertEquals(got, expected);
+    }
+  },
+});
+
+Deno.test({
+  name: "Regression 6",
+  async fn() {
+    const store = newTestStore();
+    await store.insert([0], 8, { layer: 1 });
+    await store.insert([1], 8, { layer: 0 });
+    await store.insert([0], 9, { layer: 0 });
+
+    const got = await store.summarise();
+    const expected = {
+      fingerprint: "0_9;1_8;",
+      size: 2,
+    };
+
+    try {
+      assertEquals(got, expected);
+    } catch (_err) {
+      await store.print();
+      console.log(got);
+      console.log(expected);
+      assertEquals(got, expected);
+    }
+  },
+});
+
+Deno.test({
+  name: "Regression 7",
+  async fn() {
+    const store = newTestStore();
+    await store.insert([0], 8, { layer: 1 });
+    await store.insert([1], 8, { layer: 0 });
+    await store.insert([2], 8, { layer: 0 });
+
+    const got = await store.summarise();
+    const expected = {
+      fingerprint: "0_8;1_8;2_8;",
+      size: 3,
+    };
+
+    try {
+      assertEquals(got, expected);
+    } catch (_err) {
+      await store.print();
+      console.log(got);
+      console.log(expected);
+      assertEquals(got, expected);
+    }
+  },
+});
+
+Deno.test({
+  name: "Regression 8",
+  async fn() {
+    const store = newTestStore();
+    await store.insert([0], 8, { layer: 1 });
+    await store.insert([1], 8, { layer: 0 });
+    await store.insert([2], 8, { layer: 0 });
+    await store.remove([1]);
+
+    const got = await store.summarise();
+    const expected = {
+      fingerprint: "0_8;2_8;",
+      size: 2,
+    };
+
+    try {
+      assertEquals(got, expected);
+    } catch (_err) {
+      await store.print();
+      console.log(got);
+      console.log(expected);
+      assertEquals(got, expected);
+    }
+  },
+});
+
+Deno.test({
+  name: "Random Tests",
+  async fn() {
+    const numKeys = 8;
+    const numLayers = 5;
+
+    const iterations = 10000;
+
+    for (let i = 0; i < iterations; i++) {
+      for (let numOps = 5; numOps < 16; numOps++) {
+        const ops: Operation<number, number>[] = [];
+        for (let opNr = 0; opNr < numOps; opNr++) {
+          ops.push(randomOperation(numKeys, numLayers));
+        }
+
+        for (const range of exhaustivelyGenerateRanges(numKeys)) {
+          await runTestCase(ops, range);
+        }
+      }
+    }
+  },
+});
 
 Deno.test({
   name: "Exhaustive Tests",
@@ -123,10 +329,45 @@ Deno.test({
     // Test stores with a single operation.
     for (const op of exhaustivelyGenerateOperations(numKeys, numLayers)) {
       for (const range of exhaustivelyGenerateRanges(numKeys)) {
-        await runTestCase([op], [range]);
+        await runTestCase([op], range);
       }
     }
-  }
+
+    // Test stores with two operations.
+    for (const op1 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
+      for (const op2 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
+        for (const range of exhaustivelyGenerateRanges(numKeys)) {
+          await runTestCase([op1, op2], range);
+        }
+      }
+    }
+
+    // Test stores with three operations.
+    for (const op1 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
+      for (const op2 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
+        for (const op3 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
+          for (const range of exhaustivelyGenerateRanges(numKeys)) {
+            await runTestCase([op1, op2, op3], range);
+          }
+        }
+      }
+    }
+
+    // Test stores with four operations.
+    for (const op1 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
+      for (const op2 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
+        for (const op3 of exhaustivelyGenerateOperations(numKeys, numLayers)) {
+          for (
+            const op4 of exhaustivelyGenerateOperations(numKeys, numLayers)
+          ) {
+            for (const range of exhaustivelyGenerateRanges(numKeys)) {
+              await runTestCase([op1, op2, op3, op4], range);
+            }
+          }
+        }
+      }
+    }
+  },
 });
 
 function* exhaustivelyGenerateOperations(numKeys: number, numLayers: number) {
@@ -151,451 +392,45 @@ function* exhaustivelyGenerateRanges(numKeys: number) {
       yield {
         start: start === 0 ? undefined : start - 1,
         end: end < numKeys ? end : undefined,
-      }
+      };
     }
   }
 }
 
-// // The range, the fingerprint, size, collected items.
-// type RangeVector = [[string, string], string, number, string[]];
-
-// const rangeVectors: RangeVector[] = [
-//   [["a", "a"], "aAbBcCdDeEfFgG", 7, ["a", "b", "c", "d", "e", "f", "g"]],
-//   [["a", "d"], "aAbBcC", 3, ["a", "b", "c"]],
-//   [["g", "a"], "gG", 1, ["g"]],
-//   [["c", "a"], "cCdDeEfFgG", 5, ["c", "d", "e", "f", "g"]],
-//   [["c", "g"], "cCdDeEfF", 4, ["c", "d", "e", "f"]],
-//   [["e", "a"], "eEfFgG", 3, ["e", "f", "g"]],
-//   [["b", "b"], "aAbBcCdDeEfFgG", 7, ["a", "b", "c", "d", "e", "f", "g"]],
-//   [["c", "b"], "aAcCdDeEfFgG", 6, ["a", "c", "d", "e", "f", "g"]],
-//   [["e", "b"], "aAeEfFgG", 4, ["a", "e", "f", "g"]],
-//   [["m", "d"], "aAbBcC", 3, ["a", "b", "c"]],
-//   [["m", "z"], "", 0, []],
-//   [["f", "z"], "fFgG", 2, ["f", "g"]],
-// ];
-
-// const compare = (a: string, b: string) => {
-//   if (a > b) {
-//     return 1;
-//   } else if (a < b) {
-//     return -1;
-//   } else {
-//     return 0;
-//   }
-// };
-
-// type SummarisableStorageScenario = {
-//   name: string;
-//   makeScenario: () => Promise<
-//     {
-//       storage: SummarisableStorage<string, string>;
-//       dispose: () => Promise<void>;
-//     }
-//   >;
-// };
-
-// /** A monoid which lifts the member as a string, and combines by concatenating together. */
-// const concatMonoid: LiftingMonoid<string, string> = {
-//   lift: (key: string, value: Uint8Array) =>
-//     Promise.resolve(key + new TextDecoder().decode(value)),
-//   combine: (a: string, b: string) => {
-//     return a + b;
-//   },
-//   neutral: "",
-// };
-
-// const simpleKvScenario: SummarisableStorageScenario = {
-//   name: "SimpleKV",
-//   makeScenario: async () => {
-//     const kv = await Deno.openKv();
-//     const driver = new KvDriverDeno(kv);
-
-//     await driver.clear();
-
-//     const simpleKv = new SimpleKv(
-//       {
-//         monoid: concatMonoid,
-//         compare,
-//         kv: driver,
-//       },
-//     );
-
-//     return {
-//       storage: simpleKv,
-//       dispose: () => Promise.resolve(kv.close()),
-//     };
-//   },
-// };
-
-// const skiplistScenario: SummarisableStorageScenario = {
-//   name: "Skiplist",
-//   makeScenario: async () => {
-//     const kv = await Deno.openKv();
-//     const driver = new KvDriverDeno(kv);
-
-//     await driver.clear();
-
-//     const skiplist = new Skiplist(
-//       {
-//         monoid: concatMonoid,
-//         compare,
-//         kv: driver,
-//       },
-//     );
-
-//     return {
-//       storage: skiplist,
-//       dispose: () => Promise.resolve(kv.close()),
-//     };
-//   },
-// };
-
-// const rbtreeScenario: SummarisableStorageScenario = {
-//   name: "RBTree",
-//   makeScenario: () => {
-//     const tree = new MonoidRbTree({ monoid: concatMonoid, compare });
-
-//     return Promise.resolve({
-//       storage: tree,
-//       dispose: () => Promise.resolve(),
-//     });
-//   },
-// };
-
-// const scenarios = [simpleKvScenario, skiplistScenario, rbtreeScenario];
-// const scenarioPairings = [
-//   [simpleKvScenario, rbtreeScenario],
-//   [skiplistScenario, rbtreeScenario],
-// ];
-
-// Deno.test("Storage", async (test) => {
-//   for (const scenario of scenarios) {
-//     await test.step({
-//       name: scenario.name,
-//       fn: async () => {
-//         const { storage, dispose } = await scenario.makeScenario();
-
-//         const encoder = new TextEncoder();
-
-//         const keys = ["a", "b", "c", "d", "e", "f", "g"];
-
-//         const map = new Map();
-
-//         for (const letter of keys) {
-//           map.set(letter, encoder.encode(letter.toUpperCase()));
-//         }
-
-//         for (const [key, value] of map) {
-//           await storage.insert(key, value);
-//         }
-
-//         const listContents = [];
-
-//         for await (const item of storage.allEntries()) {
-//           listContents.push(item.value);
-//         }
-
-//         assertEquals(Array.from(map.values()), listContents);
-
-//         for (const [key, value] of map) {
-//           const storedValue = await storage.get(key);
-
-//           assertEquals(storedValue, value);
-//         }
-
-//         await dispose();
-//       },
-//     });
-//   }
-// });
-
-// Deno.test("Summarise (basics)", async (test) => {
-//   for (const scenario of scenarios) {
-//     await test.step({
-//       name: scenario.name,
-//       fn: async () => {
-//         const { storage, dispose } = await scenario.makeScenario();
-
-//         const set = ["a", "b", "c", "d", "e", "f", "g"];
-
-//         for (const item of set) {
-//           await storage.insert(
-//             item,
-//             new TextEncoder().encode(item.toUpperCase()),
-//           );
-//         }
-
-//         for (const vector of rangeVectors) {
-//           const items = [];
-
-//           for await (
-//             const entry of storage.entries(vector[0][0], vector[0][1])
-//           ) {
-//             items.push(entry.key);
-//           }
-
-//           assertEquals(
-//             items,
-//             vector[3],
-//           );
-
-//           const { fingerprint, size } = await storage.summarise(
-//             vector[0][0],
-//             vector[0][1],
-//           );
-
-//           assertEquals(
-//             [fingerprint, size],
-//             [vector[1], vector[2]],
-//           );
-//         }
-
-//         await dispose();
-//       },
-//     });
-//   }
-// });
-
-// const letters = [
-//   "a",
-//   "b",
-//   "c",
-//   "d",
-//   "e",
-//   "f",
-//   "g",
-//   "h",
-//   "i",
-//   "j",
-//   "k",
-//   "l",
-//   "m",
-//   "n",
-//   "o",
-//   "p",
-//   "q",
-//   "r",
-//   "s",
-//   "t",
-//   "u",
-//   "v",
-//   "w",
-//   "x",
-//   "y",
-//   "z",
-// ];
-
-// function makeRandomLetters() {
-//   const arr: string[] = [];
-
-//   const threshold = 0.8;
-
-//   for (const letter of letters) {
-//     if (Math.random() > threshold) {
-//       arr.push(letter);
-//     }
-//   }
-
-//   if (arr.length === 0) {
-//     arr.push(
-//       letters[
-//         Math.floor(Math.random() * arr.length)
-//       ],
-//     );
-//   }
-
-//   shuffle(arr);
-
-//   return arr;
-// }
-
-// function makeRandomRange(set: string[]) {
-//   const startIndex = Math.floor(Math.random() * set.length);
-//   const endIndex = Math.floor(Math.random() * set.length);
-
-//   return { start: set[startIndex], end: set[endIndex] };
-// }
-
-// function makeRandomItemsQuery(set: string[]) {
-//   const startIndex = Math.random() > 0.1
-//     ? Math.floor(Math.random() * set.length)
-//     : undefined;
-//   const endIndex = Math.random() > 0.1
-//     ? Math.floor(Math.random() * set.length)
-//     : undefined;
-
-//   return {
-//     start: startIndex ? set[startIndex] : undefined,
-//     end: endIndex ? set[endIndex] : undefined,
-//     reverse: Math.random() > 0.5 ? true : false,
-//     limit: Math.random() > 0.5
-//       ? Math.floor(Math.random() * (set.length - 1 + 1) + 1)
-//       : undefined,
-//   };
-// }
-
-// Deno.test.only("Insertion and summary", async (test) => {
-//   for (const scenario of scenarios) {
-//     await test.step(scenario.name, async () => {
-//       const letterArrays: string[][] = [];
-
-//       for (let i = 0; i < 3; i++) {
-//         letterArrays.push(makeRandomLetters());
-//       }
-
-//       for (const letterArr of letterArrays) {
-//         const { storage, dispose } = await scenario
-//           .makeScenario();
-
-//         let expectedFingerprint = concatMonoid.neutral;
-
-//         for (const item of letterArr.toSorted()) {
-//           expectedFingerprint = concatMonoid.combine(expectedFingerprint, item);
-//         }
-
-//         for (const item of letterArr) {
-//           await storage.insert(item, new Uint8Array());
-//         }
-
-//         const { fingerprint, size } = await storage.summarise("a", "a");
-
-//         console.log({
-//           fingerprint,
-//           expectedFingerprint,
-//           letterArr,
-//         });
-
-//         if (storage instanceof Skiplist) {
-//           await storage.print();
-//         }
-
-//         assertEquals(fingerprint, expectedFingerprint);
-//         assertEquals(size, letterArr.length);
-
-//         await dispose();
-//       }
-//     });
-//   }
-// });
-
-// Deno.test("Summarise and compare (random 100 sets x 100 ranges)", async (test) => {
-//   for (const [aScenario, bScenario] of scenarioPairings) {
-//     await test.step({
-//       name: `${aScenario.name} + ${bScenario.name}`,
-//       fn: async () => {
-//         const sets: string[][] = [];
-
-//         for (let i = 0; i < 100; i++) {
-//           sets.push(makeRandomLetters());
-//         }
-
-//         for (const set of sets) {
-//           const { storage: aStorage, dispose: aDispose } = await aScenario
-//             .makeScenario();
-//           const { storage: bStorage, dispose: bDispose } = await bScenario
-//             .makeScenario();
-
-//           for (const item of set) {
-//             await aStorage.insert(item, new Uint8Array());
-//             await bStorage.insert(item, new Uint8Array());
-//           }
-
-//           // Randomly delete an element.
-
-//           const toDelete = set[Math.floor(Math.random() * set.length)];
-
-//           const aItems = [];
-//           const bItems = [];
-
-//           for await (const aValue of aStorage.allEntries()) {
-//             aItems.push(aValue.key);
-//           }
-
-//           for await (const bValue of bStorage.allEntries()) {
-//             bItems.push(bValue.key);
-//           }
-
-//           // console.log({ toDelete });
-
-//           await aStorage.remove(toDelete);
-//           await bStorage.remove(toDelete);
-
-//           assertEquals(aItems, bItems);
-
-//           for (let i = 0; i < 100; i++) {
-//             const { start, end } = makeRandomRange(set);
-
-//             const aFingerprint = await aStorage.summarise(start, end);
-//             const bFingerprint = await bStorage.summarise(start, end);
-
-//             // console.log({ start, end });
-
-//             assertEquals(
-//               aFingerprint,
-//               bFingerprint,
-//             );
-
-//             const aItems = [];
-
-//             for await (const entry of aStorage.entries(start, end)) {
-//               aItems.push(entry.key);
-//             }
-
-//             const bItems = [];
-
-//             for await (const entry of bStorage.entries(start, end)) {
-//               bItems.push(entry.key);
-//             }
-
-//             assertEquals(
-//               aItems,
-//               bItems,
-//             );
-
-//             const randomQuery = makeRandomItemsQuery(set);
-
-//             const aQueryItems = [];
-
-//             for await (
-//               const entry of aStorage.entries(
-//                 randomQuery.start,
-//                 randomQuery.end,
-//                 {
-//                   limit: randomQuery.limit,
-//                   reverse: randomQuery.reverse,
-//                 },
-//               )
-//             ) {
-//               aQueryItems.push(entry.key);
-//             }
-
-//             const bQueryItems = [];
-
-//             for await (
-//               const entry of bStorage.entries(
-//                 randomQuery.start,
-//                 randomQuery.end,
-//                 {
-//                   limit: randomQuery.limit,
-//                   reverse: randomQuery.reverse,
-//                 },
-//               )
-//             ) {
-//               bQueryItems.push(entry.key);
-//             }
-
-//             assertEquals(
-//               aQueryItems,
-//               bQueryItems,
-//             );
-//           }
-
-//           await Promise.all([
-//             aDispose(),
-//             bDispose(),
-//           ]);
-//         }
-//       },
-//     });
-//   }
-// });
+function getRandomInt(max: number): number {
+  return Math.floor(Math.random() * max);
+}
+
+function randomOperation(
+  numKeys: number,
+  numLayers: number,
+): Operation<number, number> {
+  const rand = Math.random();
+
+  if (rand < 0.5) {
+    // Generate insertion op.
+    return {
+      key: getRandomInt(numKeys),
+      value: getRandomInt(10),
+      level: getRandomInt(numLayers),
+    };
+  } else {
+    // Generate deletion op.
+    return {
+      key: getRandomInt(numKeys),
+    };
+  }
+}
+
+/**
+ * Collect an async iterator into an array.
+ */
+async function collect<T>(iter: AsyncIterable<T>): Promise<T[]> {
+  const arr: T[] = [];
+
+  for await (const item of iter) {
+    arr.push(item);
+  }
+
+  return arr;
+}
