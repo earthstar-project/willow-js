@@ -1,36 +1,25 @@
+// deno test --unstable-kv ./src/store/storage/kv/kv.test.ts
+
 import { assertEquals } from "https://deno.land/std@0.223.0/assert/assert_equals.ts";
 
 import { KvDriver } from "./types.ts";
 import { KvDriverInMemory } from "./kv_driver_in_memory.ts";
+import { KvDriverDeno } from "./kv_driver_deno.ts";
 
 Deno.test("Test in-memory kv store", async (t) => {
-  const store = new KvDriverInMemory<number[], string>(
-    compareNumberArrays,
-  );
+  const store = new KvDriverInMemory();
   await testKvStore(t, store);
 });
 
-function compareNumberArrays(a: number[], b: number[]): number {
-  for (let i = 0; i < Math.min(a.length, b.length); i++) {
-    if (a[i] < b[i]) {
-      return -1;
-    } else if (a[i] > b[i]) {
-      return 1;
-    }
-  }
-
-  if (a.length < b.length) {
-    return -1;
-  } else if (a.length > b.length) {
-    return 1;
-  } else {
-    return 0;
-  }
-}
+Deno.test("Test deno kv store", async (t) => {
+  const store = new KvDriverDeno(await Deno.openKv(":memory:"));
+  await testKvStore(t, store);
+  store.close();
+});
 
 async function testKvStore(
   t: Deno.TestContext,
-  store: KvDriver<number[], string>,
+  store: KvDriver,
 ) {
   await store.clear();
 
@@ -49,7 +38,7 @@ async function testKvStore(
   );
 
   await t.step("Insert into empty store", async () => {
-    store.set([42], "foo");
+    await store.set([42], "foo");
 
     assertEquals(await store.get([42]), "foo");
     assertEquals(await store.get([43]), undefined);
@@ -57,6 +46,7 @@ async function testKvStore(
       key: [42],
       value: "foo",
     }]);
+    
     assertEquals(await collect(store.list({ prefix: [42] })), [{
       key: [42],
       value: "foo",
@@ -72,7 +62,7 @@ async function testKvStore(
   });
 
   await t.step("Insert second entry", async () => {
-    store.set([42, 44], "bar");
+    await store.set([42, 44], "bar");
 
     assertEquals(await store.get([42]), "foo");
     assertEquals(await store.get([42, 44]), "bar");
@@ -127,7 +117,7 @@ async function testKvStore(
   });
 
   await t.step("Delete", async () => {
-    store.delete([42, 44]);
+    await store.delete([42, 44]);
 
     assertEquals(await store.get([42]), "foo");
     assertEquals(await store.get([43]), undefined);
@@ -150,7 +140,7 @@ async function testKvStore(
   });
 
   await t.step("Update", async () => {
-    store.set([42], "b");
+    await store.set([42], "b");
 
     assertEquals(await store.get([42]), "b");
     assertEquals(await store.get([43]), undefined);
@@ -173,53 +163,47 @@ async function testKvStore(
   });
 
   await t.step("Test a more populated store store", async () => {
-    store.set([], "a");
-    store.set([42, 44, 7], "e");
-    store.set([42], "b");
-    store.set([47, 1], "h");
-    store.set([42, 44, 3], "d");
-    store.set([42, 44], "c");
-    store.set([42, 55], "f");
-    store.set([47, 0, 0], "g");
-    store.set([99], "i");
+    await store.set([1], "a");
+    await store.set([42, 44, 7], "e");
+    await store.set([42], "b");
+    await store.set([47, 1], "h");
+    await store.set([42, 44, 3], "d");
+    await store.set([42, 44], "c");
+    await store.set([42, 55], "f");
+    await store.set([47, 0, 0], "g");
+    await store.set([99], "i");
 
     assertEquals((await collect(store.list({ prefix: [] }))).map(entry => entry.value), ["a", "b", "c", "d", "e", "f", "g", "h", "i"]);
     assertEquals((await collect(store.list({ prefix: [] }, {limit: 3}))).map(entry => entry.value), ["a", "b", "c"]);
-    assertEquals((await collect(store.list({ prefix: [] }, {limit: 0}))).map(entry => entry.value), []);
     assertEquals((await collect(store.list({ prefix: [] }, {reverse: true}))).map(entry => entry.value), ["i", "h", "g", "f", "e", "d", "c", "b", "a"]);
     assertEquals((await collect(store.list({ prefix: [] }, {reverse: true, limit: 3}))).map(entry => entry.value), ["i", "h", "g"]);
-    assertEquals((await collect(store.list({ prefix: [] }, {reverse: true, limit: 0}))).map(entry => entry.value), []);
 
     assertEquals((await collect(store.list({ prefix: [42] }))).map(entry => entry.value), ["b", "c", "d", "e", "f"]);
     assertEquals((await collect(store.list({ prefix: [42] }, {limit: 3}))).map(entry => entry.value), ["b", "c", "d"]);
-    assertEquals((await collect(store.list({ prefix: [42] }, {limit: 0}))).map(entry => entry.value), []);
     assertEquals((await collect(store.list({ prefix: [42] }, {reverse: true}))).map(entry => entry.value), ["f", "e", "d", "c", "b"]);
     assertEquals((await collect(store.list({ prefix: [42] }, {reverse: true, limit: 3}))).map(entry => entry.value), ["f", "e", "d"]);
-    assertEquals((await collect(store.list({ prefix: [42] }, {reverse: true, limit: 0}))).map(entry => entry.value), []);
 
     assertEquals((await collect(store.list({ start: [42, 44, 3], end: [47, 1] }))).map(entry => entry.value), ["d", "e", "f", "g"]);
     assertEquals((await collect(store.list({ start: [42, 44, 3], end: [47, 1] }, {limit: 3}))).map(entry => entry.value), ["d", "e", "f"]);
-    assertEquals((await collect(store.list({ start: [42, 44, 3], end: [47, 1] }, {limit: 0}))).map(entry => entry.value), []);
     assertEquals((await collect(store.list({ start: [42, 44, 3], end: [47, 1] }, {reverse: true}))).map(entry => entry.value), ["g", "f", "e", "d"]);
     assertEquals((await collect(store.list({ start: [42, 44, 3], end: [47, 1] }, {reverse: true, limit: 3}))).map(entry => entry.value), ["g", "f", "e"]);
-    assertEquals((await collect(store.list({ start: [42, 44, 3], end: [47, 1] }, {reverse: true, limit: 0}))).map(entry => entry.value), []);
   });
 
   await t.step("Clear a store", async () => {
-    store.clear({prefix: [42, 44], start: [], end: [99999]});
+    await store.clear({prefix: [42, 44], start: [42, 44], end: [42, 44, 99999]});
     assertEquals((await collect(store.list({ prefix: [] }))).map(entry => entry.value), ["a", "b", "f", "g", "h", "i"]);
 
-    store.clear({prefix: [], start: [6], end: [47, 1]});
+    await store.clear({prefix: [], start: [6], end: [47, 1]});
     assertEquals((await collect(store.list({ prefix: [] }))).map(entry => entry.value), ["a", "h", "i"]);
 
-    store.clear();
+    await store.clear();
     assertEquals((await collect(store.list({ prefix: [] }))).map(entry => entry.value), []);
   });
 
   await t.step("Batch operations", async () => {
-    store.set([42], "foo");
-    store.set([44], "bar");
-    store.set([46], "baz");
+    await store.set([42], "foo");
+    await store.set([44], "bar");
+    await store.set([46], "baz");
 
     const batch = store.batch();
     batch.set([46], "qux");

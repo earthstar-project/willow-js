@@ -4,25 +4,25 @@
  * This is not very efficient. Use for testing only.
  */
 
-import { KeyPart, KvDriver } from "../kv/types.ts";
+import { KvDriver, KvKey } from "../kv/types.ts";
 import { combineMonoid, LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
 import { SummarisableStorage } from "./types.ts";
 
 export type LinearStorageOpts<
-  Key extends KeyPart[],
+  Key extends KvKey,
   Value,
   SummaryData,
 > = {
-  kv: KvDriver<Key, Value>;
+  kv: KvDriver;
   monoid: LiftingMonoid<[Key, Value], SummaryData>;
 };
 
 export class LinearStorage<
-  Key extends KeyPart[],
+  Key extends KvKey,
   Value,
   SummaryData,
 > implements SummarisableStorage<Key, Value, SummaryData> {
-  kv: KvDriver<Key, Value>;
+  kv: KvDriver;
   monoid: LiftingMonoid<[Key, Value], [SummaryData, number]>;
 
   constructor(opts: LinearStorageOpts<Key, Value, SummaryData>) {
@@ -53,10 +53,10 @@ export class LinearStorage<
   ): Promise<{ fingerprint: SummaryData; size: number }> {
     let summary = this.monoid.neutral;
 
-    for await (const entry of this.kv.list({ start, end })) {
+    for await (const entry of this.kv.list<Value>({ start, end })) {
       summary = this.monoid.combine(
         summary,
-        await this.monoid.lift([entry.key, entry.value]),
+        await this.monoid.lift([<Key> entry.key, entry.value]),
       );
     }
 
@@ -74,7 +74,10 @@ export class LinearStorage<
       reverse?: boolean;
     },
   ): AsyncIterable<{ key: Key; value: Value }> {
-    return this.kv.list({ start, end }, opts);
+    return <AsyncIterable<{ key: Key; value: Value }>> this.kv.list<Value>({
+      start,
+      end,
+    }, opts);
   }
 
   allEntries(

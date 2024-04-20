@@ -1,5 +1,5 @@
 import { deferred } from "../../../../deps.ts";
-import { KeyPart, KvDriver } from "../kv/types.ts";
+import { KvDriver, KvKey, compareKeys } from "../kv/types.ts";
 import { combineMonoid, LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
 import { SummarisableStorage } from "./types.ts";
 
@@ -11,30 +11,30 @@ A pair of a logical key and its logical value is called a *logical entry*, a pai
 On the key value store, we create a physical entry for each node in the skip list. We sort these entries by layer first, logical key second.
 */
 
-export type PhysicalKey<LogicalKey extends KeyPart[]> = [
+type PhysicalKey<LogicalKey extends KvKey> = [
   number, /* which layer? */
   ...LogicalKey,
 ] | [number /* which layer? */];
 
-function physicalKeyGetLayer<LogicalKey extends KeyPart[]>(
+function physicalKeyGetLayer<LogicalKey extends KvKey>(
   pk: PhysicalKey<LogicalKey>,
 ): number {
   return pk[0];
 }
 
-function physicalKeyGetLogicalKey<LogicalKey extends KeyPart[]>(
+function physicalKeyGetLogicalKey<LogicalKey extends KvKey>(
   pk: PhysicalKey<LogicalKey>,
 ): LogicalKey {
   return <LogicalKey> <unknown> pk.slice(1);
 }
 
-function physicalKeyIncrementLayer<LogicalKey extends KeyPart[]>(
+function physicalKeyIncrementLayer<LogicalKey extends KvKey>(
   pk: PhysicalKey<LogicalKey>,
 ): PhysicalKey<LogicalKey> {
   return [physicalKeyGetLayer(pk) + 1, ...physicalKeyGetLogicalKey(pk)];
 }
 
-function physicalKeyDecrementLayer<LogicalKey extends KeyPart[]>(
+function physicalKeyDecrementLayer<LogicalKey extends KvKey>(
   pk: PhysicalKey<LogicalKey>,
 ): PhysicalKey<LogicalKey> {
   return [physicalKeyGetLayer(pk) - 1, ...physicalKeyGetLogicalKey(pk)];
@@ -45,7 +45,7 @@ Further, the skiplist is summarisable: you can efficiently query for a *summary*
 To support this efficiently, each physical value consists not only of a logical value, but also of some metadata.
 */
 
-export type PhysicalValue<LogicalValue, SummaryData> = {
+type PhysicalValue<LogicalValue, SummaryData> = {
   /**
    * The LogicalValue that this entry stores. The only piece of non-metadata.
    *
@@ -71,7 +71,7 @@ export type PhysicalValue<LogicalValue, SummaryData> = {
  * Used internally to cache skiplist node information in memory.
  */
 type Node<
-  LogicalKey extends KeyPart[],
+  LogicalKey extends KvKey,
   LogicalValue,
   SummaryData,
 > = {
@@ -80,7 +80,7 @@ type Node<
 };
 
 function nodeIncrementLayer<
-  LogicalKey extends KeyPart[],
+  LogicalKey extends KvKey,
   LogicalValue,
   SummaryData,
 >(
@@ -98,38 +98,25 @@ const LAYER_INSERT_PROBABILITY = 0.5;
 const LAYER_LEVEL_LIMIT = 64;
 
 export type SkiplistOpts<
-  LogicalKey extends KeyPart[],
+  LogicalKey extends KvKey,
   LogicalValue,
   SummaryData,
 > = {
   /**
-   * Return a negative number if a < b, zero if a == b, or a positive number if a > b.
-   *
-   * This **must** coincide with how the underlying kv store compares logical keys!
-   */
-  logicalKeyCompare: (a: LogicalKey, b: LogicalKey) => number;
-  /**
    * Return true iff a and b are considered equal.
    */
   logicalValueEq: (a: LogicalValue, b: LogicalValue) => boolean;
-  kv: KvDriver<
-    PhysicalKey<LogicalKey>,
-    PhysicalValue<LogicalValue, SummaryData>
-  >;
+  kv: KvDriver;
   monoid: LiftingMonoid<[LogicalKey, LogicalValue], SummaryData>;
 };
 
 export class Skiplist<
-  LogicalKey extends KeyPart[],
+  LogicalKey extends KvKey,
   LogicalValue,
   SummaryData,
 > implements SummarisableStorage<LogicalKey, LogicalValue, SummaryData> {
-  private logicalKeyCompare: (a: LogicalKey, b: LogicalKey) => number;
   private logicalValueEq: (a: LogicalValue, b: LogicalValue) => boolean;
-  private kv: KvDriver<
-    PhysicalKey<LogicalKey>,
-    PhysicalValue<LogicalValue, SummaryData>
-  >;
+  private kv: KvDriver;
   private _maxHeight = 0;
   private isSetup = deferred();
   private monoid: LiftingMonoid<
@@ -140,7 +127,6 @@ export class Skiplist<
   constructor(opts: SkiplistOpts<LogicalKey, LogicalValue, SummaryData>) {
     this.kv = opts.kv;
 
-    this.logicalKeyCompare = opts.logicalKeyCompare;
     this.logicalValueEq = opts.logicalValueEq;
     this.monoid = combineMonoid(opts.monoid, sizeMonoid);
 
@@ -155,9 +141,9 @@ export class Skiplist<
       Record<number, PhysicalValue<LogicalValue, SummaryData>>
     > = new Map();
 
-    for await (const entry of this.kv.list({})) {
-      const layer = physicalKeyGetLayer(entry.key);
-      const key = physicalKeyGetLogicalKey(entry.key);
+    for await (const entry of this.kv.list<PhysicalValue<LogicalValue, SummaryData>>({})) {
+      const layer = physicalKeyGetLayer(<PhysicalKey<LogicalKey>>entry.key);
+      const key = physicalKeyGetLogicalKey(<PhysicalKey<LogicalKey>>entry.key);
       const keyJson = JSON.stringify(key);
 
       const valueEntry = map.get(keyJson);
@@ -218,7 +204,7 @@ export class Skiplist<
     let level = 0;
 
     for await (const entry of lastEntry) {
-      level = physicalKeyGetLayer(entry.key);
+      level = physicalKeyGetLayer(<PhysicalKey<LogicalKey>>entry.key);
     }
 
     this._maxHeight = level;
@@ -266,7 +252,7 @@ export class Skiplist<
     */
 
     const layerZeroPhysicalKey: PhysicalKey<LogicalKey> = [0, ...key];
-    const got = await this.kv.get(layerZeroPhysicalKey);
+    const got = await this.kv.get<PhysicalValue<LogicalValue, SummaryData>>(layerZeroPhysicalKey);
 
     if (
       got &&
@@ -375,7 +361,7 @@ export class Skiplist<
 
       const currentKey: PhysicalKey<LogicalKey> = [currentLayer, ...key];
 
-      // console.log("insert loop iteration with currentKey:", currentKey);      
+      // console.log("insert loop iteration with currentKey:", currentKey);
 
       /*
       If the maxLayer of priorRight is greater than or equal to the currentLayer, then currentRight is simply the node above priorRight.
@@ -431,8 +417,8 @@ export class Skiplist<
         currentLeft = await this.getLeftNode(currentKey);
       }
 
-      // console.log("currentLeft", currentLeft);  
-      // console.log("priorLeft", priorLeft);      
+      // console.log("currentLeft", currentLeft);
+      // console.log("priorLeft", priorLeft);
 
       /*
       Now for computing (the label of) `currentLeft`.
@@ -508,7 +494,7 @@ export class Skiplist<
 
     // Do we acually contain this key?
     const layerZeroPhysicalKey: PhysicalKey<LogicalKey> = [0, ...key];
-    const got = await this.kv.get(layerZeroPhysicalKey);
+    const got = await this.kv.get<PhysicalValue<LogicalValue, SummaryData>>(layerZeroPhysicalKey);
 
     if (!got) {
       // Nothing to do but to report back if we didn't have the key in the first place.
@@ -569,9 +555,9 @@ export class Skiplist<
       }
 
       // console.log("currentLeft", currentLeft);
-      // console.log("priorLeft", priorLeft); 
+      // console.log("priorLeft", priorLeft);
       // console.log("currentRight", currentRight);
-      // console.log("priorRight", priorRight); 
+      // console.log("priorRight", priorRight);
 
       // The new label of currentLeft summarises until currentRight.
       // This is the same as summarising until priorLeft, from priorLeft to priorRight (this summary we have cached in the `priorLeft` variable), and from priorRight to currentRight (all on the previous layer).
@@ -626,7 +612,7 @@ export class Skiplist<
   }
 
   async get(key: LogicalKey): Promise<LogicalValue | undefined> {
-    const result = await this.kv.get([0, ...key]);
+    const result = await this.kv.get<PhysicalValue<LogicalValue, SummaryData>>([0, ...key]);
 
     if (result) {
       return result.logicalValue;
@@ -654,7 +640,7 @@ export class Skiplist<
     ): Promise<
       { label: [SummaryData, number]; overshootKey: LogicalKey | undefined }
     > => {
-      const startUntilEnd = this.kv.list({
+      const startUntilEnd = this.kv.list<PhysicalValue<LogicalValue, SummaryData>>({
         start: start ? [layer, ...start] : [layer],
         end: end ? [layer, ...end] : [layer + 1],
       });
@@ -669,7 +655,7 @@ export class Skiplist<
         candidateLabel = this.monoid.neutral;
 
         if (entry.value.maxLayer <= layer) {
-          overshootKey = physicalKeyGetLogicalKey(entry.key);
+          overshootKey = physicalKeyGetLogicalKey(<PhysicalKey<LogicalKey>>entry.key);
           candidateLabel = entry.value.summary;
           continue;
         }
@@ -704,7 +690,7 @@ export class Skiplist<
       end: LogicalKey | undefined,
       layer: number,
     ): Promise<[SummaryData, number]> => {
-      const endUntilOvershoot = this.kv.list({
+      const endUntilOvershoot = this.kv.list<PhysicalValue<LogicalValue, SummaryData>>({
         start: [layer, ...overshootLabel],
         end: end ? [layer, ...end] : [layer + 1],
       }, {
@@ -720,7 +706,7 @@ export class Skiplist<
           continue;
         }
 
-        const entryValue = physicalKeyGetLogicalKey(entry.key);
+        const entryValue = physicalKeyGetLogicalKey(<PhysicalKey<LogicalKey>>entry.key);
 
         const aboveLabel = await getTail(
           overshootLabel,
@@ -742,7 +728,7 @@ export class Skiplist<
         end?: LogicalKey;
       },
     ) => {
-      const firstEntry = this.kv.list({
+      const firstEntry = this.kv.list<PhysicalValue<LogicalValue, SummaryData>>({
         start: start ? [0, ...start] : [0],
         end: [1],
       }, {
@@ -783,7 +769,7 @@ export class Skiplist<
   private async getRightNode(
     key: PhysicalKey<LogicalKey>,
   ): Promise<Node<LogicalKey, LogicalValue, SummaryData> | undefined> {
-    const nextItems = this.kv.list({
+    const nextItems = this.kv.list<PhysicalValue<LogicalValue, SummaryData>>({
       start: key,
       end: [key[0] + 1], // First node of the next higher layer.
     }, {
@@ -793,14 +779,14 @@ export class Skiplist<
 
     for await (const next of nextItems) {
       if (
-        this.logicalKeyCompare(
-          physicalKeyGetLogicalKey(next.key),
+        compareKeys(
+          physicalKeyGetLogicalKey(<PhysicalKey<LogicalKey>>next.key),
           physicalKeyGetLogicalKey(key),
         ) === 0
       ) {
         continue;
       } else {
-        return next;
+        return <Node<LogicalKey, LogicalValue, SummaryData>>next;
       }
     }
 
@@ -813,7 +799,7 @@ export class Skiplist<
   private async getLeftNode(
     key: PhysicalKey<LogicalKey>,
   ): Promise<Node<LogicalKey, LogicalValue, SummaryData> | undefined> {
-    const nextItems = this.kv.list({
+    const nextItems = this.kv.list<PhysicalValue<LogicalValue, SummaryData>>({
       start: [key[0]], // First node on the same layer as `key`.
       end: key,
     }, {
@@ -823,7 +809,7 @@ export class Skiplist<
     });
 
     for await (const next of nextItems) {
-      return next;
+      return <Node<LogicalKey, LogicalValue, SummaryData>>next;
     }
 
     return undefined;
@@ -842,7 +828,7 @@ export class Skiplist<
     let summary = this.monoid.neutral;
 
     for await (
-      const { value } of this.kv.list({
+      const { value } of this.kv.list<PhysicalValue<LogicalValue, SummaryData>>({
         start,
         end: end ? [layer, ...end] : [layer + 1],
       })
@@ -869,13 +855,13 @@ export class Skiplist<
       : [1];
 
     for await (
-      const physicalEntry of this.kv.list({
+      const physicalEntry of this.kv.list<PhysicalValue<LogicalValue, SummaryData>>({
         start: physicalStart,
         end: physicalEnd,
       }, opts)
     ) {
       yield {
-        key: physicalKeyGetLogicalKey(physicalEntry.key),
+        key: physicalKeyGetLogicalKey(<PhysicalKey<LogicalKey>>physicalEntry.key),
         value: physicalEntry.value.logicalValue!,
       };
     }

@@ -1,42 +1,38 @@
-import { KeyPart, KvBatch, KvDriver } from "./types.ts";
+import { KvKey, KvBatch, KvDriver } from "./types.ts";
 
-export class PrefixedDriver<
-  Prefix extends KeyPart[],
-  Key extends KeyPart[],
-  Value,
-> implements KvDriver<Key, Value> {
-  private parentDriver: KvDriver<[...Prefix, ...Key], Value>;
-  private prefix: Prefix;
+export class PrefixedDriver implements KvDriver {
+  private parentDriver: KvDriver;
+  private prefix: KvKey;
 
-  constructor(prefix: Prefix, driver: KvDriver<[...Prefix, ...Key], Value>) {
+  constructor(prefix: KvKey, driver: KvDriver) {
     this.parentDriver = driver;
     this.prefix = prefix;
   }
 
-  get(key: Key): Promise<Value | undefined> {
+  get<Value>(key: KvKey): Promise<Value | undefined> {
     return this.parentDriver.get([...this.prefix, ...key]);
   }
 
-  set(key: Key, value: Value): Promise<void> {
+  set<Value>(key: KvKey, value: Value): Promise<void> {
     return this.parentDriver.set([...this.prefix, ...key], value);
   }
 
-  delete(key: Key): Promise<boolean> {
+  delete(key: KvKey): Promise<boolean> {
     return this.parentDriver.delete([...this.prefix, ...key]);
   }
 
-  async *list(
-    selector: { start?: Key; end?: Key; prefix?: Key },
+  async *list<Value>(
+    selector: { start?: KvKey; end?: KvKey; prefix?: KvKey },
     opts?: {
       reverse?: boolean;
       limit?: number;
       batchSize?: number;
     },
-  ): AsyncIterable<{ key: Key; value: Value }> {
+  ): AsyncIterable<{ key: KvKey; value: Value }> {
     const selectorPrefixed: {
-      start?: [...Prefix, ...Key];
-      end?: [...Prefix, ...Key];
-      prefix?: [...Prefix, ...Key];
+      start?: KvKey;
+      end?: KvKey;
+      prefix?: KvKey;
     } = {};
 
     if (selector.start !== undefined) {
@@ -50,20 +46,20 @@ export class PrefixedDriver<
     }
 
     for await (
-      const entry of this.parentDriver.list(
+      const entry of this.parentDriver.list<Value>(
         selectorPrefixed,
         opts,
       )
     ) {
       yield {
-        key: <Key> entry.key.slice(this.prefix.length),
+        key: <KvKey> entry.key.slice(this.prefix.length),
         value: entry.value,
       };
     }
   }
 
   clear(
-    opts?: { prefix?: Key; start?: Key; end?: Key },
+    opts?: { prefix?: KvKey; start?: KvKey; end?: KvKey },
   ): Promise<void> {
     if (opts) {
       return this.parentDriver.clear({
@@ -80,7 +76,7 @@ export class PrefixedDriver<
     return this.parentDriver.clear();
   }
 
-  batch(): KvBatch<Key, Value> {
+  batch(): KvBatch {
     const prefix = this.prefix;
     const batch = this.parentDriver.batch();
 

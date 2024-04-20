@@ -1,7 +1,7 @@
 // deno test --unstable-kv ./src/store/storage/summarisable_storage/skiplist_storage.test.ts
 
 import { assertEquals } from "https://deno.land/std@0.202.0/assert/mod.ts";
-import { PhysicalKey, PhysicalValue, Skiplist } from "./monoid_skiplist.ts";
+import { Skiplist } from "./monoid_skiplist.ts";
 
 import { LiftingMonoid } from "./lifting_monoid.ts";
 import { KvDriverInMemory } from "../kv/kv_driver_in_memory.ts";
@@ -33,58 +33,17 @@ const testMonoid: LiftingMonoid<[[number], number], string> = {
   },
   neutral: "",
 };
-
-function compareNumberArrays(a: number[], b: number[]): number {
-  for (let i = 0; i < Math.min(a.length, b.length); i++) {
-    if (a[i] < b[i]) {
-      return -1;
-    } else if (a[i] > b[i]) {
-      return 1;
-    }
-  }
-
-  if (a.length < b.length) {
-    return -1;
-  } else if (a.length > b.length) {
-    return 1;
-  } else {
-    return 0;
-  }
-}
-
 async function newTestStore(
   useDenoKv?: boolean,
 ): Promise<Skiplist<[number], number, string>> {
-  const keyCompare = (a: [number], b: [number]) => {
-    if (a[0] < b[0]) {
-      return -1;
-    } else if (a[0] > b[0]) {
-      return 1;
-    } else {
-      return 0;
-    }
-  };
-
-  let kv: KvDriver<
-    PhysicalKey<[number]>,
-    PhysicalValue<number, string>
-  > = new KvDriverInMemory<
-    PhysicalKey<[number]>,
-    PhysicalValue<number, string>
-  >(
-    compareNumberArrays,
-  );
+  let kv: KvDriver = new KvDriverInMemory();
 
   if (useDenoKv) {
-    kv = new KvDriverDeno<
-      PhysicalKey<[number]>,
-      PhysicalValue<number, string>
-    >(await Deno.openKv(":memory:"));
+    kv = new KvDriverDeno(await Deno.openKv(":memory:"));
     await kv.clear();
   }
 
   return new Skiplist<[number], number, string>({
-    logicalKeyCompare: keyCompare,
     logicalValueEq: (a: number, b: number) => a === b,
     kv,
     monoid: testMonoid,
@@ -99,9 +58,7 @@ async function runTestCase(
   const store = await newTestStore(useDenoKv);
 
   const control = new LinearStorage<[number], number, string>({
-    kv: new KvDriverInMemory<[number], number>(
-      compareNumberArrays,
-    ),
+    kv: new KvDriverInMemory(),
     monoid: testMonoid,
   });
 
@@ -143,7 +100,7 @@ async function runTestCase(
   }
 
   if (useDenoKv) {
-    (<KvDriverDeno<[number], number>><unknown>store["kv"]).close();
+    (<KvDriverDeno> <unknown> store["kv"]).close();
   }
 }
 

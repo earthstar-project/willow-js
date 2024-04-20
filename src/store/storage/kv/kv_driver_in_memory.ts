@@ -1,34 +1,25 @@
 import { RedBlackTree } from "https://deno.land/std@0.188.0/collections/red_black_tree.ts";
 import { RedBlackNode } from "https://deno.land/std@0.188.0/collections/red_black_node.ts";
 
-import { KeyPart, KvBatch, KvDriver } from "./types.ts";
+import { KvKey, KvBatch, KvDriver, compareKeys, isFirstKeyPrefixOfSecondKey } from "./types.ts";
 
 /**
  * We use the RB tree implementation from the deno standard library. It is generic only over a single type,
  * but we want a key-value mapping. We cal a pair of a key and a value a `PhysicalKey`.
  */
-type PhysicalKey<Key, Value> = {
-  key: Key;
-  value: Value;
+type PhysicalKey = {
+  key: KvKey;
+  value: unknown;
 };
 
 /**
  * A thin wrapper around RedBlackTree, with proper key/value typing; also giving us access to protected implementation details.
  */
-class UsefulTree<Key, Value> extends RedBlackTree<PhysicalKey<Key, Value>> {
-  cmp: (
-    a: PhysicalKey<Key, Value>,
-    b: PhysicalKey<Key, Value>,
-  ) => number;
-
-  keyCmp: (a: Key, b: Key) => number;
-
-  constructor(keyCompare: (a: Key, b: Key) => number) {
-    super((x: PhysicalKey<Key, Value>, y: PhysicalKey<Key, Value>) =>
-      keyCompare(x.key, y.key)
+class UsefulTree extends RedBlackTree<PhysicalKey> {
+  constructor() {
+    super((x: PhysicalKey, y: PhysicalKey) =>
+      compareKeys(x.key, y.key)
     );
-    this.cmp = (a, b) => keyCompare(a.key, b.key);
-    this.keyCmp = keyCompare;
   }
 
   /**
@@ -37,8 +28,8 @@ class UsefulTree<Key, Value> extends RedBlackTree<PhysicalKey<Key, Value>> {
    * Assumens that the predicate is false up until some key and true from then on.
    */
   findLeastMatching(
-    pred: (k: Key) => boolean,
-  ): RedBlackNode<PhysicalKey<Key, Value>> | null {
+    pred: (k: KvKey) => boolean,
+  ): RedBlackNode<PhysicalKey> | null {
     let node = this.root;
     let leastSoFar = null;
 
@@ -62,8 +53,8 @@ class UsefulTree<Key, Value> extends RedBlackTree<PhysicalKey<Key, Value>> {
    * Assumens that the predicate is true up until some key and false from then on.
    */
   findGreatestMatching(
-    pred: (k: Key) => boolean,
-  ): RedBlackNode<PhysicalKey<Key, Value>> | null {
+    pred: (k: KvKey) => boolean,
+  ): RedBlackNode<PhysicalKey> | null {
     let node = this.root;
     let greatest = null;
 
@@ -78,21 +69,21 @@ class UsefulTree<Key, Value> extends RedBlackTree<PhysicalKey<Key, Value>> {
       }
     }
 
-    return greatest;
+    return <RedBlackNode<PhysicalKey> | null>greatest;
   }
 }
 
 /**
  * Find the least node greater than the given node.
  */
-function nextGreaterNode<Key, Value>(
-  node_: RedBlackNode<PhysicalKey<Key, Value>>,
-): RedBlackNode<PhysicalKey<Key, Value>> | null {
-  let node: RedBlackNode<PhysicalKey<Key, Value>> | null = node_;
+function nextGreaterNode(
+  node_: RedBlackNode<PhysicalKey>,
+): RedBlackNode<PhysicalKey> | null {
+  let node: RedBlackNode<PhysicalKey> | null = node_;
 
   if (node.right === null) {
     // No right child, so node is in the subtree of the next greater node.
-    let prevNode: RedBlackNode<PhysicalKey<Key, Value>> | null = node;
+    let prevNode: RedBlackNode<PhysicalKey> | null = node;
     node = node.parent;
 
     while (node !== null) {
@@ -123,14 +114,14 @@ function nextGreaterNode<Key, Value>(
 /**
  * Find the greatest node less than the given node.
  */
-function nextLesserNode<Key, Value>(
-  node_: RedBlackNode<PhysicalKey<Key, Value>>,
-): RedBlackNode<PhysicalKey<Key, Value>> | null {
-  let node: RedBlackNode<PhysicalKey<Key, Value>> | null = node_;
+function nextLesserNode(
+  node_: RedBlackNode<PhysicalKey>,
+): RedBlackNode<PhysicalKey> | null {
+  let node: RedBlackNode<PhysicalKey> | null = node_;
 
   if (node.left === null) {
     // No left child, so node is in the subtree of the next lesser node.
-    let prevNode: RedBlackNode<PhysicalKey<Key, Value>> | null = node;
+    let prevNode: RedBlackNode<PhysicalKey> | null = node;
     node = node.parent;
 
     while (node !== null) {
@@ -161,72 +152,55 @@ function nextLesserNode<Key, Value>(
 /**
  * An in-memory kv store. No persistence involved at all.
  */
-export class KvDriverInMemory<Key extends KeyPart[], Value>
-  implements KvDriver<Key, Value> {
+export class KvDriverInMemory
+  implements KvDriver {
   // This is a fairly thin wrapper around a RB tree from the deno standard library.
-  private tree: UsefulTree<Key, Value>;
+  private tree: UsefulTree;
 
-  private isKeyPrefixOf: (possiblePrefix: Key, keyToCompareTo: Key) => boolean;
-
-  constructor(
-    keyCompare: (a: Key, b: Key) => number,
-  ) {
-    this.tree = new UsefulTree<Key, Value>(keyCompare);
-    this.isKeyPrefixOf = (a: Key, b: Key) => {
-      if (a.length > b.length) {
-        return false;
-      } else {
-        for (let i = 0; i < a.length; i++) {
-          if (a[i] !== b[i]) {
-            return false;
-          }
-        }
-    
-        return true;
-      }
-    };
+  constructor() {
+    this.tree = new UsefulTree();
   }
 
-  get(key: Key): Promise<Value | undefined> {
-    const lookup = this.tree.find({ key, value: "unused" as Value });
-    return Promise.resolve(lookup === null ? undefined : lookup.value);
+  get<Value>(key: KvKey): Promise<Value | undefined> {
+    const lookup = this.tree.find({ key, value: "unused" });
+    return Promise.resolve(lookup === null ? undefined : <Value>lookup.value);
   }
 
-  set(key: Key, value: Value): Promise<void> {
-    this.tree.remove({ key, value: "unused" as Value });
+  set<Value>(key: KvKey, value: Value): Promise<void> {
+    this.tree.remove({ key, value: "unused" });
     this.tree.insert({ key, value });
     return Promise.resolve();
   }
 
-  delete(key: Key): Promise<boolean> {
-    return Promise.resolve(this.tree.remove({ key, value: "unused" as Value }));
+  delete(key: KvKey): Promise<boolean> {
+    return Promise.resolve(this.tree.remove({ key, value: "unused" }));
   }
 
-  async *list(
-    selector: { start?: Key; end?: Key; prefix?: Key },
+  async *list<Value>(
+    selector: { start?: KvKey; end?: KvKey; prefix?: KvKey },
     opts: {
       reverse?: boolean | undefined;
       limit?: number | undefined;
       batchSize?: number | undefined;
     } | undefined = { reverse: false, limit: undefined, batchSize: undefined },
-  ): AsyncIterable<{ key: Key; value: Value }> {
-    const prefix = selector.prefix ?? <Key> <unknown> [];
+  ): AsyncIterable<{ key: KvKey; value: Value }> {
+    const prefix = selector.prefix ?? <KvKey> <unknown> [];
     const first = opts.reverse
       ? this.tree.findGreatestMatching((k) =>
-        (selector.end ? this.tree.keyCmp(k, selector.end) < 0 : true) &&
-        ((this.tree.keyCmp(k, prefix) <= 0) || this.isKeyPrefixOf(prefix, k))
+        (selector.end ? compareKeys(k, selector.end) < 0 : true) &&
+        ((compareKeys(k, prefix) <= 0) || isFirstKeyPrefixOfSecondKey(prefix, k))
       )
       : this.tree.findLeastMatching((k) =>
-        (selector.start ? this.tree.keyCmp(k, selector.start) >= 0 : true) &&
-        ((this.tree.keyCmp(k, prefix) >= 0) || this.isKeyPrefixOf(prefix, k))
+        (selector.start ? compareKeys(k, selector.start) >= 0 : true) &&
+        ((compareKeys(k, prefix) >= 0) || isFirstKeyPrefixOfSecondKey(prefix, k))
       );
 
-    const stillInRange = (k: Key) => {
+    const stillInRange = (k: KvKey) => {
       return opts.reverse
-        ? (this.isKeyPrefixOf(prefix, k) &&
-          (selector.start ? this.tree.keyCmp(k, selector.start) >= 0 : true))
-        : (this.isKeyPrefixOf(prefix, k) &&
-          (selector.end ? this.tree.keyCmp(k, selector.end) < 0 : true));
+        ? (isFirstKeyPrefixOfSecondKey(prefix, k) &&
+          (selector.start ? compareKeys(k, selector.start) >= 0 : true))
+        : (isFirstKeyPrefixOfSecondKey(prefix, k) &&
+          (selector.end ? compareKeys(k, selector.end) < 0 : true));
     };
 
     let count = 0;
@@ -238,7 +212,7 @@ export class KvDriverInMemory<Key extends KeyPart[], Value>
         return;
       }
 
-      yield node.value;
+      yield (<{key: KvKey, value: Value}> node.value);
       node = opts.reverse ? nextLesserNode(node) : nextGreaterNode(node);
     }
 
@@ -246,21 +220,21 @@ export class KvDriverInMemory<Key extends KeyPart[], Value>
   }
 
   clear(
-    opts?: { prefix?: Key; start?: Key; end?: Key } | undefined,
+    opts?: { prefix?: KvKey; start?: KvKey; end?: KvKey } | undefined,
   ): Promise<void> {
     if (opts === undefined) {
       this.tree.clear();
     } else {
-      const prefix = opts.prefix ?? <Key> <unknown> [];
-      const predicate = (k: Key) => {
-        return this.isKeyPrefixOf(prefix, k) &&
-          (opts.start ? (this.tree.keyCmp(k, opts.start) >= 0) : true);
+      const prefix = opts.prefix ?? <KvKey> <unknown> [];
+      const predicate = (k: KvKey) => {
+        return isFirstKeyPrefixOfSecondKey(prefix, k) &&
+          (opts.start ? (compareKeys(k, opts.start) >= 0) : true);
       };
 
       let node = this.tree.findLeastMatching(predicate);
       while (
         node !== null &&
-        (opts.end ? this.tree.keyCmp(node.value.key, opts.end) < 0 : true)
+        (opts.end ? compareKeys(node.value.key, opts.end) < 0 : true)
       ) {
         this.tree.remove(node.value);
         node = this.tree.findLeastMatching(predicate);
@@ -270,12 +244,12 @@ export class KvDriverInMemory<Key extends KeyPart[], Value>
     return Promise.resolve();
   }
 
-  batch(): KvBatch<Key, Value> {
-    const operations: BatchOperation<Key, Value>[] = [];
+  batch(): KvBatch{
+    const operations: BatchOperation[] = [];
 
     return {
-      set: (key: Key, value: Value) => operations.push({ set: { key, value } }),
-      delete: (key: Key) => operations.push({ delete: { key } }),
+      set: <Value>(key: KvKey, value: Value) => operations.push({ set: { key, value } }),
+      delete: (key: KvKey) => operations.push({ delete: { key } }),
       commit: () => {
         for (const operation of operations) {
           if ("set" in operation) {
@@ -291,6 +265,6 @@ export class KvDriverInMemory<Key extends KeyPart[], Value>
   }
 }
 
-type BatchOperation<Key, Value> = { set: { key: Key; value: Value } } | {
-  delete: { key: Key };
+type BatchOperation = { set: { key: KvKey; value: unknown } } | {
+  delete: { key: KvKey };
 };

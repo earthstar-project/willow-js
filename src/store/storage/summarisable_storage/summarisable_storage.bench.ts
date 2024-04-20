@@ -2,7 +2,7 @@
 
 import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
 import { LiftingMonoid } from "./lifting_monoid.ts";
-import { PhysicalKey, PhysicalValue, Skiplist } from "./monoid_skiplist.ts";
+import { Skiplist } from "./monoid_skiplist.ts";
 
 const xormonoid: LiftingMonoid<[[number], Uint8Array], number> = {
   combine: (a, b) => a ^ b,
@@ -11,28 +11,7 @@ const xormonoid: LiftingMonoid<[[number], Uint8Array], number> = {
 };
 
 const kv2 = await Deno.openKv("./skip");
-const skipDriver = new KvDriverDeno<
-  PhysicalKey<[number]>,
-  PhysicalValue<Uint8Array, number>
->(kv2);
-
-function compareNumberArrays(a: number[], b: number[]): number {
-  for (let i = 0; i < Math.min(a.length, b.length); i++) {
-    if (a[i] < b[i]) {
-      return -1;
-    } else if (a[i] > b[i]) {
-      return 1;
-    }
-  }
-
-  if (a.length < b.length) {
-    return -1;
-  } else if (a.length > b.length) {
-    return 1;
-  } else {
-    return 0;
-  }
-}
+const skipDriver = new KvDriverDeno(kv2);
 
 // Insert (1st)
 
@@ -88,7 +67,6 @@ Deno.bench(
     const skiplist = new Skiplist<[number], Uint8Array, number>(
       {
         monoid: xormonoid,
-        logicalKeyCompare: compareNumberArrays,
         logicalValueEq: (arr1, arr2) => {
           if (arr1.length !== arr2.length) {
             return false;
@@ -168,7 +146,6 @@ Deno.bench(
     const skiplist = new Skiplist<[number], Uint8Array, number>(
       {
         monoid: xormonoid,
-        logicalKeyCompare: compareNumberArrays,
         logicalValueEq: (arr1, arr2) => {
           if (arr1.length !== arr2.length) {
             return false;
@@ -250,7 +227,6 @@ Deno.bench(
     const skiplist = new Skiplist<[number], Uint8Array, number>(
       {
         monoid: xormonoid,
-        logicalKeyCompare: compareNumberArrays,
         logicalValueEq: (arr1, arr2) => {
           if (arr1.length !== arr2.length) {
             return false;
@@ -355,7 +331,6 @@ Deno.bench(
     const skiplist = new Skiplist<[number], Uint8Array, number>(
       {
         monoid: xormonoid,
-        logicalKeyCompare: compareNumberArrays,
         logicalValueEq: (arr1, arr2) => {
           if (arr1.length !== arr2.length) {
             return false;
@@ -460,7 +435,6 @@ Deno.bench(
     const skiplist = new Skiplist<[number], Uint8Array, number>(
       {
         monoid: xormonoid,
-        logicalKeyCompare: compareNumberArrays,
         logicalValueEq: (arr1, arr2) => {
           if (arr1.length !== arr2.length) {
             return false;
@@ -565,7 +539,6 @@ Deno.bench(
     const skiplist = new Skiplist<[number], Uint8Array, number>(
       {
         monoid: xormonoid,
-        logicalKeyCompare: compareNumberArrays,
         logicalValueEq: (arr1, arr2) => {
           if (arr1.length !== arr2.length) {
             return false;
