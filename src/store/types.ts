@@ -154,8 +154,10 @@ export type IngestEventSuccess<
   kind: "success";
   /** The successfully ingested signed entry. */
   entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>;
+  /** Entries which were pruned by this ingestion. */
+  pruned: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>[];
+  /** The authorisation token generated for this entry. */
   authToken: AuthorisationToken;
-
   /** An ID representing the source of this ingested entry. */
   externalSourceId?: string;
 };
