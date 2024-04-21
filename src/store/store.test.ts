@@ -453,6 +453,66 @@ Deno.test("Store.ingestEntry", async (test) => {
     assert(entries[0][1]);
     assertEquals(await entries[0][1].bytes(), new Uint8Array([0, 1, 2, 3]));
   });
+
+  await test.step("replaces older entries with paths prefixed by the new one, but doesn't replace newer entries", async () => {
+    const store = new TestStore();
+
+    await store.set(
+      {
+        path: [new Uint8Array([0]), new Uint8Array([1])],
+        payload: new Uint8Array([0, 1, 0]),
+        timestamp: BigInt(0),
+        subspace: alfie,
+      },
+      alfie,
+    );
+
+    await store.set(
+      {
+        path: [new Uint8Array([0]), new Uint8Array([2])],
+        payload: new Uint8Array([0, 2, 2]),
+        timestamp: BigInt(2),
+        subspace: alfie,
+      },
+      alfie,
+    );
+
+    const prefixRes = await store.set(
+      {
+        path: [new Uint8Array([0])],
+        payload: new Uint8Array([0, 2]),
+        timestamp: BigInt(1),
+        subspace: alfie,
+      },
+      alfie,
+    );
+
+    assert(prefixRes.kind === "success");
+
+    const entries = [];
+
+    for await (
+      const entry of store.query({
+        area: fullArea(),
+        maxCount: 0,
+        maxSize: BigInt(0),
+      }, "path")
+    ) {
+      entries.push(entry);
+    }
+
+    assertEquals(entries.length, 2);
+
+    assert(entries[0]);
+    assertEquals(entries[0][0].path, [new Uint8Array([0])]);
+    assert(entries[0][1]);
+    assertEquals(await entries[0][1].bytes(), new Uint8Array([0, 2]));
+
+    assert(entries[1]);
+    assertEquals(entries[1][0].path, [new Uint8Array([0]), new Uint8Array([2])]);
+    assert(entries[1][1]);
+    assertEquals(await entries[1][1].bytes(), new Uint8Array([0, 2, 2]));
+  });
 });
 
 // ==================================
