@@ -1,5 +1,5 @@
 import { compareKeys } from "./types.ts";
-import { KvKey, KvBatch, KvDriver } from "./types.ts";
+import { KvBatch, KvDriver, KvKey } from "./types.ts";
 
 export class KvDriverDeno implements KvDriver {
   private kv: Deno.Kv;
@@ -66,7 +66,10 @@ export class KvDriverDeno implements KvDriver {
         ) {
           const directMatch = await this.kv.get<Value>(selector_.prefix);
           if (directMatch.value !== null) {
-            yield { key: <KvKey>[...directMatch.key], value: directMatch.value };
+            yield {
+              key: <KvKey> [...directMatch.key],
+              value: directMatch.value,
+            };
             if (limit !== undefined) {
               limit -= 1;
             }
@@ -102,7 +105,10 @@ export class KvDriverDeno implements KvDriver {
         ) {
           const directMatch = await this.kv.get<Value>(selector_.prefix);
           if (directMatch.value !== null) {
-            yield { key: <KvKey>[...directMatch.key], value: directMatch.value };
+            yield {
+              key: <KvKey> [...directMatch.key],
+              value: directMatch.value,
+            };
             if (limit !== undefined) {
               limit -= 1;
             }
@@ -112,7 +118,9 @@ export class KvDriverDeno implements KvDriver {
     }
   }
 
-  async clear(opts?: { prefix?: KvKey; start?: KvKey; end?: KvKey }): Promise<void> {
+  async clear(
+    opts?: { prefix?: KvKey; start?: KvKey; end?: KvKey },
+  ): Promise<void> {
     if (!opts) {
       const iter = this.kv.list<unknown>({ prefix: <KvKey> <unknown> [] });
 

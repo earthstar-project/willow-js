@@ -1,7 +1,13 @@
 import { RedBlackTree } from "https://deno.land/std@0.188.0/collections/red_black_tree.ts";
 import { RedBlackNode } from "https://deno.land/std@0.188.0/collections/red_black_node.ts";
 
-import { KvKey, KvBatch, KvDriver, compareKeys, isFirstKeyPrefixOfSecondKey } from "./types.ts";
+import {
+  compareKeys,
+  isFirstKeyPrefixOfSecondKey,
+  KvBatch,
+  KvDriver,
+  KvKey,
+} from "./types.ts";
 
 /**
  * We use the RB tree implementation from the deno standard library. It is generic only over a single type,
@@ -17,9 +23,7 @@ type PhysicalKey = {
  */
 class UsefulTree extends RedBlackTree<PhysicalKey> {
   constructor() {
-    super((x: PhysicalKey, y: PhysicalKey) =>
-      compareKeys(x.key, y.key)
-    );
+    super((x: PhysicalKey, y: PhysicalKey) => compareKeys(x.key, y.key));
   }
 
   /**
@@ -69,7 +73,7 @@ class UsefulTree extends RedBlackTree<PhysicalKey> {
       }
     }
 
-    return <RedBlackNode<PhysicalKey> | null>greatest;
+    return <RedBlackNode<PhysicalKey> | null> greatest;
   }
 }
 
@@ -152,8 +156,7 @@ function nextLesserNode(
 /**
  * An in-memory kv store. No persistence involved at all.
  */
-export class KvDriverInMemory
-  implements KvDriver {
+export class KvDriverInMemory implements KvDriver {
   // This is a fairly thin wrapper around a RB tree from the deno standard library.
   private tree: UsefulTree;
 
@@ -163,7 +166,7 @@ export class KvDriverInMemory
 
   get<Value>(key: KvKey): Promise<Value | undefined> {
     const lookup = this.tree.find({ key, value: "unused" });
-    return Promise.resolve(lookup === null ? undefined : <Value>lookup.value);
+    return Promise.resolve(lookup === null ? undefined : <Value> lookup.value);
   }
 
   set<Value>(key: KvKey, value: Value): Promise<void> {
@@ -188,11 +191,13 @@ export class KvDriverInMemory
     const first = opts.reverse
       ? this.tree.findGreatestMatching((k) =>
         (selector.end ? compareKeys(k, selector.end) < 0 : true) &&
-        ((compareKeys(k, prefix) <= 0) || isFirstKeyPrefixOfSecondKey(prefix, k))
+        ((compareKeys(k, prefix) <= 0) ||
+          isFirstKeyPrefixOfSecondKey(prefix, k))
       )
       : this.tree.findLeastMatching((k) =>
         (selector.start ? compareKeys(k, selector.start) >= 0 : true) &&
-        ((compareKeys(k, prefix) >= 0) || isFirstKeyPrefixOfSecondKey(prefix, k))
+        ((compareKeys(k, prefix) >= 0) ||
+          isFirstKeyPrefixOfSecondKey(prefix, k))
       );
 
     const stillInRange = (k: KvKey) => {
@@ -212,7 +217,7 @@ export class KvDriverInMemory
         return;
       }
 
-      yield (<{key: KvKey, value: Value}> node.value);
+      yield (<{ key: KvKey; value: Value }> node.value);
       node = opts.reverse ? nextLesserNode(node) : nextGreaterNode(node);
     }
 
@@ -244,11 +249,12 @@ export class KvDriverInMemory
     return Promise.resolve();
   }
 
-  batch(): KvBatch{
+  batch(): KvBatch {
     const operations: BatchOperation[] = [];
 
     return {
-      set: <Value>(key: KvKey, value: Value) => operations.push({ set: { key, value } }),
+      set: <Value>(key: KvKey, value: Value) =>
+        operations.push({ set: { key, value } }),
       delete: (key: KvKey) => operations.push({ delete: { key } }),
       commit: () => {
         for (const operation of operations) {
