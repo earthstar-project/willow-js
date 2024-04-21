@@ -499,7 +499,7 @@ Deno.test("Store.ingestPayload", async (test) => {
       path: res.entry.path,
       subspace: res.entry.subspaceId,
       timestamp: res.entry.timestamp,
-    }, new Blob([new Uint8Array()]).stream());
+    }, new Blob([payload]).stream());
 
     assert(res3.kind === "success");
 
