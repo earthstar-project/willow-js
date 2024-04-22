@@ -1,5 +1,5 @@
 import { deferred } from "../../../../deps.ts";
-import { KvDriver, KvKey, compareKeys } from "../kv/types.ts";
+import { compareKeys, KeyPart, KvDriver, KvKey } from "../kv/types.ts";
 import { combineMonoid, LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
 import { SummarisableStorage } from "./types.ts";
 
@@ -141,9 +141,11 @@ export class Skiplist<
       Record<number, PhysicalValue<LogicalValue, SummaryData>>
     > = new Map();
 
-    for await (const entry of this.kv.list<PhysicalValue<LogicalValue, SummaryData>>({})) {
-      const layer = physicalKeyGetLayer(<PhysicalKey<LogicalKey>>entry.key);
-      const key = physicalKeyGetLogicalKey(<PhysicalKey<LogicalKey>>entry.key);
+    for await (
+      const entry of this.kv.list<PhysicalValue<LogicalValue, SummaryData>>({})
+    ) {
+      const layer = physicalKeyGetLayer(<PhysicalKey<LogicalKey>> entry.key);
+      const key = physicalKeyGetLogicalKey(<PhysicalKey<LogicalKey>> entry.key);
       const keyJson = JSON.stringify(key);
 
       const valueEntry = map.get(keyJson);
@@ -204,7 +206,7 @@ export class Skiplist<
     let level = 0;
 
     for await (const entry of lastEntry) {
-      level = physicalKeyGetLayer(<PhysicalKey<LogicalKey>>entry.key);
+      level = physicalKeyGetLayer(<PhysicalKey<LogicalKey>> entry.key);
     }
 
     this._maxHeight = level;
@@ -252,7 +254,9 @@ export class Skiplist<
     */
 
     const layerZeroPhysicalKey: PhysicalKey<LogicalKey> = [0, ...key];
-    const got = await this.kv.get<PhysicalValue<LogicalValue, SummaryData>>(layerZeroPhysicalKey);
+    const got = await this.kv.get<PhysicalValue<LogicalValue, SummaryData>>(
+      layerZeroPhysicalKey,
+    );
 
     if (
       got &&
@@ -494,7 +498,9 @@ export class Skiplist<
 
     // Do we acually contain this key?
     const layerZeroPhysicalKey: PhysicalKey<LogicalKey> = [0, ...key];
-    const got = await this.kv.get<PhysicalValue<LogicalValue, SummaryData>>(layerZeroPhysicalKey);
+    const got = await this.kv.get<PhysicalValue<LogicalValue, SummaryData>>(
+      layerZeroPhysicalKey,
+    );
 
     if (!got) {
       // Nothing to do but to report back if we didn't have the key in the first place.
@@ -612,7 +618,10 @@ export class Skiplist<
   }
 
   async get(key: LogicalKey): Promise<LogicalValue | undefined> {
-    const result = await this.kv.get<PhysicalValue<LogicalValue, SummaryData>>([0, ...key]);
+    const result = await this.kv.get<PhysicalValue<LogicalValue, SummaryData>>([
+      0,
+      ...key,
+    ]);
 
     if (result) {
       return result.logicalValue;
@@ -640,7 +649,9 @@ export class Skiplist<
     ): Promise<
       { label: [SummaryData, number]; overshootKey: LogicalKey | undefined }
     > => {
-      const startUntilEnd = this.kv.list<PhysicalValue<LogicalValue, SummaryData>>({
+      const startUntilEnd = this.kv.list<
+        PhysicalValue<LogicalValue, SummaryData>
+      >({
         start: start ? [layer, ...start] : [layer],
         end: end ? [layer, ...end] : [layer + 1],
       });
@@ -655,7 +666,9 @@ export class Skiplist<
         candidateLabel = this.monoid.neutral;
 
         if (entry.value.maxLayer <= layer) {
-          overshootKey = physicalKeyGetLogicalKey(<PhysicalKey<LogicalKey>>entry.key);
+          overshootKey = physicalKeyGetLogicalKey(
+            <PhysicalKey<LogicalKey>> entry.key,
+          );
           candidateLabel = entry.value.summary;
           continue;
         }
@@ -690,7 +703,9 @@ export class Skiplist<
       end: LogicalKey | undefined,
       layer: number,
     ): Promise<[SummaryData, number]> => {
-      const endUntilOvershoot = this.kv.list<PhysicalValue<LogicalValue, SummaryData>>({
+      const endUntilOvershoot = this.kv.list<
+        PhysicalValue<LogicalValue, SummaryData>
+      >({
         start: [layer, ...overshootLabel],
         end: end ? [layer, ...end] : [layer + 1],
       }, {
@@ -706,7 +721,9 @@ export class Skiplist<
           continue;
         }
 
-        const entryValue = physicalKeyGetLogicalKey(<PhysicalKey<LogicalKey>>entry.key);
+        const entryValue = physicalKeyGetLogicalKey(
+          <PhysicalKey<LogicalKey>> entry.key,
+        );
 
         const aboveLabel = await getTail(
           overshootLabel,
@@ -728,12 +745,15 @@ export class Skiplist<
         end?: LogicalKey;
       },
     ) => {
-      const firstEntry = this.kv.list<PhysicalValue<LogicalValue, SummaryData>>({
-        start: start ? [0, ...start] : [0],
-        end: [1],
-      }, {
-        limit: 1,
-      });
+      const firstEntry = this.kv.list<PhysicalValue<LogicalValue, SummaryData>>(
+        {
+          start: start ? [0, ...start] : [0],
+          end: [1],
+        },
+        {
+          limit: 1,
+        },
+      );
 
       for await (const first of firstEntry) {
         const { label: headLabel, overshootKey } =
@@ -780,13 +800,13 @@ export class Skiplist<
     for await (const next of nextItems) {
       if (
         compareKeys(
-          physicalKeyGetLogicalKey(<PhysicalKey<LogicalKey>>next.key),
+          physicalKeyGetLogicalKey(<PhysicalKey<LogicalKey>> next.key),
           physicalKeyGetLogicalKey(key),
         ) === 0
       ) {
         continue;
       } else {
-        return <Node<LogicalKey, LogicalValue, SummaryData>>next;
+        return <Node<LogicalKey, LogicalValue, SummaryData>> next;
       }
     }
 
@@ -809,7 +829,7 @@ export class Skiplist<
     });
 
     for await (const next of nextItems) {
-      return <Node<LogicalKey, LogicalValue, SummaryData>>next;
+      return <Node<LogicalKey, LogicalValue, SummaryData>> next;
     }
 
     return undefined;
@@ -828,10 +848,12 @@ export class Skiplist<
     let summary = this.monoid.neutral;
 
     for await (
-      const { value } of this.kv.list<PhysicalValue<LogicalValue, SummaryData>>({
-        start,
-        end: end ? [layer, ...end] : [layer + 1],
-      })
+      const { value } of this.kv.list<PhysicalValue<LogicalValue, SummaryData>>(
+        {
+          start,
+          end: end ? [layer, ...end] : [layer + 1],
+        },
+      )
     ) {
       summary = this.monoid.combine(summary, value.summary);
     }
@@ -855,13 +877,17 @@ export class Skiplist<
       : [1];
 
     for await (
-      const physicalEntry of this.kv.list<PhysicalValue<LogicalValue, SummaryData>>({
+      const physicalEntry of this.kv.list<
+        PhysicalValue<LogicalValue, SummaryData>
+      >({
         start: physicalStart,
         end: physicalEnd,
       }, opts)
     ) {
       yield {
-        key: physicalKeyGetLogicalKey(<PhysicalKey<LogicalKey>>physicalEntry.key),
+        key: physicalKeyGetLogicalKey(
+          <PhysicalKey<LogicalKey>> physicalEntry.key,
+        ),
         value: physicalEntry.value.logicalValue!,
       };
     }
@@ -884,4 +910,93 @@ function randomHeight() {
   }
 
   return level;
+}
+
+/*
+The SummarisableStorage interface allows for arbitrary keys, but the MonoidSkiplist restricts keys to be arrays of KV KeyParts.
+We often need a MonidSkiplist whose keys are single values. Instead of implementing these as singleton arrays, we provide the following wrapper type to hide the conversion.
+
+To be honest, this covers up a flaw in the interface designs. Oh well, it works nevertheless.
+*/
+
+export type SingleKeySkiplistOpts<
+  LogicalKey extends KeyPart,
+  LogicalValue,
+  SummaryData,
+> = {
+  /**
+   * Return true iff a and b are considered equal.
+   */
+  logicalValueEq: (a: LogicalValue, b: LogicalValue) => boolean;
+  kv: KvDriver;
+  monoid: LiftingMonoid<[LogicalKey, LogicalValue], SummaryData>;
+};
+
+export class SingleKeySkiplist<
+  LogicalKey extends KeyPart,
+  LogicalValue,
+  SummaryData,
+> implements SummarisableStorage<LogicalKey, LogicalValue, SummaryData> {
+  private skiplist: Skiplist<[LogicalKey], LogicalValue, SummaryData>;
+
+  constructor(
+    opts: SingleKeySkiplistOpts<LogicalKey, LogicalValue, SummaryData>,
+  ) {
+    this.skiplist = new Skiplist({
+      logicalValueEq: opts.logicalValueEq,
+      kv: opts.kv,
+      monoid: {
+        lift: (base: [[LogicalKey], LogicalValue]) =>
+          opts.monoid.lift([base[0][0], base[1]]),
+        combine: opts.monoid.combine,
+        neutral: opts.monoid.neutral,
+      },
+    });
+  }
+
+  get(key: LogicalKey): Promise<LogicalValue | undefined> {
+    return this.skiplist.get([key]);
+  }
+
+  insert(key: LogicalKey, value: LogicalValue): Promise<void> {
+    return this.skiplist.insert([key], value);
+  }
+
+  remove(key: LogicalKey): Promise<boolean> {
+    return this.skiplist.remove([key]);
+  }
+
+  summarise(
+    start?: LogicalKey | undefined,
+    end?: LogicalKey | undefined,
+  ): Promise<{ fingerprint: SummaryData; size: number }> {
+    return this.skiplist.summarise(
+      start === undefined ? undefined : [start],
+      end === undefined ? undefined : [end],
+    );
+  }
+
+  async *entries(
+    start: LogicalKey | undefined,
+    end: LogicalKey | undefined,
+    opts?:
+      | { reverse?: boolean | undefined; limit?: number | undefined }
+      | undefined,
+  ): AsyncIterable<{ key: LogicalKey; value: LogicalValue }> {
+    for await (
+      const entry of this.skiplist.entries(
+        start === undefined ? undefined : [start],
+        end === undefined ? undefined : [end],
+        opts,
+      )
+    ) {
+      yield { key: entry.key[0], value: entry.value };
+    }
+  }
+
+  async *allEntries(): AsyncIterable<{ key: LogicalKey; value: LogicalValue }> {
+    for await (const entry of this.skiplist.allEntries()) {
+      yield { key: entry.key[0], value: entry.value };
+    }
+  }
 }

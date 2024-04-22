@@ -35,9 +35,9 @@ export type TripleStorageOpts<
   namespace: NamespaceId;
   /** Creates a {@link SummarisableStorage} with a given ID, used for storing entries and their data. */
   createSummarisableStorage: (
-    monoid: LiftingMonoid<Uint8Array, Fingerprint>,
+    monoid: LiftingMonoid<[Uint8Array, Uint8Array], Fingerprint>,
     id: string,
-  ) => SummarisableStorage<Uint8Array, Fingerprint>;
+  ) => SummarisableStorage<Uint8Array, Uint8Array, Fingerprint>;
   subspaceScheme: SubspaceScheme<SubspaceId>;
   payloadScheme: PayloadScheme<PayloadDigest>;
   pathScheme: PathScheme;
@@ -64,9 +64,9 @@ export class TripleStorage<
   > {
   private namespace: NamespaceId;
 
-  private ptsStorage: SummarisableStorage<Uint8Array, Fingerprint>;
-  private sptStorage: SummarisableStorage<Uint8Array, Fingerprint>;
-  private tspStorage: SummarisableStorage<Uint8Array, Fingerprint>;
+  private ptsStorage: SummarisableStorage<Uint8Array, Uint8Array, Fingerprint>;
+  private sptStorage: SummarisableStorage<Uint8Array, Uint8Array, Fingerprint>;
+  private tspStorage: SummarisableStorage<Uint8Array, Uint8Array, Fingerprint>;
   private subspaceScheme: SubspaceScheme<SubspaceId>;
   private payloadScheme: PayloadScheme<PayloadDigest>;
   private fingerprintScheme: FingerprintScheme<
@@ -120,17 +120,17 @@ export class TripleStorage<
     };
 
     this.ptsStorage = opts.createSummarisableStorage({
-      lift: (key, value) => lift(key, value, "path"),
+      lift: ([key, value]) => lift(key, value, "path"),
       combine: opts.fingerprintScheme.fingerprintCombine,
       neutral: opts.fingerprintScheme.neutral,
     }, "pts");
     this.sptStorage = opts.createSummarisableStorage({
-      lift: (key, value) => lift(key, value, "subspace"),
+      lift: ([key, value]) => lift(key, value, "subspace"),
       combine: opts.fingerprintScheme.fingerprintCombine,
       neutral: opts.fingerprintScheme.neutral,
     }, "spt");
     this.tspStorage = opts.createSummarisableStorage({
-      lift: (key, value) => lift(key, value, "timestamp"),
+      lift: ([key, value]) => lift(key, value, "timestamp"),
       combine: opts.fingerprintScheme.fingerprintCombine,
       neutral: opts.fingerprintScheme.neutral,
     }, "tsp");

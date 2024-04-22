@@ -4,16 +4,12 @@ import {
   SubspaceScheme,
 } from "../../types.ts";
 import { LiftingMonoid } from "../summarisable_storage/lifting_monoid.ts";
-import { MonoidRbTree } from "../summarisable_storage/monoid_rbtree.ts";
+import { SingleKeySkiplist } from "../summarisable_storage/monoid_skiplist.ts";
+import { KvDriverInMemory } from "../kv/kv_driver_in_memory.ts";
 import { EntryDriver } from "../types.ts";
 import { Storage3d } from "../storage_3d/types.ts";
 import { TripleStorage } from "../storage_3d/triple_storage.ts";
-import {
-  encodeBase64,
-  Entry,
-  orderBytes,
-  PathScheme,
-} from "../../../../deps.ts";
+import { bytesEq, encodeBase64, Entry, PathScheme } from "../../../../deps.ts";
 import { RadixTree } from "../prefix_iterators/radix_tree.ts";
 
 type EntryDriverMemoryOpts<
@@ -65,11 +61,12 @@ export class EntryDriverMemory<
     return new TripleStorage({
       namespace,
       createSummarisableStorage: (
-        monoid: LiftingMonoid<Uint8Array, Fingerprint>,
+        monoid: LiftingMonoid<[Uint8Array, Uint8Array], Fingerprint>,
       ) => {
-        return new MonoidRbTree({
+        return new SingleKeySkiplist({
           monoid,
-          compare: orderBytes,
+          kv: new KvDriverInMemory(),
+          logicalValueEq: bytesEq,
         });
       },
       fingerprintScheme: this.opts.fingerprintScheme,
