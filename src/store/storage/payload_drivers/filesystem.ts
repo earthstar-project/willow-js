@@ -159,7 +159,7 @@ export class PayloadDriverFilesystem<PayloadDigest>
 
   async receive(
     opts: {
-      payload: AsyncIterable<Uint8Array>;
+      payload: AsyncIterable<Uint8Array> | Uint8Array;
       offset: number;
       knownLength: bigint;
       knownDigest: PayloadDigest;
@@ -197,13 +197,19 @@ export class PayloadDriverFilesystem<PayloadDigest>
 
       let receivedLength = BigInt(opts.offset);
 
-      for await (const chunk of opts.payload) {
-        await writer.write(chunk);
+      if (opts.payload instanceof Uint8Array) {
+        receivedLength += BigInt(opts.payload.byteLength);
 
-        receivedLength += BigInt(chunk.byteLength);
+        await writer.write(opts.payload);
+      } else {
+        for await (const chunk of opts.payload) {
+          await writer.write(chunk);
 
-        if (receivedLength >= opts.knownLength) {
-          break;
+          receivedLength += BigInt(chunk.byteLength);
+
+          if (receivedLength >= opts.knownLength) {
+            break;
+          }
         }
       }
 
