@@ -1,20 +1,20 @@
-export interface SummarisableStorage<ValueType, LiftedType> {
-  get(key: ValueType): Promise<Uint8Array | undefined>;
-  insert(key: ValueType, value: Uint8Array): Promise<void>;
-  remove(key: ValueType): Promise<boolean>;
+export interface SummarisableStorage<LogicalKey, LogicalValue, SummaryData> {
+  get(key: LogicalKey): Promise<LogicalValue | undefined>;
+  insert(key: LogicalKey, value: LogicalValue): Promise<void>;
+  remove(key: LogicalKey): Promise<boolean>;
 
   summarise(
-    start: ValueType,
-    end: ValueType,
-  ): Promise<{ fingerprint: LiftedType; size: number }>;
+    start?: LogicalKey,
+    end?: LogicalKey,
+  ): Promise<{ fingerprint: SummaryData; size: number }>;
 
   entries(
-    start: ValueType | undefined,
-    end: ValueType | undefined,
+    start: LogicalKey | undefined,
+    end: LogicalKey | undefined,
     opts?: {
       reverse?: boolean;
       limit?: number;
     },
-  ): AsyncIterable<{ key: ValueType; value: Uint8Array }>;
-  allEntries(): AsyncIterable<{ key: ValueType; value: Uint8Array }>;
+  ): AsyncIterable<{ key: LogicalKey; value: LogicalValue }>;
+  allEntries(): AsyncIterable<{ key: LogicalKey; value: LogicalValue }>;
 }

@@ -1,3 +1,5 @@
+// deno test ./src/store/storage/storage_3d/storage_3d.test.ts
+
 import { assert } from "https://deno.land/std@0.202.0/assert/assert.ts";
 import {
   ANY_SUBSPACE,
@@ -7,6 +9,7 @@ import {
   encodeBase64,
   encodeEntry,
   Entry,
+  equalsBytes,
   isIncluded3d,
   isIncludedRange,
   isPathPrefixed,
@@ -17,6 +20,7 @@ import {
   Path,
   Range,
   Range3d,
+  StreamDecoder,
   successorPath,
 } from "../../../../deps.ts";
 import {
@@ -36,8 +40,7 @@ import {
   randomSubspace,
   randomTimestamp,
 } from "../../../test/utils.ts";
-import { LengthyEntry, ProtocolParameters, QueryOrder } from "../../types.ts";
-import { MonoidRbTree } from "../summarisable_storage/monoid_rbtree.ts";
+import { LengthyEntry, QueryOrder, StoreSchemes } from "../../types.ts";
 import { encodePathWithSeparators, TripleStorage } from "./triple_storage.ts";
 import { RangeOfInterest, Storage3d } from "./types.ts";
 import { assertEquals } from "https://deno.land/std@0.202.0/assert/assert_equals.ts";
@@ -45,8 +48,8 @@ import { sample } from "https://deno.land/std@0.202.0/collections/mod.ts";
 
 import { Store } from "../../store.ts";
 import { RadixTree } from "../prefix_iterators/radix_tree.ts";
-import { assertRejects } from "https://deno.land/std@0.202.0/assert/assert_rejects.ts";
-import { assertThrows } from "https://deno.land/std@0.202.0/assert/assert_throws.ts";
+import { SingleKeySkiplist } from "../summarisable_storage/monoid_skiplist.ts";
+import { KvDriverInMemory } from "../kv/kv_driver_in_memory.ts";
 
 export type Storage3dScenario<
   NamespaceId,
@@ -59,7 +62,7 @@ export type Storage3dScenario<
   name: string;
   makeScenario: (
     namespace: NamespaceId,
-    params: ProtocolParameters<
+    params: StoreSchemes<
       NamespaceId,
       SubspaceId,
       PayloadDigest,
@@ -91,7 +94,7 @@ const tripleStorageScenario = {
     Fingerprint,
   >(
     namespace: NamespaceId,
-    params: ProtocolParameters<
+    params: StoreSchemes<
       NamespaceId,
       SubspaceId,
       PayloadDigest,
@@ -102,11 +105,15 @@ const tripleStorageScenario = {
   ) => {
     const storage = new TripleStorage({
       namespace,
-      ...params,
+      pathScheme: params.path,
+      subspaceScheme: params.subspace,
+      payloadScheme: params.payload,
+      fingerprintScheme: params.fingerprint,
       createSummarisableStorage: (monoid) => {
-        return new MonoidRbTree({
+        return new SingleKeySkiplist({
           monoid,
-          compare: orderBytes,
+          kv: new KvDriverInMemory(),
+          logicalValueEq: equalsBytes,
         });
       },
       getPayloadLength: () => Promise.resolve(BigInt(0)),
@@ -123,12 +130,12 @@ Deno.test("Storage3d.insert, get, and remove", async (test) => {
     const { storage, dispose } = await scenario.makeScenario(
       randomNamespace(),
       {
-        namespaceScheme: testSchemeNamespace,
-        subspaceScheme: testSchemeSubspace,
-        pathScheme: testSchemePath,
-        payloadScheme: testSchemePayload,
-        fingerprintScheme: testSchemeFingerprint,
-        authorisationScheme: testSchemeAuthorisation,
+        namespace: testSchemeNamespace,
+        subspace: testSchemeSubspace,
+        path: testSchemePath,
+        payload: testSchemePayload,
+        fingerprint: testSchemeFingerprint,
+        authorisation: testSchemeAuthorisation,
       },
     );
 
@@ -243,6 +250,54 @@ Deno.test("Storage3d.summarise", async () => {
       return newFingerprint;
     },
     neutral: [] as Array<[number, Path, bigint, bigint]>,
+
+    isEqual: (
+      a: [number, Path, bigint, bigint][],
+      b: [number, Path, bigint, bigint][],
+    ) => {
+      if (a.length !== b.length) {
+        return false;
+      }
+
+      for (let i = 0; i < a.length; i++) {
+        const x = a[i];
+        const y = b[i];
+
+        if (x[0] !== y[0]) {
+          return false;
+        }
+
+        if (orderPath(x[1], y[1]) !== 0) {
+          return false;
+        }
+
+        if (x[2] !== y[2]) {
+          return false;
+        }
+
+        if (x[3] !== y[3]) {
+          return false;
+        }
+      }
+
+      return true;
+    },
+
+    // Uused, so define a dummy encoding scheme.
+    encoding: {
+      encode: (_value: [number, Path, bigint, bigint][]) => {
+        return new Uint8Array(0);
+      },
+      decode: (_encoded: Uint8Array) => {
+        return <[number, Path, bigint, bigint][]> [];
+      },
+      encodedLength: (_value: [number, Path, bigint, bigint][]) => {
+        return 0;
+      },
+      decodeStream: <StreamDecoder<
+        [number, Path, bigint, bigint][]
+      >> <unknown> "unused",
+    },
   };
 
   for (const scenario of scenarios) {
@@ -251,12 +306,12 @@ Deno.test("Storage3d.summarise", async () => {
     const { storage, dispose } = await scenario.makeScenario(
       namespace,
       {
-        namespaceScheme: testSchemeNamespace,
-        subspaceScheme: testSchemeSubspace,
-        payloadScheme: testSchemePayload,
-        pathScheme: testSchemePath,
-        authorisationScheme: testSchemeAuthorisation,
-        fingerprintScheme: specialFingerprintScheme,
+        namespace: testSchemeNamespace,
+        subspace: testSchemeSubspace,
+        payload: testSchemePayload,
+        path: testSchemePath,
+        authorisation: testSchemeAuthorisation,
+        fingerprint: specialFingerprintScheme,
       },
     );
 
@@ -484,6 +539,7 @@ Deno.test("Storage3d.summarise", async () => {
         actual.fingerprint,
         expected.fingerprint,
       );
+
       assertEquals(actual.size, expected.count);
 
       let actualPayloadSize = BigInt(0);
@@ -506,24 +562,24 @@ Deno.test("Storage3d.query", async (test) => {
     const { storage, dispose } = await scenario.makeScenario(
       namespace,
       {
-        namespaceScheme: testSchemeNamespace,
-        subspaceScheme: testSchemeSubspace,
-        pathScheme: testSchemePath,
-        payloadScheme: testSchemePayload,
-        fingerprintScheme: testSchemeFingerprint,
-        authorisationScheme: testSchemeAuthorisation,
+        namespace: testSchemeNamespace,
+        subspace: testSchemeSubspace,
+        path: testSchemePath,
+        payload: testSchemePayload,
+        fingerprint: testSchemeFingerprint,
+        authorisation: testSchemeAuthorisation,
       },
     );
 
     const store = new Store({
       namespace,
-      protocolParameters: {
-        authorisationScheme: testSchemeAuthorisation,
-        namespaceScheme: testSchemeNamespace,
-        subspaceScheme: testSchemeSubspace,
-        pathScheme: testSchemePath,
-        payloadScheme: testSchemePayload,
-        fingerprintScheme: testSchemeFingerprint,
+      schemes: {
+        authorisation: testSchemeAuthorisation,
+        namespace: testSchemeNamespace,
+        subspace: testSchemeSubspace,
+        path: testSchemePath,
+        payload: testSchemePayload,
+        fingerprint: testSchemeFingerprint,
       },
       entryDriver: {
         makeStorage: () => {
@@ -920,24 +976,24 @@ Deno.test("Storage3d.splitRange", async () => {
       const { storage, dispose } = await scenario.makeScenario(
         namespace,
         {
-          namespaceScheme: testSchemeNamespace,
-          subspaceScheme: testSchemeSubspace,
-          pathScheme: testSchemePath,
-          payloadScheme: testSchemePayload,
-          fingerprintScheme: testSchemeFingerprint,
-          authorisationScheme: testSchemeAuthorisation,
+          namespace: testSchemeNamespace,
+          subspace: testSchemeSubspace,
+          path: testSchemePath,
+          payload: testSchemePayload,
+          fingerprint: testSchemeFingerprint,
+          authorisation: testSchemeAuthorisation,
         },
       );
 
       const store = new Store({
         namespace,
-        protocolParameters: {
-          authorisationScheme: testSchemeAuthorisation,
-          namespaceScheme: testSchemeNamespace,
-          subspaceScheme: testSchemeSubspace,
-          pathScheme: testSchemePath,
-          payloadScheme: testSchemePayload,
-          fingerprintScheme: testSchemeFingerprint,
+        schemes: {
+          authorisation: testSchemeAuthorisation,
+          namespace: testSchemeNamespace,
+          subspace: testSchemeSubspace,
+          path: testSchemePath,
+          payload: testSchemePayload,
+          fingerprint: testSchemeFingerprint,
         },
         entryDriver: {
           makeStorage: () => {

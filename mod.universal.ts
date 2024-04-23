@@ -18,7 +18,6 @@ export * from "./src/store/storage/prefix_iterators/radix_tree.ts";
 export * from "./src/store/storage/storage_3d/types.ts";
 
 export * from "./src/store/storage/summarisable_storage/types.ts";
-export * from "./src/store/storage/summarisable_storage/monoid_rbtree.ts";
 export * from "./src/store/storage/summarisable_storage/monoid_skiplist.ts";
 export * from "./src/store/storage/summarisable_storage/lifting_monoid.ts";
 

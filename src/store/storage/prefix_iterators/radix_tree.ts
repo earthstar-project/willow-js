@@ -172,24 +172,32 @@ export class RadixTree<ValueType> implements PrefixIterator<ValueType> {
     let result: MemoryNode<ValueType> | null = null;
     let node = this.root;
 
-    for (let i = 0; i < path.length; i++) {
-      const component = path[i];
-      const isLast = i === path.length - 1;
-      const edge = node.children.get(encodeBase64(component));
+    if (path.length === 0) {
+      result = this.root as MemoryNode<ValueType>;
+    } else {
+      for (let i = 0; i < path.length; i++) {
+        const component = path[i];
+        const isLast = i === path.length - 1;
+        const edge = node.children.get(encodeBase64(component));
 
-      if (!edge) {
-        break;
+        if (!edge) {
+          break;
+        }
+
+        if (isLast) {
+          result = edge;
+        }
+
+        node = edge;
       }
-
-      if (isLast) {
-        result = edge;
-      }
-
-      node = edge;
     }
 
     if (!result) {
       return;
+    }
+
+    if (result.value) {
+      yield [path, result.value];
     }
 
     for (

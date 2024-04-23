@@ -158,7 +158,7 @@ export const testSchemeSubspace: SubspaceScheme<TestSubspace> = {
         return TestSubspace.Muriarty;
     }
 
-    throw new Error("Badly encoded test namespace");
+    throw new Error("Badly encoded test subspace");
   },
   minimalSubspaceId: TestSubspace.Alfie,
   order: (a, b) => {

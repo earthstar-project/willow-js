@@ -2,6 +2,7 @@ import {
   decodeEntry,
   encodeEntry,
   Entry,
+  equalsBytes,
   orderBytes,
   PathScheme,
 } from "../../../../deps.ts";
@@ -11,6 +12,8 @@ import {
   PayloadScheme,
   SubspaceScheme,
 } from "../../types.ts";
+import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
+import { KvDriverInMemory } from "../kv/kv_driver_in_memory.ts";
 import { PrefixedDriver } from "../kv/prefixed_driver.ts";
 import { KvDriver } from "../kv/types.ts";
 import { SimpleKeyIterator } from "../prefix_iterators/simple_key_iterator.ts";
@@ -18,7 +21,10 @@ import { PrefixIterator } from "../prefix_iterators/types.ts";
 import { TripleStorage } from "../storage_3d/triple_storage.ts";
 import { Storage3d } from "../storage_3d/types.ts";
 import { LiftingMonoid } from "../summarisable_storage/lifting_monoid.ts";
-import { Skiplist } from "../summarisable_storage/monoid_skiplist.ts";
+import {
+  SingleKeySkiplist,
+  Skiplist,
+} from "../summarisable_storage/monoid_skiplist.ts";
 import { EntryDriver, PayloadReferenceCounter } from "../types.ts";
 
 type EntryDriverKvOpts<
@@ -152,12 +158,10 @@ export class EntryDriverKvStore<
         monoid,
         id,
       ) => {
-        const prefixedAgain = new PrefixedDriver([id], prefixedStorageDriver);
-
-        return new Skiplist({
-          kv: prefixedAgain,
+        return new SingleKeySkiplist({
           monoid,
-          compare: orderBytes,
+          kv: new PrefixedDriver([id], prefixedStorageDriver),
+          logicalValueEq: equalsBytes,
         });
       },
       fingerprintScheme: this.fingerprintScheme,
@@ -265,8 +269,8 @@ export class EntryDriverKvStore<
       await this.kvDriver.delete(["waf", "insert"]);
       await this.kvDriver.delete(["waf", "insert", "authTokenHash"]);
     },
-    unflagRemoval: () => {
-      return this.kvDriver.delete(["waf", "remove"]);
+    unflagRemoval: async () => {
+      await this.kvDriver.delete(["waf", "remove"]);
     },
   };
 }

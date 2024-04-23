@@ -1,10 +1,11 @@
-import { assertEquals } from "https://deno.land/std@0.202.0/testing/asserts.ts";
 import { RadixTree } from "./radix_tree.ts";
 import { PrefixIterator } from "./types.ts";
 import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
 import { SimpleKeyIterator } from "./simple_key_iterator.ts";
 import { randomPath } from "../../../test/utils.ts";
 import { concat, Path, prefixesOf } from "../../../../deps.ts";
+import { PrefixedDriver } from "../kv/prefixed_driver.ts";
+import { assertEquals } from "https://deno.land/std@0.223.0/assert/assert_equals.ts";
 
 const MAX_PATH_SETS = 64;
 
@@ -49,15 +50,18 @@ const simpleKeyIteratorScenario: PrefixIteratorScenario = {
   name: "Simple key iterator",
   makeScenario: async () => {
     const kv = await Deno.openKv();
-    const kvDriver = new KvDriverDeno(kv);
+    const kvDriver = new PrefixedDriver(["test"], new KvDriverDeno(kv));
     const simpleKeyIteratorScenario = new SimpleKeyIterator<Uint8Array>(
       kvDriver,
     );
-    await kvDriver.clear();
 
     return {
       iterator: simpleKeyIteratorScenario,
-      dispose: () => Promise.resolve(kv.close()),
+      dispose: async () => {
+        await kvDriver.clear();
+
+        kv.close();
+      },
     };
   },
 };
@@ -99,7 +103,7 @@ Deno.test("Prefix Iterator", async (test) => {
         );
 
         const expectedPrefixes = pathSet.slice(0, splitPoint);
-        const expectedPrefixedBy = pathSet.slice(splitPoint + 1);
+        const expectedPrefixedBy = pathSet.slice(splitPoint);
 
         const actualPrefixes: Path[] = [];
 
