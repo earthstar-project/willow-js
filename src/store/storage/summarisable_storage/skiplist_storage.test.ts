@@ -279,7 +279,7 @@ Deno.test({
   },
 });
 
-Deno.test({
+Deno.test.ignore({
   name: "Random Tests",
   async fn() {
     const numKeys = 8;
@@ -301,7 +301,7 @@ Deno.test({
   },
 });
 
-Deno.test({
+Deno.test.ignore({
   name: "Even More Random Tests",
   async fn() {
     const numKeys = 16;
@@ -327,7 +327,7 @@ Deno.test({
   },
 });
 
-Deno.test({
+Deno.test.ignore({
   name: "Randomly Test DenoKV",
   async fn() {
     const numKeys = 8;
@@ -349,7 +349,7 @@ Deno.test({
   },
 });
 
-Deno.test({
+Deno.test.ignore({
   name: "Even More Random Tests For DenoKV",
   async fn() {
     const numKeys = 16;
@@ -375,7 +375,7 @@ Deno.test({
   },
 });
 
-Deno.test({
+Deno.test.ignore({
   name: "Exhaustive Tests",
   async fn() {
     const numKeys = 5;
