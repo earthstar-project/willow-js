@@ -2,6 +2,7 @@ import { concat, encodeBase64 } from "../../../../deps.ts";
 import { ValidationError } from "../../../errors.ts";
 import { Payload, PayloadScheme } from "../../types.ts";
 import { PayloadDriver } from "../types.ts";
+import { collectUint8Arrays } from "./util.ts";
 
 /** Store and retrieve payloads in memory. */
 export class PayloadDriverMemory<PayloadDigest>
@@ -22,20 +23,18 @@ export class PayloadDriverMemory<PayloadDigest>
   private getPayload(bytes: Uint8Array): Payload {
     return {
       bytes: (offset) => {
-        if (!offset) {
+        if (offset === undefined || offset === 0) {
           return Promise.resolve(bytes);
         }
 
         return Promise.resolve(
-          new Uint8Array(
-            bytes.slice(offset),
-          ),
+          bytes.slice(offset),
         );
       },
 
       // Need to do this for Node's sake.
       stream: (offset) => {
-        if (!offset) {
+        if (offset === undefined || offset === 0) {
           return Promise.resolve(
             new Blob([bytes.buffer]).stream() as unknown as ReadableStream<
               Uint8Array
@@ -43,7 +42,7 @@ export class PayloadDriverMemory<PayloadDigest>
           );
         }
 
-        return Promise.resolve(new Blob([bytes.subarray(offset).buffer])
+        return Promise.resolve(new Blob([bytes.slice(offset).buffer])
           .stream() as unknown as ReadableStream<
             Uint8Array
           >);
@@ -75,7 +74,7 @@ export class PayloadDriverMemory<PayloadDigest>
     }
 
     return Promise.resolve(
-      new ValidationError("No attachment with that signature found."),
+      new ValidationError("No payload with that digest found."),
     );
   }
 
@@ -113,7 +112,7 @@ export class PayloadDriverMemory<PayloadDigest>
 
   async receive(
     opts: {
-      payload: AsyncIterable<Uint8Array>;
+      payload: AsyncIterable<Uint8Array> | Uint8Array;
       offset: number;
       knownLength: bigint;
       knownDigest: PayloadDigest;
@@ -122,15 +121,13 @@ export class PayloadDriverMemory<PayloadDigest>
     const key = this.getKey(opts.knownDigest);
     const existingBytes = this.payloadMap.get(key) || new Uint8Array();
 
-    const collectedBytes: Uint8Array[] = [];
-
-    for await (const chunk of opts.payload) {
-      collectedBytes.push(chunk);
-    }
+    const collectedBytes = opts.payload instanceof Uint8Array
+      ? opts.payload
+      : await collectUint8Arrays(opts.payload);
 
     const assembled = concat(
       existingBytes.slice(0, opts.offset),
-      ...collectedBytes,
+      collectedBytes,
     );
 
     this.payloadMap.set(key, assembled);
@@ -142,26 +139,4 @@ export class PayloadDriverMemory<PayloadDigest>
       length: BigInt(assembled.byteLength),
     };
   }
-}
-
-export async function collectUint8Arrays(
-  it: AsyncIterable<Uint8Array>,
-): Promise<Uint8Array> {
-  const chunks = [];
-  let length = 0;
-  for await (const chunk of it) {
-    chunks.push(chunk);
-    length += chunk.length;
-  }
-  if (chunks.length === 1) {
-    // No need to copy.
-    return chunks[0];
-  }
-  const collected = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    collected.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return collected;
 }
