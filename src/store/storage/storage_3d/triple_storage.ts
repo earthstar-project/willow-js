@@ -250,8 +250,7 @@ export class TripleStorage<
     /** The least excluded item we've run into.
      * This is going to be the upper bound of a summarise op we run when we detect a contiguous range of included entries.
      */
-    let leastExcluded = upperBound ||
-      this.encodeKey(1, bigintToBytes(BigInt(0)));
+    let leastExcluded = upperBound;
 
     /** The least included item we've run into.
      * This is going to be the lower bound of a summarise op we run when we detect a contiguous range of included entries.

@@ -5,11 +5,11 @@ import {
   ANY_SUBSPACE,
   AreaOfInterest,
   bigintToBytes,
-  bytesEq,
   concat,
   encodeBase64,
   encodeEntry,
   Entry,
+  equalsBytes,
   isIncluded3d,
   isIncludedRange,
   isPathPrefixed,
@@ -18,7 +18,6 @@ import {
   orderPath,
   orderTimestamp,
   Path,
-  pathEq,
   Range,
   Range3d,
   StreamDecoder,
@@ -114,7 +113,7 @@ const tripleStorageScenario = {
         return new SingleKeySkiplist({
           monoid,
           kv: new KvDriverInMemory(),
-          logicalValueEq: bytesEq,
+          logicalValueEq: equalsBytes,
         });
       },
       getPayloadLength: () => Promise.resolve(BigInt(0)),
@@ -268,7 +267,7 @@ Deno.test("Storage3d.summarise", async () => {
           return false;
         }
 
-        if (!pathEq(x[1], y[1])) {
+        if (orderPath(x[1], y[1]) !== 0) {
           return false;
         }
 
@@ -540,6 +539,7 @@ Deno.test("Storage3d.summarise", async () => {
         actual.fingerprint,
         expected.fingerprint,
       );
+
       assertEquals(actual.size, expected.count);
 
       let actualPayloadSize = BigInt(0);
@@ -1040,15 +1040,7 @@ Deno.test("Storage3d.splitRange", async () => {
         },
       };
 
-      console.log(`test case of sampleSize ${sampleSize}\n`);    
-      for await (const entry of store.queryRange(range, "oldest")) {
-        console.log(entry);        
-      }  
-
       const [left, right] = await store.splitRange(range, sampleSize);
-
-      console.log(left, right);
-      
 
       const { fingerprint: fingerprintL, size: sizeL } = await store.summarise(
         left,
@@ -1057,13 +1049,7 @@ Deno.test("Storage3d.splitRange", async () => {
         right,
       );
 
-      console.log(sizeL, sizeR);
-      
-
       const { fingerprint, size } = await store.summarise(range);
-
-      console.log(range, size);
-      
 
       assertEquals(sizeL + sizeR, size);
 
