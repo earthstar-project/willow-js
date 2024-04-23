@@ -10,11 +10,11 @@ export class SimpleKeyIterator<ValueType> implements PrefixIterator<ValueType> {
   }
 
   insert(path: Path, value: ValueType) {
-    return this.kv.set([0, ...path], value);
+    return this.kv.set(path, value);
   }
 
   async remove(path: Path) {
-    await this.kv.delete([0, ...path]);
+    await this.kv.delete(path);
 
     return true;
   }
@@ -25,14 +25,15 @@ export class SimpleKeyIterator<ValueType> implements PrefixIterator<ValueType> {
   ): AsyncIterable<[Path, ValueType]> {
     for await (
       const entry of this.kv.list<ValueType>({
-        start: [0, ...atLeast],
-        end: [0, ...path],
+        start: atLeast,
+        end: path,
       }, {
         batchSize: path.length === 0 ? 1 : undefined,
         limit: path.length === 0 ? 1 : undefined,
       })
     ) {
-      const candidate = entry.key.slice(1) as Path;
+      const candidate = entry.key as Path;
+
       // If the candidate is greater than or equal to the current path, we've reached the end of the line.
       if (orderPath(candidate, path) >= 0) {
         break;
@@ -58,10 +59,10 @@ export class SimpleKeyIterator<ValueType> implements PrefixIterator<ValueType> {
   async *prefixedBy(path: Path): AsyncIterable<[Path, ValueType]> {
     for await (
       const entry of this.kv.list<ValueType>({
-        prefix: [0, ...path],
+        prefix: path,
       })
     ) {
-      yield [entry.key.slice(1) as Path, entry.value];
+      yield [entry.key as Path, entry.value];
     }
   }
 }

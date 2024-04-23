@@ -9,7 +9,12 @@ import { KvDriverInMemory } from "../kv/kv_driver_in_memory.ts";
 import { EntryDriver } from "../types.ts";
 import { Storage3d } from "../storage_3d/types.ts";
 import { TripleStorage } from "../storage_3d/triple_storage.ts";
-import { bytesEq, encodeBase64, Entry, PathScheme } from "../../../../deps.ts";
+import {
+  encodeBase64,
+  Entry,
+  equalsBytes,
+  PathScheme,
+} from "../../../../deps.ts";
 import { RadixTree } from "../prefix_iterators/radix_tree.ts";
 
 type EntryDriverMemoryOpts<
@@ -66,7 +71,7 @@ export class EntryDriverMemory<
         return new SingleKeySkiplist({
           monoid,
           kv: new KvDriverInMemory(),
-          logicalValueEq: bytesEq,
+          logicalValueEq: equalsBytes,
         });
       },
       fingerprintScheme: this.opts.fingerprintScheme,
