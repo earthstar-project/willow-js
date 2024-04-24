@@ -1,6 +1,5 @@
-import { encodeBase32, Entry, FIFO } from "../../../deps.ts";
+import { Entry, FIFO } from "../../../deps.ts";
 import { HandleStore } from "../handle_store.ts";
-import { StoreMap } from "../store_map.ts";
 import { WillowError } from "../../errors.ts";
 import { Payload } from "../../store/types.ts";
 import {
@@ -11,6 +10,7 @@ import {
   MsgDataSendEntry,
   MsgDataSendPayload,
 } from "../types.ts";
+import { GetStoreFn } from "../wgps_messenger.ts";
 
 type DataSendEntryPack<
   DynamicToken,
@@ -46,13 +46,13 @@ export class DataSender<
         offset: bigint;
         entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
       }>;
-      storeMap: StoreMap<
+      getStore: GetStoreFn<
         Fingerprint,
         AuthorisationToken,
+        AuthorisationOpts,
         NamespaceId,
         SubspaceId,
-        PayloadDigest,
-        AuthorisationOpts
+        PayloadDigest
       >;
     },
   ) {
@@ -74,7 +74,7 @@ export class DataSender<
     dynamicToken: DynamicToken,
     offset: number,
   ) {
-    const store = this.opts.storeMap.get(entry.namespaceId);
+    const store = this.opts.getStore(entry.namespaceId);
 
     const payload = await store.getPayload(entry);
 
@@ -97,7 +97,7 @@ export class DataSender<
     const payloadRequest = await this.opts.handlesPayloadRequestsTheirs
       .getEventually(handle);
 
-    const store = this.opts.storeMap.get(payloadRequest.entry.namespaceId);
+    const store = this.opts.getStore(payloadRequest.entry.namespaceId);
 
     const payload = await store.getPayload(payloadRequest.entry);
 

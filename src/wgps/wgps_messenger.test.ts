@@ -20,17 +20,9 @@ import {
   TestSubspace,
 } from "../test/test_schemes.ts";
 import { delay } from "https://deno.land/std@0.202.0/async/delay.ts";
-import {
-  ANY_SUBSPACE,
-  defaultRange3d,
-  encodeBase32,
-  OPEN_END,
-  Range3d,
-} from "../../deps.ts";
+import { encodeBase32, OPEN_END, Range3d } from "../../deps.ts";
 import { Store } from "../store/store.ts";
 import { PayloadDriverFilesystem } from "../store/storage/payload_drivers/filesystem.ts";
-import { EntryDriverKvStore } from "../store/storage/entry_drivers/kv_store.ts";
-import { KvDriverDeno } from "../store/storage/kv/kv_driver_deno.ts";
 import { emptyDir } from "https://deno.land/std@0.202.0/fs/empty_dir.ts";
 import { EntryDriverMemory } from "../store/storage/entry_drivers/memory.ts";
 
@@ -38,8 +30,8 @@ Deno.test("WgpsMessenger", async (test) => {
   const alfieDenoKv = await Deno.openKv("./test/alfie");
   const bettyDenoKv = await Deno.openKv("./test/betty");
 
-  const ALFIE_ENTRIES = 2;
-  const BETTY_ENTRIES = 2;
+  const ALFIE_ENTRIES = 100;
+  const BETTY_ENTRIES = 100;
 
   await test.step("sync", async () => {
     const [alfie, betty] = transportPairInMemory();
@@ -122,11 +114,8 @@ Deno.test("WgpsMessenger", async (test) => {
         authorisation: testSchemeAuthorisation,
         payload: testSchemePayload,
       },
-      getStoreDrivers: () => {
-        return {
-          entryDriver: alfieEntryDriver,
-          payloadDriver: alfiePayloadDriver,
-        };
+      getStore: () => {
+        return alfieStore;
       },
       interests: new Map([[
         {
@@ -233,11 +222,8 @@ Deno.test("WgpsMessenger", async (test) => {
         authorisation: testSchemeAuthorisation,
         payload: testSchemePayload,
       },
-      getStoreDrivers: () => {
-        return {
-          entryDriver: bettyEntryDriver,
-          payloadDriver: bettyPayloadDriver,
-        };
+      getStore: () => {
+        return bettyStore;
       },
       interests: new Map([[
         {
@@ -376,6 +362,8 @@ Deno.test("WgpsMessenger", async (test) => {
       actualSizeBetty += 1;
     }
 
+    console.log({ actualSizeAlfie, actualSizeBetty });
+
     assertEquals(actualSizeAlfie, alfieSize);
     assertEquals(actualSizeBetty, bettySize);
     assert(alfieSize === bettySize);
@@ -385,5 +373,5 @@ Deno.test("WgpsMessenger", async (test) => {
   alfieDenoKv.close();
   bettyDenoKv.close();
 
-  await emptyDir("./test");
+  //await emptyDir("./test");
 });

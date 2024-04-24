@@ -1,7 +1,7 @@
 import { Entry, FIFO } from "../../../deps.ts";
 import { WgpsMessageValidationError } from "../../errors.ts";
-import { StoreMap } from "../store_map.ts";
 import { onAsyncIterate } from "../util.ts";
+import { GetStoreFn } from "../wgps_messenger.ts";
 
 const CANCELLATION = Symbol("cancellation");
 
@@ -21,13 +21,13 @@ export class PayloadIngester<
   >();
 
   constructor(opts: {
-    storeMap: StoreMap<
+    getStore: GetStoreFn<
       Fingerprint,
       AuthorisationToken,
+      AuthorisationOpts,
       NamespaceId,
       SubspaceId,
-      PayloadDigest,
-      AuthorisationOpts
+      PayloadDigest
     >;
   }) {
     onAsyncIterate(this.events, (event) => {
@@ -37,7 +37,7 @@ export class PayloadIngester<
         this.currentIngestion.push(CANCELLATION);
         this.currentIngestion = new FIFO();
 
-        const store = opts.storeMap.get(event.entry.namespaceId);
+        const store = opts.getStore(event.entry.namespaceId);
 
         store.ingestPayload({
           path: event.entry.path,

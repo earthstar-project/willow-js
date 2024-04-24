@@ -17,6 +17,7 @@ import {
 } from "../../../../deps.ts";
 import { RadixTree } from "../prefix_iterators/radix_tree.ts";
 import { KvKey } from "../kv/types.ts";
+import { LinearStorage } from "../summarisable_storage/linear_summarisable_storage.ts";
 
 type EntryDriverMemoryOpts<
   NamespaceId,
@@ -69,10 +70,9 @@ export class EntryDriverMemory<
       createSummarisableStorage: (
         monoid: LiftingMonoid<[KvKey, Uint8Array], Fingerprint>,
       ) => {
-        return new Skiplist({
+        return new LinearStorage({
           monoid,
           kv: new KvDriverInMemory(),
-          logicalValueEq: equalsBytes,
         });
       },
       fingerprintScheme: this.opts.fingerprintScheme,
