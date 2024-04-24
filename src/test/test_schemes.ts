@@ -32,7 +32,6 @@ import {
 } from "../store/types.ts";
 import { PaiScheme } from "../wgps/pai/types.ts";
 import { x25519 } from "npm:@noble/curves/ed25519";
-import { encodePathWithSeparators } from "../store/storage/storage_3d/triple_storage.ts";
 import { isFragmentTriple } from "../wgps/pai/pai_finder.ts";
 
 // Namespace
@@ -383,6 +382,32 @@ export const testSchemePayload: PayloadScheme<ArrayBuffer> = {
   defaultDigest: new Uint8Array(32),
 };
 
+export function addBytes(a: Uint8Array, b: Uint8Array, length: number) {
+  if (
+    a.byteLength < length ||
+    b.byteLength < length
+  ) {
+    throw new Error("i'm not doing that");
+  }
+
+  const bytes = new Uint8Array(length);
+
+  let carried = 0;
+
+  for (let i = 0; i < length; i++) {
+    const byteA = a[a.byteLength - 1 - i];
+    const byteB = b[b.byteLength - 1 - i];
+
+    const added = carried + byteA + byteB;
+
+    carried = added >> 8;
+
+    bytes.set([added % 256], length - 1 - i);
+  }
+
+  return bytes;
+}
+
 export const testSchemeFingerprint: FingerprintScheme<
   TestNamespace,
   TestSubspace,
@@ -405,13 +430,7 @@ export const testSchemeFingerprint: FingerprintScheme<
     );
   },
   fingerprintCombine(a, b) {
-    const bytes = new Uint8Array(32);
-
-    for (let i = 0; i < 32; i++) {
-      bytes.set([a[i] ^ b[i]], i);
-    }
-
-    return bytes;
+    return addBytes(a, b, 32);
   },
   isEqual: (a, b) => {
     return orderBytes(a, b) === 0;
@@ -521,7 +540,7 @@ export const testSchemePai: PaiScheme<
 
       const pairOrTripleByte = 1;
       const namespaceEnc = testSchemeNamespace.encode(namespace);
-      const pathEncoded = encodePathWithSeparators(path);
+      const pathEncoded = encodePath(testSchemePath, path);
 
       const bytes = concat(
         new Uint8Array([pairOrTripleByte]),
@@ -540,7 +559,7 @@ export const testSchemePai: PaiScheme<
     const namespaceEnc = testSchemeNamespace.encode(namespace);
     const subspaceEnc = testSchemeSubspace.encode(subspace);
 
-    const pathEncoded = encodePathWithSeparators(path);
+    const pathEncoded = encodePath(testSchemePath, path);
 
     const bytes = concat(
       new Uint8Array([pairOrTripleByte]),
