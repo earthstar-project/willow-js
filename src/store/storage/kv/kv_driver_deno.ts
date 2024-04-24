@@ -79,6 +79,13 @@ export class KvDriverDeno implements KvDriver {
     }
 
     if (limit === undefined || limit > 0) {
+      if (
+        selector.start && selector.end &&
+        compareKeys(selector.start, selector.end) >= 0
+      ) {
+        return;
+      }
+
       const iter = this.kv.list<Value>(selector, {
         reverse: opts?.reverse,
         limit: limit,
