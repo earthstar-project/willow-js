@@ -7,6 +7,7 @@ import {
   Entry,
   isIncluded3d,
   isIncludedRange,
+  isPathPrefixed,
   OPEN_END,
   orderPath,
   orderTimestamp,
@@ -25,6 +26,7 @@ import { LiftingMonoid } from "../summarisable_storage/lifting_monoid.ts";
 import { SummarisableStorage } from "../summarisable_storage/types.ts";
 import { RangeOfInterest, Storage3d } from "./types.ts";
 import { WillowError } from "../../../errors.ts";
+import { KvKey } from "../kv/types.ts";
 
 export type TripleStorageOpts<
   NamespaceId,
@@ -35,9 +37,9 @@ export type TripleStorageOpts<
   namespace: NamespaceId;
   /** Creates a {@link SummarisableStorage} with a given ID, used for storing entries and their data. */
   createSummarisableStorage: (
-    monoid: LiftingMonoid<[Uint8Array, Uint8Array], Fingerprint>,
+    monoid: LiftingMonoid<[KvKey, Uint8Array], Fingerprint>,
     id: string,
-  ) => SummarisableStorage<Uint8Array, Uint8Array, Fingerprint>;
+  ) => SummarisableStorage<KvKey, Uint8Array, Fingerprint>;
   subspaceScheme: SubspaceScheme<SubspaceId>;
   payloadScheme: PayloadScheme<PayloadDigest>;
   pathScheme: PathScheme;
@@ -64,9 +66,9 @@ export class TripleStorage<
   > {
   private namespace: NamespaceId;
 
-  private ptsStorage: SummarisableStorage<Uint8Array, Uint8Array, Fingerprint>;
-  private sptStorage: SummarisableStorage<Uint8Array, Uint8Array, Fingerprint>;
-  private tspStorage: SummarisableStorage<Uint8Array, Uint8Array, Fingerprint>;
+  private ptsStorage: SummarisableStorage<KvKey, Uint8Array, Fingerprint>;
+  private sptStorage: SummarisableStorage<KvKey, Uint8Array, Fingerprint>;
+  private tspStorage: SummarisableStorage<KvKey, Uint8Array, Fingerprint>;
   private subspaceScheme: SubspaceScheme<SubspaceId>;
   private payloadScheme: PayloadScheme<PayloadDigest>;
   private fingerprintScheme: FingerprintScheme<
@@ -88,7 +90,7 @@ export class TripleStorage<
     this.namespace = opts.namespace;
 
     const lift = async (
-      key: Uint8Array,
+      key: KvKey,
       value: Uint8Array,
       order: "path" | "subspace" | "timestamp",
     ) => {
@@ -98,10 +100,9 @@ export class TripleStorage<
       );
 
       // Decode the key.
-      const { subspace, timestamp, path } = decodeEntryKey(
+      const { subspace, timestamp, path } = this.decodeEntryKey(
         key,
         order,
-        this.subspaceScheme,
       );
 
       const entry: Entry<NamespaceId, SubspaceId, PayloadDigest> = {
@@ -184,12 +185,11 @@ export class TripleStorage<
       authTokenDigest: PayloadDigest;
     },
   ): Promise<void> {
-    const keys = encodeEntryKeys(
+    const keys = this.encodeEntryKeys(
       {
         path,
         timestamp,
         subspace,
-        subspaceEncoding: this.subspaceScheme,
       },
     );
 
@@ -203,28 +203,27 @@ export class TripleStorage<
     );
 
     await Promise.all([
-      this.ptsStorage.insert(keys.pts, toStore),
-      this.sptStorage.insert(keys.spt, toStore),
-      this.tspStorage.insert(keys.tsp, toStore),
+      this.ptsStorage.insert(keys.pts!, toStore),
+      this.sptStorage.insert(keys.spt!, toStore),
+      this.tspStorage.insert(keys.tsp!, toStore),
     ]);
   }
 
   async remove(
     entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
   ): Promise<boolean> {
-    const keys = encodeEntryKeys(
+    const keys = this.encodeEntryKeys(
       {
         path: entry.path,
         timestamp: entry.timestamp,
         subspace: entry.subspaceId,
-        subspaceEncoding: this.subspaceScheme,
       },
     );
 
     const results = await Promise.all([
-      this.ptsStorage.remove(keys.pts),
-      this.tspStorage.remove(keys.tsp),
-      this.sptStorage.remove(keys.spt),
+      this.ptsStorage.remove(keys.pts!),
+      this.tspStorage.remove(keys.tsp!),
+      this.sptStorage.remove(keys.spt!),
     ]);
 
     return results[0];
@@ -233,11 +232,13 @@ export class TripleStorage<
   async summarise(
     range: Range3d<SubspaceId>,
   ): Promise<{ fingerprint: Fingerprint; size: number }> {
+    console.group("summarise", range);
+
     let fingerprint = this.fingerprintScheme.neutral;
     /** The size of the fingerprint. */
     let size = 0;
 
-    const { lowerBound, upperBound } = this.createTspBounds(range);
+    const { lowerBound, upperBound } = this.createBounds(range, "timestamp");
 
     const timeEntries = this.tspStorage.entries(
       lowerBound,
@@ -255,15 +256,19 @@ export class TripleStorage<
     /** The least included item we've run into.
      * This is going to be the lower bound of a summarise op we run when we detect a contiguous range of included entries.
      */
-    let leastIncluded: Uint8Array | undefined;
+    let leastIncluded: KvKey | undefined;
 
     /** Run this when we detect a contiguous range of included entries. */
-    const updateFingerprint = async (start: Uint8Array) => {
+    const updateFingerprint = async (start: KvKey) => {
+      console.group("update fingerprint");
+
       const { fingerprint: includedFp, size: includedSize } = await this
         .tspStorage.summarise(
           start,
           leastExcluded,
         );
+
+      console.log({ start, leastExcluded, includedSize });
 
       fingerprint = this.fingerprintScheme.fingerprintCombine(
         fingerprint,
@@ -272,17 +277,24 @@ export class TripleStorage<
 
       size += includedSize;
 
+      console.log({ size });
+
       // Prevent this from running again until we run into another included entry.
       leastIncluded = undefined;
+
+      console.groupEnd();
     };
 
     for await (const entry of timeEntries) {
+      console.log("-----------\n");
+
       // Decode the key.
-      const { timestamp, path, subspace } = decodeEntryKey(
+      const { timestamp, path, subspace } = this.decodeEntryKey(
         entry.key,
         "timestamp",
-        this.subspaceScheme,
       );
+
+      console.log({ timestamp, path, subspace });
 
       const isIncluded = isIncluded3d(
         this.subspaceScheme.order,
@@ -294,6 +306,8 @@ export class TripleStorage<
         },
       );
 
+      console.log({ isIncluded });
+
       // If it's not included, and we ran into an included item earlier,
       // that indicates the end of a contiguous range.
       // Recalculate the fingerprint!
@@ -304,6 +318,7 @@ export class TripleStorage<
 
         // This entry is now the least excluded entry we've run into.
         leastExcluded = entry.key;
+
         continue;
       }
 
@@ -311,6 +326,7 @@ export class TripleStorage<
 
       // This entry is part of a contiguous range of included entries,
       // and it's the least included key we've encountered so far.
+
       leastIncluded = entry.key;
     }
 
@@ -318,6 +334,8 @@ export class TripleStorage<
     if (leastIncluded) {
       await updateFingerprint(leastIncluded);
     }
+
+    console.groupEnd();
 
     return {
       fingerprint,
@@ -343,7 +361,7 @@ export class TripleStorage<
     let countUsed = 0;
     let sizeUsed = BigInt(0);
 
-    const { lowerBound, upperBound } = this.createTspBounds(range);
+    const { lowerBound, upperBound } = this.createBounds(range, "timestamp");
 
     let lowerBoundTime;
     let lowerBoundSubspace;
@@ -369,11 +387,14 @@ export class TripleStorage<
       );
 
       // Decode the key.
-      const { timestamp, path, subspace } = decodeEntryKey(
+      const { timestamp, path, subspace } = this.decodeEntryKey(
         entry.key,
         "timestamp",
-        this.subspaceScheme,
       );
+
+      if (!isPathPrefixed(areaOfInterest.area.pathPrefix, path)) {
+        continue;
+      }
 
       const isIncluded = isIncluded3d(
         this.subspaceScheme.order,
@@ -411,7 +432,7 @@ export class TripleStorage<
       countUsed = nextCountUsed;
       sizeUsed = nextSizeUsed;
 
-      if (!upperboundTime || timestamp > upperboundTime) {
+      if (upperboundTime === undefined || timestamp > upperboundTime) {
         if (timestamp === BigInt(2 ** 64 - 1)) {
           // TODO: account for the largest possible bigint.
           //upperboundTime = OPEN_END;
@@ -421,29 +442,32 @@ export class TripleStorage<
       }
 
       if (
-        !upperboundSubspace ||
-        this.subspaceScheme.order(subspace, upperboundSubspace) === 1
+        upperboundSubspace === undefined || upperboundSubspace &&
+          this.subspaceScheme.order(subspace, upperboundSubspace) === 1
       ) {
         upperboundSubspace = this.subspaceScheme.successor(subspace);
       }
 
-      if (!upperboundPath || orderPath(path, upperboundPath) === 1) {
+      if (
+        !upperboundPath === undefined ||
+        upperboundPath && orderPath(path, upperboundPath) === 1
+      ) {
         upperboundPath = successorPath(path, this.pathScheme);
       }
 
-      if (!lowerBoundTime || timestamp < lowerBoundTime) {
+      if (lowerBoundTime === undefined || timestamp < lowerBoundTime) {
         lowerBoundTime = timestamp;
       }
 
       if (
-        !lowerBoundSubspace ||
+        lowerBoundSubspace === undefined ||
         this.subspaceScheme.order(subspace, lowerBoundSubspace) === -1
       ) {
         lowerBoundSubspace = subspace;
       }
 
       if (
-        !lowerBoundPath || orderPath(path, lowerBoundPath) === -1
+        lowerBoundPath === undefined || orderPath(path, lowerBoundPath) === -1
       ) {
         lowerBoundPath = path;
       }
@@ -479,11 +503,10 @@ export class TripleStorage<
       ? this.ptsStorage
       : this.tspStorage;
 
-    const { lowerBound, upperBound } = order === "subspace"
-      ? this.createSptBounds(rangeOfInterest.range)
-      : order === "path"
-      ? this.createPtsBounds(rangeOfInterest.range)
-      : this.createTspBounds(rangeOfInterest.range);
+    const { lowerBound, upperBound } = this.createBounds(
+      rangeOfInterest.range,
+      order,
+    );
 
     let entriesYielded = 0;
     let payloadBytesYielded = BigInt(0);
@@ -499,10 +522,9 @@ export class TripleStorage<
       );
 
       // Decode the key.
-      const { subspace, timestamp, path } = decodeEntryKey(
+      const { subspace, timestamp, path } = this.decodeEntryKey(
         key,
         order,
-        this.subspaceScheme,
       );
 
       const allowAnySubspace = this.subspaceScheme.order(
@@ -731,204 +753,201 @@ export class TripleStorage<
     return true;
   }
 
-  private encodeKey(
-    doNotEscapeIdx: number,
-    ...parts: Uint8Array[]
-  ): Uint8Array {
-    const toConcat = [];
+  private createBounds(
+    range: Range3d<SubspaceId>,
+    order: "subspace" | "path" | "timestamp",
+  ): {
+    lowerBound: KvKey | undefined;
+    upperBound: KvKey | undefined;
+  } {
+    const lowerBounds = this.encodeEntryKeys({
+      subspace: range.subspaceRange.start,
+      path: range.pathRange.start,
+      timestamp: range.timeRange.start,
+    });
 
-    for (let i = 0; i < parts.length; i++) {
-      if (i === doNotEscapeIdx) {
-        toConcat.push(parts[i], new Uint8Array([0, 0]));
-        continue;
+    let upperBound = this.encodeEntryKeys({
+      subspace: range.subspaceRange.end !== OPEN_END
+        ? range.subspaceRange.end
+        : undefined,
+      path: range.pathRange.end !== OPEN_END ? range.pathRange.end : undefined,
+      timestamp: range.timeRange.end !== OPEN_END
+        ? range.timeRange.end
+        : undefined,
+    });
+
+    switch (order) {
+      case "subspace":
+        return {
+          lowerBound: lowerBounds.spt,
+          upperBound: upperBound.spt,
+        };
+
+      case "path":
+        return {
+          lowerBound: lowerBounds.pts,
+          upperBound: upperBound.pts,
+        };
+      case "timestamp":
+        return {
+          lowerBound: lowerBounds.tsp,
+          upperBound: upperBound.tsp,
+        };
+    }
+  }
+
+  /** Encodes the subspace, path, and time of an entry into three keys for three respective orderings.
+   */
+  encodeEntryKeys(
+    opts: {
+      subspace?: SubspaceId;
+      path?: Path;
+      timestamp?: bigint;
+    },
+  ): {
+    spt: KvKey | undefined;
+    pts: KvKey | undefined;
+    tsp: KvKey | undefined;
+  } {
+    const encodedSubspace = opts.subspace !== undefined
+      ? this.subspaceScheme.encode(opts.subspace)
+      : undefined;
+    const encodedPath = opts.path !== undefined
+      ? encodePathWithSeparators(opts.path)
+      : undefined;
+    const encodedTime = opts.timestamp !== undefined
+      ? bigintToBytes(opts.timestamp)
+      : undefined;
+
+    return {
+      spt: denseArr(encodedSubspace, encodedPath, encodedTime),
+      pts: denseArr(encodedPath, encodedTime, encodedSubspace),
+      tsp: denseArr(encodedTime, encodedSubspace, encodedPath),
+    };
+  }
+
+  /** Decodes a key back into subspace, path, and timestamp. */
+  decodeEntryKey(
+    encoded: KvKey,
+    order: "subspace" | "path" | "timestamp",
+  ): {
+    subspace: SubspaceId;
+    path: Path;
+    timestamp: bigint;
+  } {
+    let subspace: SubspaceId;
+    let timestamp: bigint;
+    let path: Path;
+
+    const fst = encoded[0] as Uint8Array;
+    const snd = encoded[1] as Uint8Array;
+    const thd = encoded[2] as Uint8Array;
+
+    switch (order) {
+      case "subspace": {
+        subspace = this.subspaceScheme.decode(fst);
+
+        path = decodePathWithSeparators(snd);
+
+        const dataView = new DataView(thd.buffer);
+        timestamp = dataView.getBigUint64(0);
+
+        break;
       }
+      case "path": {
+        path = decodePathWithSeparators(fst);
 
-      const escapedBytes = escapeBytes(parts[i]);
+        const dataView = new DataView(snd.buffer);
+        timestamp = dataView.getBigUint64(0);
 
-      toConcat.push(escapedBytes, new Uint8Array([0, 0]));
+        subspace = this.subspaceScheme.decode(thd);
+
+        break;
+      }
+      case "timestamp": {
+        const dataView = new DataView(fst.buffer);
+        timestamp = dataView.getBigUint64(0);
+
+        subspace = this.subspaceScheme.decode(snd);
+
+        path = decodePathWithSeparators(thd);
+      }
     }
-
-    return concat(...toConcat);
-  }
-
-  private createSptBounds(
-    range: Range3d<SubspaceId>,
-  ): {
-    lowerBound: Uint8Array | undefined;
-    upperBound: Uint8Array | undefined;
-  } {
-    const encSubspaceStart = this.subspaceScheme.encode(
-      range.subspaceRange.start,
-    );
-
-    if (range.subspaceRange.end === OPEN_END) {
-      return {
-        lowerBound: this.encodeKey(1, encSubspaceStart),
-        upperBound: undefined,
-      };
-    }
-
-    const encSubspaceEnd = this.subspaceScheme.encode(range.subspaceRange.end);
-
-    const encPathStart = encodePathWithSeparators(range.pathRange.start);
-
-    if (range.pathRange.end === OPEN_END) {
-      return {
-        lowerBound: this.encodeKey(1, encSubspaceStart, encPathStart),
-        upperBound: this.encodeKey(1, encSubspaceEnd),
-      };
-    }
-
-    const encPathEnd = encodePathWithSeparators(range.pathRange.end);
-
-    const encTimeStart = bigintToBytes(range.timeRange.start);
-
-    if (range.timeRange.end === OPEN_END) {
-      return {
-        lowerBound: this.encodeKey(
-          1,
-          encSubspaceStart,
-          encPathStart,
-          encTimeStart,
-        ),
-        upperBound: this.encodeKey(1, encSubspaceEnd, encPathEnd),
-      };
-    }
-
-    const encTimeEnd = bigintToBytes(range.timeRange.end);
 
     return {
-      lowerBound: this.encodeKey(
-        1,
-        encSubspaceStart,
-        encPathStart,
-        encTimeStart,
-      ),
-      upperBound: this.encodeKey(1, encSubspaceEnd, encPathEnd, encTimeEnd),
+      subspace,
+      path,
+      timestamp,
     };
   }
+}
 
-  private createPtsBounds(
-    range: Range3d<SubspaceId>,
-  ): {
-    lowerBound: Uint8Array | undefined;
-    upperBound: Uint8Array | undefined;
-  } {
-    const encPathStart = encodePathWithSeparators(range.pathRange.start);
+/** Encodes some values associated with an entry to a single value to be stored in KV. */
+export function encodeKvValue<PayloadDigest>(
+  {
+    authTokenDigest,
+    payloadDigest,
+    payloadLength,
+    payloadScheme,
+  }: {
+    authTokenDigest: PayloadDigest;
+    payloadDigest: PayloadDigest;
+    payloadLength: bigint;
+    payloadScheme: PayloadScheme<PayloadDigest>;
+  },
+): Uint8Array {
+  return concat(
+    bigintToBytes(payloadLength),
+    payloadScheme.encode(payloadDigest),
+    payloadScheme.encode(authTokenDigest),
+  );
+}
 
-    if (range.pathRange.end === OPEN_END) {
-      return {
-        lowerBound: this.encodeKey(0, encPathStart),
-        upperBound: undefined,
-      };
+export function decodeKvValue<PayloadDigest>(
+  encoded: Uint8Array,
+  payloadEncoding: EncodingScheme<PayloadDigest>,
+): {
+  payloadLength: bigint;
+  payloadHash: PayloadDigest;
+  authTokenHash: PayloadDigest;
+} {
+  const dataView = new DataView(encoded.buffer);
+
+  const payloadLength = dataView.getBigUint64(0);
+
+  const payloadHash = payloadEncoding.decode(
+    encoded.subarray(8),
+  );
+
+  const payloadHashLength = payloadEncoding.encodedLength(payloadHash);
+
+  const authTokenHash = payloadEncoding.decode(
+    encoded.subarray(8 + payloadHashLength),
+  );
+
+  return {
+    payloadLength,
+    payloadHash,
+    authTokenHash,
+  };
+}
+
+function denseArr<T>(...items: (T | undefined)[]): T[] | undefined {
+  const denseItems: T[] = [];
+
+  for (const item of items) {
+    if (item === undefined) {
+      break;
     }
 
-    const encPathEnd = encodePathWithSeparators(range.pathRange.end);
-
-    const encTimeStart = bigintToBytes(range.timeRange.start);
-
-    if (range.timeRange.end === OPEN_END) {
-      return {
-        lowerBound: this.encodeKey(
-          0,
-          encPathStart,
-          encTimeStart,
-        ),
-        upperBound: this.encodeKey(0, encPathEnd),
-      };
-    }
-
-    const encTimeEnd = bigintToBytes(range.timeRange.end);
-
-    const encSubspaceStart = this.subspaceScheme.encode(
-      range.subspaceRange.start,
-    );
-
-    if (range.subspaceRange.end === OPEN_END) {
-      return {
-        lowerBound: this.encodeKey(
-          0,
-          encPathStart,
-          encTimeStart,
-          encSubspaceStart,
-        ),
-        upperBound: this.encodeKey(0, encPathEnd, encTimeEnd),
-      };
-    }
-
-    const encSubspaceEnd = this.subspaceScheme.encode(range.subspaceRange.end);
-
-    return {
-      lowerBound: this.encodeKey(
-        0,
-        encPathStart,
-        encTimeStart,
-        encSubspaceStart,
-      ),
-      upperBound: this.encodeKey(0, encPathEnd, encTimeEnd, encSubspaceEnd),
-    };
+    denseItems.push(item);
   }
 
-  private createTspBounds(
-    range: Range3d<SubspaceId>,
-  ): {
-    lowerBound: Uint8Array | undefined;
-    upperBound: Uint8Array | undefined;
-  } {
-    const encTimeStart = bigintToBytes(range.timeRange.start);
-
-    if (range.timeRange.end === OPEN_END) {
-      return {
-        lowerBound: this.encodeKey(2, encTimeStart),
-        upperBound: undefined,
-      };
-    }
-
-    const encTimeEnd = bigintToBytes(range.timeRange.end);
-
-    const encSubspaceStart = this.subspaceScheme.encode(
-      range.subspaceRange.start,
-    );
-
-    if (range.subspaceRange.end === OPEN_END) {
-      return {
-        lowerBound: this.encodeKey(
-          2,
-          encTimeStart,
-          encSubspaceStart,
-        ),
-        upperBound: this.encodeKey(2, encTimeEnd),
-      };
-    }
-
-    const encSubspaceEnd = this.subspaceScheme.encode(range.subspaceRange.end);
-
-    const encPathStart = encodePathWithSeparators(range.pathRange.start);
-
-    if (range.pathRange.end === OPEN_END) {
-      return {
-        lowerBound: this.encodeKey(
-          2,
-          encTimeStart,
-          encSubspaceStart,
-          encPathStart,
-        ),
-        upperBound: this.encodeKey(2, encTimeEnd, encSubspaceEnd),
-      };
-    }
-
-    const encPathEnd = encodePathWithSeparators(range.pathRange.end);
-
-    return {
-      lowerBound: this.encodeKey(
-        2,
-        encTimeStart,
-        encSubspaceStart,
-        encPathStart,
-      ),
-      upperBound: this.encodeKey(2, encTimeEnd, encSubspaceEnd, encPathEnd),
-    };
+  if (denseItems.length === 0) {
+    return undefined;
   }
+
+  return denseItems;
 }
 
 /** Escape all 0 bytes to 0x02, and encode separators as 0x01.
@@ -998,228 +1017,4 @@ export function decodePathWithSeparators(
   }
 
   return path;
-}
-
-/** Escape all 0 bytes as 0x01. */
-export function escapeBytes(bytes: Uint8Array): Uint8Array {
-  const newBytes: number[] = [];
-
-  for (const byte of bytes) {
-    if (byte !== 0) {
-      newBytes.push(byte);
-      continue;
-    }
-
-    newBytes.push(0, 1);
-  }
-
-  return new Uint8Array(newBytes);
-}
-
-/** Unescape all 0x01 back to 0x0. */
-export function unescapeBytes(escaped: Uint8Array): Uint8Array {
-  let previousWasZero = false;
-
-  const escapedBytes = [];
-
-  for (const byte of escaped) {
-    if (previousWasZero && byte === 1) {
-      escapedBytes.push(0);
-      previousWasZero = false;
-      continue;
-    }
-
-    if (byte === 0) {
-      previousWasZero = true;
-      continue;
-    }
-
-    previousWasZero = false;
-    escapedBytes.push(byte);
-  }
-
-  return new Uint8Array(escapedBytes);
-}
-
-/** Join all the parts of a key (which are presumed to be escaped and contain no 0x0 bytes) with a 0x00 separator between them. */
-export function joinKey(
-  ...parts: Uint8Array[]
-): Uint8Array {
-  const newParts = [];
-
-  for (const part of parts) {
-    newParts.push(part, new Uint8Array([0, 0]));
-  }
-
-  return concat(...newParts);
-}
-
-/** Split all the semantic parts of a key (subspace, path, time) out of a key. Returns them in the same order as they are in the key. */
-export function splitKey(
-  key: Uint8Array,
-): [Uint8Array, Uint8Array, Uint8Array] {
-  const parts = [];
-
-  let previousWasZero = false;
-
-  let currentPartBytes: number[] = [];
-
-  for (const byte of key) {
-    if (previousWasZero && byte === 0) {
-      parts.push(new Uint8Array(currentPartBytes));
-      currentPartBytes = [];
-      previousWasZero = false;
-      continue;
-    }
-
-    if (!previousWasZero && byte === 0) {
-      previousWasZero = true;
-      continue;
-    }
-
-    if (previousWasZero && byte !== 0) {
-      currentPartBytes.push(0);
-    }
-
-    previousWasZero = false;
-
-    currentPartBytes.push(byte);
-  }
-
-  return [parts[0], parts[1], parts[2]];
-}
-
-/** Encodes the subspace, path, and time of an entry into three keys for three respective orderings.
- */
-export function encodeEntryKeys<SubspacePublicKey>(
-  opts: {
-    path: Path;
-    timestamp: bigint;
-    subspace: SubspacePublicKey;
-    subspaceEncoding: EncodingScheme<SubspacePublicKey>;
-  },
-): {
-  spt: Uint8Array;
-  pts: Uint8Array;
-  tsp: Uint8Array;
-} {
-  const escapedSubspace = escapeBytes(
-    opts.subspaceEncoding.encode(opts.subspace),
-  );
-  const escapedPath = encodePathWithSeparators(opts.path);
-  const escapedTime = escapeBytes(bigintToBytes(opts.timestamp));
-
-  const sptBytes = joinKey(escapedSubspace, escapedPath, escapedTime);
-  const ptsBytes = joinKey(escapedPath, escapedTime, escapedSubspace);
-  const tspBytes = joinKey(escapedTime, escapedSubspace, escapedPath);
-
-  return {
-    spt: sptBytes,
-    pts: ptsBytes,
-    tsp: tspBytes,
-  };
-}
-
-/** Decodes a key back into subspace, path, and timestamp. */
-export function decodeEntryKey<SubspacePublicKey>(
-  encoded: Uint8Array,
-  order: "subspace" | "path" | "timestamp",
-  subspaceEncoding: EncodingScheme<SubspacePublicKey>,
-): {
-  subspace: SubspacePublicKey;
-  path: Path;
-  timestamp: bigint;
-} {
-  let subspace: SubspacePublicKey;
-  let timestamp: bigint;
-  let path: Path;
-
-  const [fst, snd, thd] = splitKey(encoded);
-
-  switch (order) {
-    case "subspace": {
-      subspace = subspaceEncoding.decode(unescapeBytes(fst));
-
-      path = decodePathWithSeparators(snd);
-
-      const dataView = new DataView(unescapeBytes(thd).buffer);
-      timestamp = dataView.getBigUint64(0);
-
-      break;
-    }
-    case "path": {
-      path = decodePathWithSeparators(fst);
-
-      const dataView = new DataView(unescapeBytes(snd).buffer);
-      timestamp = dataView.getBigUint64(0);
-
-      subspace = subspaceEncoding.decode(unescapeBytes(thd));
-
-      break;
-    }
-    case "timestamp": {
-      const dataView = new DataView(unescapeBytes(fst).buffer);
-      timestamp = dataView.getBigUint64(0);
-
-      subspace = subspaceEncoding.decode(unescapeBytes(snd));
-
-      path = decodePathWithSeparators(thd);
-    }
-  }
-
-  return {
-    subspace,
-    path,
-    timestamp,
-  };
-}
-
-/** Encodes some values associated with an entry to a single value to be stored in KV. */
-export function encodeKvValue<PayloadDigest>(
-  {
-    authTokenDigest,
-    payloadDigest,
-    payloadLength,
-    payloadScheme,
-  }: {
-    authTokenDigest: PayloadDigest;
-    payloadDigest: PayloadDigest;
-    payloadLength: bigint;
-    payloadScheme: PayloadScheme<PayloadDigest>;
-  },
-): Uint8Array {
-  return concat(
-    bigintToBytes(payloadLength),
-    payloadScheme.encode(payloadDigest),
-    payloadScheme.encode(authTokenDigest),
-  );
-}
-
-export function decodeKvValue<PayloadDigest>(
-  encoded: Uint8Array,
-  payloadEncoding: EncodingScheme<PayloadDigest>,
-): {
-  payloadLength: bigint;
-  payloadHash: PayloadDigest;
-  authTokenHash: PayloadDigest;
-} {
-  const dataView = new DataView(encoded.buffer);
-
-  const payloadLength = dataView.getBigUint64(0);
-
-  const payloadHash = payloadEncoding.decode(
-    encoded.subarray(8),
-  );
-
-  const payloadHashLength = payloadEncoding.encodedLength(payloadHash);
-
-  const authTokenHash = payloadEncoding.decode(
-    encoded.subarray(8 + payloadHashLength),
-  );
-
-  return {
-    payloadLength,
-    payloadHash,
-    authTokenHash,
-  };
 }
