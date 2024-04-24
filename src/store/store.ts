@@ -280,7 +280,7 @@ export class Store<
     // Check for collisions with stored entries
 
     for await (
-      const { entry: otherEntry, authTokenHash: otherAuthTokenDigest } of this
+      const { entry: otherEntry } of this
         .storage.query(
           {
             range: {
