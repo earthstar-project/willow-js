@@ -1,4 +1,7 @@
-import { assertEquals } from "https://deno.land/std@0.202.0/assert/mod.ts";
+import {
+  assert,
+  assertEquals,
+} from "https://deno.land/std@0.202.0/assert/mod.ts";
 import { transportPairInMemory } from "./transports/in_memory.ts";
 import { WgpsMessenger } from "./wgps_messenger.ts";
 import {
@@ -22,12 +25,14 @@ import {
   defaultRange3d,
   encodeBase32,
   OPEN_END,
+  Range3d,
 } from "../../deps.ts";
 import { Store } from "../store/store.ts";
 import { PayloadDriverFilesystem } from "../store/storage/payload_drivers/filesystem.ts";
 import { EntryDriverKvStore } from "../store/storage/entry_drivers/kv_store.ts";
 import { KvDriverDeno } from "../store/storage/kv/kv_driver_deno.ts";
 import { emptyDir } from "https://deno.land/std@0.202.0/fs/empty_dir.ts";
+import { EntryDriverMemory } from "../store/storage/entry_drivers/memory.ts";
 
 Deno.test("WgpsMessenger", async (test) => {
   const alfieDenoKv = await Deno.openKv("./test/alfie");
@@ -47,6 +52,7 @@ Deno.test("WgpsMessenger", async (test) => {
       "./test/alfie_payloads",
       testSchemePayload,
     );
+    /*
     const alfieEntryDriver = new EntryDriverKvStore({
       namespaceScheme: testSchemeNamespace,
       fingerprintScheme: testSchemeFingerprint,
@@ -57,6 +63,17 @@ Deno.test("WgpsMessenger", async (test) => {
         return alfiePayloadDriver.length(digest);
       },
       kvDriver: new KvDriverDeno(alfieDenoKv),
+    });
+    */
+
+    const alfieEntryDriver = new EntryDriverMemory({
+      fingerprintScheme: testSchemeFingerprint,
+      pathScheme: testSchemePath,
+      payloadScheme: testSchemePayload,
+      subspaceScheme: testSchemeSubspace,
+      getPayloadLength: (digest) => {
+        return alfiePayloadDriver.length(digest);
+      },
     });
 
     const alfieStore = new Store({
@@ -76,19 +93,15 @@ Deno.test("WgpsMessenger", async (test) => {
     });
 
     for (let i = 0; i < ALFIE_ENTRIES; i++) {
-      const res = await alfieStore.set({
+      await alfieStore.set({
         subspace: TestSubspace.Gemma,
         payload: new TextEncoder().encode(`Originated from Alfie! (${i})`),
         path: [
           new Uint8Array([1]),
           new Uint8Array([2]),
-          crypto.getRandomValues(new Uint8Array(8)),
+          new Uint8Array([i, i + 1, i + 2, i + 3]),
         ],
       }, TestSubspace.Gemma);
-
-      if (res.kind === "success") {
-        console.log(encodeBase32(new Uint8Array(res.entry.payloadDigest)));
-      }
     }
 
     const messengerAlfie = new WgpsMessenger({
@@ -147,6 +160,8 @@ Deno.test("WgpsMessenger", async (test) => {
       "./test/betty_payloads",
       testSchemePayload,
     );
+
+    /*
     const bettyEntryDriver = new EntryDriverKvStore({
       namespaceScheme: testSchemeNamespace,
       fingerprintScheme: testSchemeFingerprint,
@@ -158,15 +173,24 @@ Deno.test("WgpsMessenger", async (test) => {
       },
       kvDriver: new KvDriverDeno(bettyDenoKv),
     });
+    */
+
+    const bettyEntryDriver = new EntryDriverMemory({
+      fingerprintScheme: testSchemeFingerprint,
+      pathScheme: testSchemePath,
+      payloadScheme: testSchemePayload,
+      subspaceScheme: testSchemeSubspace,
+      getPayloadLength: (digest) => {
+        return bettyPayloadDriver.length(digest);
+      },
+    });
 
     const bettyStore = new Store({
       namespace: TestNamespace.Family,
       schemes: {
         namespace: testSchemeNamespace,
-
         path: testSchemePath,
         subspace: testSchemeSubspace,
-
         fingerprint: testSchemeFingerprint,
         authorisation: testSchemeAuthorisation,
         payload: testSchemePayload,
@@ -182,7 +206,7 @@ Deno.test("WgpsMessenger", async (test) => {
         path: [
           new Uint8Array([1]),
           new Uint8Array([2]),
-          crypto.getRandomValues(new Uint8Array(8)),
+          new Uint8Array([i]),
         ],
       }, TestSubspace.Gemma);
 
@@ -293,14 +317,25 @@ Deno.test("WgpsMessenger", async (test) => {
 
     await delay(1000);
 
+    const range: Range3d<TestSubspace> = {
+      subspaceRange: {
+        start: TestSubspace.Gemma,
+        end: OPEN_END,
+      },
+      pathRange: {
+        start: [],
+        end: OPEN_END,
+      },
+      timeRange: {
+        start: 0n,
+        end: OPEN_END,
+      },
+    };
+
     const { fingerprint: alfieFp, size: alfieSize } = await alfieStore
-      .summarise(
-        defaultRange3d(TestSubspace.Alfie),
-      );
+      .summarise(range);
     const { fingerprint: bettyFp, size: bettySize } = await bettyStore
-      .summarise(
-        defaultRange3d(TestSubspace.Alfie),
-      );
+      .summarise(range);
 
     console.log({ alfieSize, bettySize });
 
@@ -310,7 +345,7 @@ Deno.test("WgpsMessenger", async (test) => {
     for await (
       const _ of alfieStore.query({
         area: {
-          includedSubspaceId: ANY_SUBSPACE,
+          includedSubspaceId: TestSubspace.Gemma,
           pathPrefix: [],
           timeRange: {
             start: 0n,
@@ -327,7 +362,7 @@ Deno.test("WgpsMessenger", async (test) => {
     for await (
       const _ of bettyStore.query({
         area: {
-          includedSubspaceId: ANY_SUBSPACE,
+          includedSubspaceId: TestSubspace.Gemma,
           pathPrefix: [],
           timeRange: {
             start: 0n,
@@ -341,14 +376,14 @@ Deno.test("WgpsMessenger", async (test) => {
       actualSizeBetty += 1;
     }
 
-    console.log({ actualSizeAlfie, actualSizeBetty });
-
-    // assertEquals(alfieFp, bettyFp);
-    assertEquals(alfieSize, bettySize);
+    assertEquals(actualSizeAlfie, alfieSize);
+    assertEquals(actualSizeBetty, bettySize);
+    assert(alfieSize === bettySize);
+    assertEquals(alfieFp, bettyFp);
   });
 
   alfieDenoKv.close();
   bettyDenoKv.close();
 
-  // await emptyDir("./test");
+  await emptyDir("./test");
 });
