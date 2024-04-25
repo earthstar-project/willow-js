@@ -172,6 +172,8 @@ export class WgpsMessenger<
   PayloadDigest,
   AuthorisationOpts,
 > {
+  private closed = false;
+
   private interests: Map<
     ReadAuthorisation<ReadCapability, SubspaceCapability>,
     AreaOfInterest<SubspaceId>[]
@@ -659,6 +661,8 @@ export class WgpsMessenger<
     // Begin handling decoded messages
     onAsyncIterate(decodedMessages, async (message) => {
       await this.handleMessage(message);
+    }, () => {
+      this.close();
     });
 
     // Set private variables for commitment scheme
@@ -940,7 +944,7 @@ export class WgpsMessenger<
     );
   }
 
-  setupData() {
+  private setupData() {
     onAsyncIterate(this.dataSender.messages(), (msg) => {
       this.encoder.encode(msg);
     });
@@ -1456,5 +1460,10 @@ export class WgpsMessenger<
       default:
         throw new WgpsMessageValidationError("Unhandled message type");
     }
+  }
+
+  close() {
+    this.closed = true;
+    this.transport.close();
   }
 }

@@ -368,6 +368,9 @@ Deno.test("WgpsMessenger", async (test) => {
     assertEquals(actualSizeBetty, bettySize);
     assert(alfieSize === bettySize);
     assertEquals(alfieFp, bettyFp);
+
+    messengerAlfie.close();
+    messengerBetty.close();
   });
 
   alfieDenoKv.close();
