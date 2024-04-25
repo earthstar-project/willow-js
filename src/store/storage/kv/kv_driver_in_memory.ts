@@ -233,9 +233,8 @@ export class KvDriverInMemory implements KvDriver {
       const prefix = opts.prefix ?? <KvKey> <unknown> [];
       const predicate = (k: KvKey) => {
         return (compareKeys(k, prefix) >= 0) &&
-        // return (isFirstKeyPrefixOfSecondKey(prefix, k)) &&
           (opts.start ? (compareKeys(k, opts.start) >= 0) : true);
-      };// FIXME this predicate is not monotone
+      };
 
       let node = this.tree.findLeastMatching(predicate);
       while (

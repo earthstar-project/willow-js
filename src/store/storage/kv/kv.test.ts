@@ -900,3 +900,261 @@ Deno.test({
     }
   },
 });
+
+Deno.test({
+  name: "Regression IndexDB 1",
+  async fn() {
+    const ops = [
+      {
+        "key": 0,
+        "value": 5,
+      },
+      {
+        "key": 6,
+      },
+      {
+        "key": 4,
+        "value": 8,
+      },
+      {
+        "clear": {
+          "start": [
+            3,
+          ],
+          "prefix": [
+            4,
+          ],
+        },
+      },
+      {
+        "key": 6,
+        "value": 3,
+      },
+      {
+        "key": 3,
+      },
+    ];
+
+    const queries = [{
+      key: 2,
+    }];
+
+    const indexDbKv = new KvDriverIndexedDB();
+    await runTestCase(ops, queries, indexDbKv);
+  },
+});
+
+Deno.test({
+  name: "Regression IndexDB 2",
+  async fn() {
+    const ops = [
+      {
+        "key": 6,
+        "value": 6,
+      },
+    ];
+
+    const queries = [
+      {
+        "selector": {},
+        "opts": {
+          "limit": 0,
+        },
+      },
+    ];
+
+    const indexDbKv = new KvDriverIndexedDB();
+    await runTestCase(ops, queries, indexDbKv);
+  },
+});
+
+Deno.test({
+  name: "Regression IndexDB 3",
+  async fn() {
+    const ops = [
+      {
+        "key": 9,
+      },
+      {
+        "clear": {
+          "end": [
+            7,
+          ],
+          "prefix": [
+            15,
+          ],
+        },
+      },
+      {
+        "clear": {
+          "start": [
+            0,
+          ],
+          "end": [
+            6,
+          ],
+          "prefix": [
+            1,
+          ],
+        },
+      },
+      {
+        "key": 8,
+        "value": 5,
+      },
+      {
+        "clear": {
+          "start": [
+            5,
+          ],
+          "end": [
+            7,
+          ],
+          "prefix": [
+            11,
+          ],
+        },
+      },
+      {
+        "key": 2,
+        "value": 0,
+      },
+    ];
+
+    const queries = [
+      {
+        "selector": {
+          "start": [
+            5,
+          ],
+          "end": [
+            13,
+          ],
+          "prefix": [
+            11,
+          ],
+        },
+        "opts": {
+          "reverse": true,
+          "limit": 14,
+        },
+      },
+    ];
+
+    const indexDbKv = new KvDriverIndexedDB();
+    await runTestCase(ops, queries, indexDbKv);
+  },
+});
+
+Deno.test({
+  name: "Regression IndexDB 4",
+  async fn() {
+    const ops = [
+      {
+        "clear": {
+          "start": [
+            12,
+          ],
+          "prefix": [
+            2,
+          ],
+        },
+      },
+      {
+        "key": 4,
+      },
+      {
+        "key": 0,
+      },
+      {
+        "clear": {
+          "start": [
+            12,
+          ],
+          "prefix": [
+            3,
+          ],
+        },
+      },
+      {
+        "key": 8,
+      },
+      {
+        "clear": {
+          "start": [
+            11,
+          ],
+          "end": [
+            12,
+          ],
+          "prefix": [
+            15,
+          ],
+        },
+      },
+    ];
+
+    const queries = [
+      {
+        "selector": {
+          "start": [
+            7,
+          ],
+        },
+        "opts": {
+          "reverse": true,
+        },
+      },
+    ];
+
+    const indexDbKv = new KvDriverIndexedDB();
+    await runTestCase(ops, queries, indexDbKv);
+  },
+});
+
+Deno.test({
+  name: "Random Tests IndexDB",
+  async fn() {
+    let numKeys = 8;
+    let iterations = 50;
+
+    for (let i = 0; i < iterations; i++) {
+      for (let numOps = 5; numOps < 16; numOps++) {
+        const ops: Operation<number, number>[] = [];
+        for (let opNr = 0; opNr < numOps; opNr++) {
+          ops.push(randomOperation(numKeys));
+        }
+
+        const queries: Query<number>[] = [];
+        for (let summariseNr = 0; summariseNr < 8; summariseNr++) {
+          queries.push(randomQuery(numKeys));
+        }
+
+        const idbKv = new KvDriverIndexedDB();
+        await runTestCase(ops, queries, idbKv);
+
+        await idbKv.clear();
+      }
+    }
+
+    numKeys = 16;
+    iterations = 50;
+
+    for (let i = 0; i < iterations; i++) {
+      for (let numOps = 5; numOps < 40; numOps++) {
+        const ops: Operation<number, number>[] = [];
+        for (let opNr = 0; opNr < numOps; opNr++) {
+          ops.push(randomOperation(numKeys));
+        }
+
+        const queries: Query<number>[] = [];
+        for (let summariseNr = 0; summariseNr < 8; summariseNr++) {
+          queries.push(randomQuery(numKeys));
+        }
+
+        const idbKv = new KvDriverIndexedDB();
+        await runTestCase(ops, queries, idbKv);
+      }
+    }
+  },
+});
