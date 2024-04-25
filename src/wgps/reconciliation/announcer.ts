@@ -46,6 +46,7 @@ type AnnouncementPack<
 };
 
 export class Announcer<
+  Prefingerprint,
   Fingerprint,
   AuthorisationToken,
   StaticToken,
@@ -125,6 +126,7 @@ export class Announcer<
       PayloadDigest,
       AuthorisationOpts,
       AuthorisationToken,
+      Prefingerprint,
       Fingerprint
     >;
     namespace: NamespaceId;

@@ -7,6 +7,7 @@ export class ReconcilerMap<
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
+  Prefingerprint,
   Fingerprint,
 > {
   private map = new Map<
@@ -21,6 +22,7 @@ export class ReconcilerMap<
         PayloadDigest,
         AuthorisationOpts,
         AuthorisationToken,
+        Prefingerprint,
         Fingerprint
       >
     >
@@ -35,6 +37,7 @@ export class ReconcilerMap<
       PayloadDigest,
       AuthorisationOpts,
       AuthorisationToken,
+      Prefingerprint,
       Fingerprint
     >,
   ) {
@@ -53,6 +56,7 @@ export class ReconcilerMap<
         PayloadDigest,
         AuthorisationOpts,
         AuthorisationToken,
+        Prefingerprint,
         Fingerprint
       >
     >();

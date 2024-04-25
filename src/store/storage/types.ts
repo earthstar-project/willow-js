@@ -35,13 +35,13 @@ export interface EntryDriver<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
-  Fingerprint,
+  Prefingerprint,
 > {
   makeStorage: (namespace: NamespaceId) => Storage3d<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
-    Fingerprint
+    Prefingerprint
   >;
   /** Helps a Store recover from unexpected shutdowns mid-write. */
   writeAheadFlag: WriteAheadFlag<

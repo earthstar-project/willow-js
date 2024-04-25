@@ -473,6 +473,7 @@ export type SyncSchemes<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Prefingerprint,
   Fingerprint,
   AuthorisationToken,
   StaticToken,
@@ -524,6 +525,7 @@ export type SyncSchemes<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
+    Prefingerprint,
     Fingerprint
   >;
 };

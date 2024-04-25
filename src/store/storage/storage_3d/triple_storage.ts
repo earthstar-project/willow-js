@@ -32,14 +32,15 @@ export type TripleStorageOpts<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
+  Prefingerprint,
   Fingerprint,
 > = {
   namespace: NamespaceId;
   /** Creates a {@link SummarisableStorage} with a given ID, used for storing entries and their data. */
   createSummarisableStorage: (
-    monoid: LiftingMonoid<[KvKey, Uint8Array], Fingerprint>,
+    monoid: LiftingMonoid<[KvKey, Uint8Array], Prefingerprint>,
     id: string,
-  ) => SummarisableStorage<KvKey, Uint8Array, Fingerprint>;
+  ) => SummarisableStorage<KvKey, Uint8Array, Prefingerprint>;
   subspaceScheme: SubspaceScheme<SubspaceId>;
   payloadScheme: PayloadScheme<PayloadDigest>;
   pathScheme: PathScheme;
@@ -47,6 +48,7 @@ export type TripleStorageOpts<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
+    Prefingerprint,
     Fingerprint
   >;
   getPayloadLength: (digest: PayloadDigest) => Promise<bigint>;
@@ -56,25 +58,27 @@ export class TripleStorage<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
+  Prefingerprint,
   Fingerprint,
 > implements
   Storage3d<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
-    Fingerprint
+    Prefingerprint
   > {
   private namespace: NamespaceId;
 
-  private ptsStorage: SummarisableStorage<KvKey, Uint8Array, Fingerprint>;
-  private sptStorage: SummarisableStorage<KvKey, Uint8Array, Fingerprint>;
-  private tspStorage: SummarisableStorage<KvKey, Uint8Array, Fingerprint>;
+  private ptsStorage: SummarisableStorage<KvKey, Uint8Array, Prefingerprint>;
+  private sptStorage: SummarisableStorage<KvKey, Uint8Array, Prefingerprint>;
+  private tspStorage: SummarisableStorage<KvKey, Uint8Array, Prefingerprint>;
   private subspaceScheme: SubspaceScheme<SubspaceId>;
   private payloadScheme: PayloadScheme<PayloadDigest>;
   private fingerprintScheme: FingerprintScheme<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
+    Prefingerprint,
     Fingerprint
   >;
   private pathScheme: PathScheme;
@@ -84,6 +88,7 @@ export class TripleStorage<
       NamespaceId,
       SubspaceId,
       PayloadDigest,
+      Prefingerprint,
       Fingerprint
     >,
   ) {
@@ -231,10 +236,8 @@ export class TripleStorage<
 
   async summarise(
     range: Range3d<SubspaceId>,
-  ): Promise<{ fingerprint: Fingerprint; size: number }> {
-    console.group("summarise", range);
-
-    let fingerprint = this.fingerprintScheme.neutral;
+  ): Promise<{ fingerprint: Prefingerprint; size: number }> {
+    let prefingerprint = this.fingerprintScheme.neutral;
     /** The size of the fingerprint. */
     let size = 0;
 
@@ -260,41 +263,29 @@ export class TripleStorage<
 
     /** Run this when we detect a contiguous range of included entries. */
     const updateFingerprint = async (start: KvKey) => {
-      console.group("update fingerprint");
-
       const { fingerprint: includedFp, size: includedSize } = await this
         .tspStorage.summarise(
           start,
           leastExcluded,
         );
 
-      console.log({ start, leastExcluded, includedSize });
-
-      fingerprint = this.fingerprintScheme.fingerprintCombine(
-        fingerprint,
+      prefingerprint = this.fingerprintScheme.fingerprintCombine(
+        prefingerprint,
         includedFp,
       );
 
       size += includedSize;
 
-      console.log({ size });
-
       // Prevent this from running again until we run into another included entry.
       leastIncluded = undefined;
-
-      console.groupEnd();
     };
 
     for await (const entry of timeEntries) {
-      console.log("-----------\n");
-
       // Decode the key.
       const { timestamp, path, subspace } = this.decodeEntryKey(
         entry.key,
         "timestamp",
       );
-
-      console.log({ timestamp, path, subspace });
 
       const isIncluded = isIncluded3d(
         this.subspaceScheme.order,
@@ -305,8 +296,6 @@ export class TripleStorage<
           subspace,
         },
       );
-
-      console.log({ isIncluded });
 
       // If it's not included, and we ran into an included item earlier,
       // that indicates the end of a contiguous range.
@@ -335,10 +324,8 @@ export class TripleStorage<
       await updateFingerprint(leastIncluded);
     }
 
-    console.groupEnd();
-
     return {
-      fingerprint,
+      fingerprint: prefingerprint,
       size,
     };
   }

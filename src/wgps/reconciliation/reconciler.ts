@@ -11,6 +11,7 @@ import { FingerprintScheme, SubspaceScheme } from "../../store/types.ts";
 import { IS_ALFIE, SyncRole } from "../types.ts";
 
 export type ReconcilerOpts<
+  Prefingerprint,
   Fingerprint,
   AuthorisationToken,
   NamespaceId,
@@ -24,6 +25,7 @@ export type ReconcilerOpts<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
+    Prefingerprint,
     Fingerprint
   >;
   namespace: NamespaceId;
@@ -35,6 +37,7 @@ export type ReconcilerOpts<
     PayloadDigest,
     AuthorisationOpts,
     AuthorisationToken,
+    Prefingerprint,
     Fingerprint
   >;
 };
@@ -47,6 +50,7 @@ export class Reconciler<
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
+  Prefingerprint,
   Fingerprint,
 > {
   private subspaceScheme: SubspaceScheme<SubspaceId>;
@@ -54,6 +58,7 @@ export class Reconciler<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
+    Prefingerprint,
     Fingerprint
   >;
 
@@ -63,6 +68,7 @@ export class Reconciler<
     PayloadDigest,
     AuthorisationOpts,
     AuthorisationToken,
+    Prefingerprint,
     Fingerprint
   >;
 
@@ -80,6 +86,7 @@ export class Reconciler<
 
   constructor(
     opts: ReconcilerOpts<
+      Prefingerprint,
       Fingerprint,
       AuthorisationToken,
       NamespaceId,
@@ -129,7 +136,11 @@ export class Reconciler<
     // Initialise sync with that first range.
     const { fingerprint } = await this.store.summarise(intersection);
 
-    this.fingerprintQueue.push({ range: intersection, fingerprint });
+    const finalised = await this.fingerprintScheme.fingerprintFinalise(
+      fingerprint,
+    );
+
+    this.fingerprintQueue.push({ range: intersection, fingerprint: finalised });
   }
 
   async respond(
@@ -140,7 +151,10 @@ export class Reconciler<
       range,
     );
 
-    if (this.fingerprintScheme.isEqual(fingerprint, fingerprintOurs)) {
+    const fingerprintOursFinal = await this.fingerprintScheme
+      .fingerprintFinalise(fingerprintOurs);
+
+    if (this.fingerprintScheme.isEqual(fingerprint, fingerprintOursFinal)) {
       this.announceQueue.push({
         range,
         count: 0,
@@ -160,16 +174,24 @@ export class Reconciler<
       const { fingerprint: fingerprintLeft } = await this.store
         .summarise(left);
 
+      const leftFinal = await this.fingerprintScheme.fingerprintFinalise(
+        fingerprintLeft,
+      );
+
       this.fingerprintQueue.push({
-        fingerprint: fingerprintLeft,
+        fingerprint: leftFinal,
         range: left,
       });
 
       const { fingerprint: fingerprintRight } = await this.store
         .summarise(right);
 
+      const rightFinal = await this.fingerprintScheme.fingerprintFinalise(
+        fingerprintRight,
+      );
+
       this.fingerprintQueue.push({
-        fingerprint: fingerprintRight,
+        fingerprint: rightFinal,
         range: right,
       });
     }

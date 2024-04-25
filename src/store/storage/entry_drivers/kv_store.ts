@@ -25,6 +25,7 @@ type EntryDriverKvOpts<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
+  Prefingerprint,
   Fingerprint,
 > = {
   kvDriver: KvDriver;
@@ -36,6 +37,7 @@ type EntryDriverKvOpts<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
+    Prefingerprint,
     Fingerprint
   >;
   getPayloadLength: (digest: PayloadDigest) => Promise<bigint>;
@@ -46,13 +48,14 @@ export class EntryDriverKvStore<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
+  Prefingerprint,
   Fingerprint,
 > implements
   EntryDriver<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
-    Fingerprint
+    Prefingerprint
   > {
   private namespaceScheme: NamespaceScheme<NamespaceId>;
   private subspaceScheme: SubspaceScheme<SubspaceId>;
@@ -62,6 +65,7 @@ export class EntryDriverKvStore<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
+    Prefingerprint,
     Fingerprint
   >;
 
@@ -77,6 +81,7 @@ export class EntryDriverKvStore<
       NamespaceId,
       SubspaceId,
       PayloadDigest,
+      Prefingerprint,
       Fingerprint
     >,
   ) {
@@ -140,7 +145,7 @@ export class EntryDriverKvStore<
 
   makeStorage(
     namespace: NamespaceId,
-  ): Storage3d<NamespaceId, SubspaceId, PayloadDigest, Fingerprint> {
+  ): Storage3d<NamespaceId, SubspaceId, PayloadDigest, Prefingerprint> {
     const prefixedStorageDriver = new PrefixedDriver(
       ["entries"],
       this.kvDriver,

@@ -6,6 +6,7 @@ import { GetStoreFn } from "../wgps_messenger.ts";
 const CANCELLATION = Symbol("cancellation");
 
 export class PayloadIngester<
+  Prefingerprint,
   Fingerprint,
   AuthorisationToken,
   NamespaceId,
@@ -22,6 +23,7 @@ export class PayloadIngester<
 
   constructor(opts: {
     getStore: GetStoreFn<
+      Prefingerprint,
       Fingerprint,
       AuthorisationToken,
       AuthorisationOpts,

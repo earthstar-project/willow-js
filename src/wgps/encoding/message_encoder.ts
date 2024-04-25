@@ -81,6 +81,7 @@ export class MessageEncoder<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Prefingeprint,
   Fingerprint,
   AuthorisationToken,
   StaticToken,
@@ -112,6 +113,7 @@ export class MessageEncoder<
       SubspaceReceiver,
       SyncSubspaceSignature,
       SubspaceSecretKey,
+      Prefingeprint,
       Fingerprint,
       AuthorisationToken,
       StaticToken,
@@ -287,7 +289,7 @@ export class MessageEncoder<
             isFingerprintNeutral: (fp) => {
               return this.schemes.fingerprint.isEqual(
                 fp,
-                this.schemes.fingerprint.neutral,
+                this.schemes.fingerprint.neutralFinalised,
               );
             },
             encodeSubspaceId: this.schemes.subspace.encode,

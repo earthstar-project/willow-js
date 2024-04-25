@@ -23,6 +23,7 @@ type EntryDriverMemoryOpts<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
+  Prefingerprint,
   Fingerprint,
 > = {
   subspaceScheme: SubspaceScheme<SubspaceId>;
@@ -32,6 +33,7 @@ type EntryDriverMemoryOpts<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
+    Prefingerprint,
     Fingerprint
   >;
   getPayloadLength: (digest: PayloadDigest) => Promise<bigint>;
@@ -42,13 +44,16 @@ export class EntryDriverMemory<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
+  Prefingerprint,
   Fingerprint,
-> implements EntryDriver<NamespaceId, SubspaceId, PayloadDigest, Fingerprint> {
+> implements
+  EntryDriver<NamespaceId, SubspaceId, PayloadDigest, Prefingerprint> {
   constructor(
     readonly opts: EntryDriverMemoryOpts<
       NamespaceId,
       SubspaceId,
       PayloadDigest,
+      Prefingerprint,
       Fingerprint
     >,
   ) {}
@@ -64,11 +69,11 @@ export class EntryDriverMemory<
 
   makeStorage(
     namespace: NamespaceId,
-  ): Storage3d<NamespaceId, SubspaceId, PayloadDigest, Fingerprint> {
+  ): Storage3d<NamespaceId, SubspaceId, PayloadDigest, Prefingerprint> {
     return new TripleStorage({
       namespace,
       createSummarisableStorage: (
-        monoid: LiftingMonoid<[KvKey, Uint8Array], Fingerprint>,
+        monoid: LiftingMonoid<[KvKey, Uint8Array], Prefingerprint>,
       ) => {
         return new LinearStorage({
           monoid,

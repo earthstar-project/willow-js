@@ -58,6 +58,7 @@ export type Storage3dScenario<
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
+  Prefingerprint,
   Fingerprint,
 > = {
   name: string;
@@ -69,6 +70,7 @@ export type Storage3dScenario<
       PayloadDigest,
       AuthorisationOpts,
       AuthorisationToken,
+      Prefingerprint,
       Fingerprint
     >,
   ) => Promise<
@@ -92,6 +94,7 @@ const tripleStorageScenario = {
     PayloadDigest,
     AuthorisationOpts,
     AuthorisationToken,
+    Prefingerprint,
     Fingerprint,
   >(
     namespace: NamespaceId,
@@ -101,6 +104,7 @@ const tripleStorageScenario = {
       PayloadDigest,
       AuthorisationOpts,
       AuthorisationToken,
+      Prefingerprint,
       Fingerprint
     >,
   ) => {
@@ -250,7 +254,10 @@ Deno.test("Storage3d.summarise", async () => {
 
       return newFingerprint;
     },
+    fingerprintFinalise: (pre: Array<[number, Path, bigint, bigint]>) =>
+      Promise.resolve(pre),
     neutral: [] as Array<[number, Path, bigint, bigint]>,
+    neutralFinalised: [] as Array<[number, Path, bigint, bigint]>,
 
     isEqual: (
       a: [number, Path, bigint, bigint][],

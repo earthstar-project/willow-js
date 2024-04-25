@@ -48,6 +48,7 @@ export type DecodeMessagesOpts<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Prefingerprint,
   Fingerprint,
   AuthorisationToken,
   StaticToken,
@@ -68,6 +69,7 @@ export type DecodeMessagesOpts<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     StaticToken,
@@ -109,6 +111,7 @@ export async function* decodeMessages<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Prefingerprint,
   Fingerprint,
   AuthorisationToken,
   StaticToken,
@@ -129,6 +132,7 @@ export async function* decodeMessages<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     StaticToken,
@@ -267,7 +271,7 @@ export async function* decodeMessages<
         {
           decodeFingerprint: opts.schemes.fingerprint.encoding.decodeStream,
           decodeSubspaceId: opts.schemes.subspace.decodeStream,
-          neutralFingerprint: opts.schemes.fingerprint.neutral,
+          neutralFingerprint: opts.schemes.fingerprint.neutralFinalised,
           pathScheme: opts.schemes.path,
           getPrivy: () => {
             return reconcileMsgTracker.getPrivy();
