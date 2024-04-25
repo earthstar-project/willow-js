@@ -1,4 +1,4 @@
-import { KvKey, KvBatch, KvDriver } from "./types.ts";
+import { KvBatch, KvDriver, KvKey } from "./types.ts";
 
 export class PrefixedDriver implements KvDriver {
   private parentDriver: KvDriver;
@@ -43,6 +43,8 @@ export class PrefixedDriver implements KvDriver {
     }
     if (selector.prefix !== undefined) {
       selectorPrefixed.prefix = [...this.prefix, ...selector.prefix];
+    } else {
+      selectorPrefixed.prefix = this.prefix;
     }
 
     for await (
@@ -64,7 +66,7 @@ export class PrefixedDriver implements KvDriver {
     if (opts) {
       return this.parentDriver.clear({
         prefix: opts.prefix === undefined
-          ? undefined
+          ? this.prefix
           : [...this.prefix, ...opts.prefix],
         start: opts.start === undefined
           ? undefined
@@ -73,7 +75,7 @@ export class PrefixedDriver implements KvDriver {
       });
     }
 
-    return this.parentDriver.clear();
+    return this.parentDriver.clear({prefix: this.prefix});
   }
 
   batch(): KvBatch {

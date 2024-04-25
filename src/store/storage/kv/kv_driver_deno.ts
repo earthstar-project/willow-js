@@ -1,4 +1,4 @@
-import { compareKeys } from "./types.ts";
+import { compareKeys, isFirstKeyPrefixOfSecondKey } from "./types.ts";
 import { KvBatch, KvDriver, KvKey } from "./types.ts";
 
 export class KvDriverDeno implements KvDriver {
@@ -15,7 +15,7 @@ export class KvDriverDeno implements KvDriver {
   async get<Value>(key: KvKey): Promise<Value | undefined> {
     const res = await this.kv.get<Value>(key);
 
-    if (res.value) {
+    if (res.value !== null) {
       return res.value;
     }
 
@@ -33,125 +33,124 @@ export class KvDriverDeno implements KvDriver {
   }
 
   async *list<Value>(
-    selector_: { start?: KvKey; end?: KvKey; prefix?: KvKey },
+    selector: { start?: KvKey; end?: KvKey; prefix?: KvKey },
     opts?: {
       reverse?: boolean;
       limit?: number;
       batchSize?: number;
     },
   ): AsyncIterable<{ key: KvKey; value: Value }> {
-    // This function would be simple and elegant if Deno didn't treat prefixes as irreflexive =(
-    // To be honest, there are much cleaner ways for adding the reflexive case, I just got frustrated...
+    // Couple gotchas: deno kv uses a strict prefix relation, but our driver interfaces assumes a non-strict prefix relation
+    // Deno throws if start or end are not prefixed by prefix.
 
-    let limit: undefined | number = opts === undefined ? undefined : opts.limit;
+    const reverse = opts ? opts.reverse : undefined;
+    let limit = opts ? opts.limit : undefined;
+    const batchSize = opts ? opts.batchSize : undefined;
 
-    const selector =
-      (selector_.start !== undefined && selector_.end !== undefined)
-        ? { start: selector_.start, end: selector_.end }
-        : {
-          prefix: (selector_.prefix === undefined)
-            ? <KvKey> <unknown> []
-            : selector_.prefix,
-          start: selector_.start,
-          end: selector_.end,
-        };
+    // Turns out it simplifies our code if we can assume that limit is not zero from now on.
+    if (limit !== undefined && limit === 0) {
+      return;
+    }
 
-    if (opts === undefined || !opts.reverse) {
-      if (selector_.prefix) {
-        if (
-          (selector_.start === undefined ||
-            compareKeys(selector_.start, selector_.prefix) <= 0) &&
-          (selector_.end === undefined ||
-            compareKeys(selector_.end, selector_.prefix) > 0)
-        ) {
-          const directMatch = await this.kv.get<Value>(selector_.prefix);
-          if (directMatch.value !== null) {
-            yield {
-              key: <KvKey> [...directMatch.key],
-              value: directMatch.value,
-            };
-            if (limit !== undefined) {
-              limit -= 1;
-            }
-          }
+    let prefix: KvKey | undefined = selector.prefix === undefined
+      ? []
+      : selector.prefix;
+    let start = selector.start;
+    let end = selector.end;
+
+    if (selector.prefix !== undefined) {
+      // Deno errors if start or end are are not strictly prefixed by prefix, so handle those cases explicitly.
+
+      if (
+        selector.start &&
+        !(isFirstKeyPrefixOfSecondKey(selector.prefix, selector.start) &&
+          (compareKeys(selector.prefix, selector.start) !== 0))
+      ) {
+        if (compareKeys(selector.start, selector.prefix) <= 0) {
+          // start <= prefix, so might as well have no start value at all.
+          start = undefined;
+        } else {
+          // start > prefix but not prefixed by it, so no entries can match.
+          return;
+        }
+      }
+
+      if (
+        selector.end &&
+        !(isFirstKeyPrefixOfSecondKey(selector.prefix, selector.end) &&
+          (compareKeys(selector.prefix, selector.end) !== 0))
+      ) {
+        if (compareKeys(selector.end, selector.prefix) > 0) {
+          // end > prefix, so might as well have no end value at all.
+          end = undefined;
+        } else {
+          // end < prefix but not prefixed by it, so no entries can match.
+          return;
         }
       }
     }
 
-    if (limit === undefined || limit > 0) {
-      if (
-        selector.start && selector.end &&
-        compareKeys(selector.start, selector.end) >= 0
-      ) {
-        return;
-      }
+    // If we contain an entry keyed by the prefix itself, we need to work around Deno using strict prefixes in its list function.
+    const directMatch = await this.kv.get<Value>(prefix);
 
-      const iter = this.kv.list<Value>(selector, {
-        reverse: opts?.reverse,
-        limit: limit,
-        batchSize: opts?.batchSize,
-      });
+    if (directMatch.value !== null && !reverse) {
+      // Not reversing, so the directMatch is the first item to emit.
+      // We handle the case if `reverse` later, because emitting the directMatch is the last thing to do in this function in that case.
 
-      for await (const entry of iter) {
-        yield { key: entry.key as KvKey, value: entry.value };
-        if (limit !== undefined) {
-          limit -= 1;
+      yield {
+        key: <KvKey> [...directMatch.key],
+        value: directMatch.value,
+      };
+
+      // We emitted one value, so if there is a limit, decrease it by one.
+      if (limit !== undefined) {
+        limit -= 1;
+
+        // If our limit was 1 to start with, return.
+        if (limit === 0) {
+          return;
         }
+      }
+    }
+
+    // Deno complains if we specify all three of prefix, start, and end. If both start and end are not undefined at this point, then we can omit the prefix from our inner list query without changing the results (because both start and end are prefixed by prefix in that case).
+    if (start !== undefined && end !== undefined) {
+      prefix = undefined;
+    }
+
+    const iter = this.kv.list<Value>({
+      prefix,
+      start,
+      end,
+    }, {
+      reverse,
+      limit,
+      batchSize,
+    });
+
+    for await (const entry of iter) {
+      yield { key: entry.key as KvKey, value: entry.value };
+      if (limit !== undefined) {
+        limit -= 1;
       }
     }
 
     if (
-      opts !== undefined && opts.reverse && (limit === undefined || limit > 0)
+      directMatch.value !== null && reverse &&
+      (limit === undefined || limit > 0)
     ) {
-      if (selector_.prefix) {
-        if (
-          (selector_.start === undefined ||
-            compareKeys(selector_.start, selector_.prefix) <= 0) &&
-          (selector_.end === undefined ||
-            compareKeys(selector_.end, selector_.prefix) > 0)
-        ) {
-          const directMatch = await this.kv.get<Value>(selector_.prefix);
-          if (directMatch.value !== null) {
-            yield {
-              key: <KvKey> [...directMatch.key],
-              value: directMatch.value,
-            };
-            if (limit !== undefined) {
-              limit -= 1;
-            }
-          }
-        }
-      }
+      yield {
+        key: <KvKey> [...directMatch.key],
+        value: directMatch.value,
+      };
     }
   }
 
   async clear(
-    opts?: { prefix?: KvKey; start?: KvKey; end?: KvKey },
+    opts: { prefix?: KvKey; start?: KvKey; end?: KvKey } = {},
   ): Promise<void> {
-    if (!opts) {
-      const iter = this.kv.list<unknown>({ prefix: <KvKey> <unknown> [] });
-
-      for await (const entry of iter) {
-        await this.delete(entry.key as KvKey);
-      }
-
-      return;
-    } else {
-      const selector = (opts.start !== undefined && opts.end !== undefined)
-        ? { start: opts.start, end: opts.end }
-        : {
-          prefix: (opts.prefix === undefined)
-            ? <KvKey> <unknown> []
-            : opts.prefix,
-          start: opts.start,
-          end: opts.end,
-        };
-
-      const iter = this.kv.list<unknown>(selector);
-
-      for await (const entry of iter) {
-        await this.delete(entry.key as KvKey);
-      }
+    for await (const entry of this.list(opts)) {
+      await this.delete(entry.key as KvKey);
     }
   }
 
