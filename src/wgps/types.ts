@@ -45,6 +45,9 @@ export interface Transport {
   send(bytes: Uint8Array): Promise<void>;
   /** An async iterator of bytes received from the other peer via this transport. */
   [Symbol.asyncIterator](): AsyncIterator<Uint8Array>;
+  /** Close the connection with the other peer. */
+  close(): void;
+  readonly isClosed: boolean;
 }
 
 // Handle types
@@ -470,6 +473,7 @@ export type SyncSchemes<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Prefingerprint,
   Fingerprint,
   AuthorisationToken,
   StaticToken,
@@ -521,6 +525,7 @@ export type SyncSchemes<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
+    Prefingerprint,
     Fingerprint
   >;
 };

@@ -32,6 +32,7 @@ type DataBindPayloadRequestPack = {
 };
 
 export class DataSender<
+  Prefingerprint,
   Fingerprint,
   AuthorisationToken,
   DynamicToken,
@@ -47,6 +48,7 @@ export class DataSender<
         entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
       }>;
       getStore: GetStoreFn<
+        Prefingerprint,
         Fingerprint,
         AuthorisationToken,
         AuthorisationOpts,

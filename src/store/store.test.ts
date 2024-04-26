@@ -22,6 +22,7 @@ class TestStore extends Store<
   ArrayBuffer,
   TestSubspace,
   Uint8Array,
+  Uint8Array,
   Uint8Array
 > {
   constructor(namespace = 0) {

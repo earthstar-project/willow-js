@@ -66,6 +66,7 @@ import { PayloadIngester } from "./data/payload_ingester.ts";
 import { Store } from "../store/store.ts";
 
 export type GetStoreFn<
+  Prefingerprint,
   Fingerprint,
   AuthorisationToken,
   AuthorisationOpts,
@@ -80,6 +81,7 @@ export type GetStoreFn<
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
+  Prefingerprint,
   Fingerprint
 >;
 
@@ -94,6 +96,7 @@ export type WgpsMessengerOpts<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Prefingerprint,
   Fingerprint,
   AuthorisationToken,
   StaticToken,
@@ -126,6 +129,7 @@ export type WgpsMessengerOpts<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     StaticToken,
@@ -142,6 +146,7 @@ export type WgpsMessengerOpts<
   >;
 
   getStore: GetStoreFn<
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     AuthorisationOpts,
@@ -163,6 +168,7 @@ export class WgpsMessenger<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Prefingerprint,
   Fingerprint,
   AuthorisationToken,
   StaticToken,
@@ -172,6 +178,8 @@ export class WgpsMessenger<
   PayloadDigest,
   AuthorisationOpts,
 > {
+  private closed = false;
+
   private interests: Map<
     ReadAuthorisation<ReadCapability, SubspaceCapability>,
     AreaOfInterest<SubspaceId>[]
@@ -189,6 +197,7 @@ export class WgpsMessenger<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     StaticToken,
@@ -225,6 +234,7 @@ export class WgpsMessenger<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     StaticToken,
@@ -262,6 +272,7 @@ export class WgpsMessenger<
   // Reconciliation
 
   private getStore: GetStoreFn<
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     AuthorisationOpts,
@@ -276,12 +287,14 @@ export class WgpsMessenger<
     PayloadDigest,
     AuthorisationOpts,
     AuthorisationToken,
+    Prefingerprint,
     Fingerprint
   >();
 
   private aoiIntersectionFinder: AoiIntersectionFinder<NamespaceId, SubspaceId>;
 
   private announcer: Announcer<
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     StaticToken,
@@ -324,6 +337,7 @@ export class WgpsMessenger<
   }>();
 
   private dataSender: DataSender<
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     DynamicToken,
@@ -334,6 +348,7 @@ export class WgpsMessenger<
   >;
 
   private payloadIngester: PayloadIngester<
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     NamespaceId,
@@ -354,6 +369,7 @@ export class WgpsMessenger<
       SubspaceReceiver,
       SyncSubspaceSignature,
       SubspaceSecretKey,
+      Prefingerprint,
       Fingerprint,
       AuthorisationToken,
       StaticToken,
@@ -659,6 +675,8 @@ export class WgpsMessenger<
     // Begin handling decoded messages
     onAsyncIterate(decodedMessages, async (message) => {
       await this.handleMessage(message);
+    }, () => {
+      this.close();
     });
 
     // Set private variables for commitment scheme
@@ -940,7 +958,7 @@ export class WgpsMessenger<
     );
   }
 
-  setupData() {
+  private setupData() {
     onAsyncIterate(this.dataSender.messages(), (msg) => {
       this.encoder.encode(msg);
     });
@@ -1456,5 +1474,10 @@ export class WgpsMessenger<
       default:
         throw new WgpsMessageValidationError("Unhandled message type");
     }
+  }
+
+  close() {
+    this.closed = true;
+    this.transport.close();
   }
 }

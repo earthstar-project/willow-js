@@ -30,8 +30,8 @@ Deno.test("WgpsMessenger", async (test) => {
   const alfieDenoKv = await Deno.openKv("./test/alfie");
   const bettyDenoKv = await Deno.openKv("./test/betty");
 
-  const ALFIE_ENTRIES = 100;
-  const BETTY_ENTRIES = 100;
+  const ALFIE_ENTRIES = 200;
+  const BETTY_ENTRIES = 200;
 
   await test.step("sync", async () => {
     const [alfie, betty] = transportPairInMemory();
@@ -364,6 +364,9 @@ Deno.test("WgpsMessenger", async (test) => {
     assertEquals(actualSizeBetty, bettySize);
     assert(alfieSize === bettySize);
     assertEquals(alfieFp, bettyFp);
+
+    messengerAlfie.close();
+    messengerBetty.close();
   });
 
   alfieDenoKv.close();

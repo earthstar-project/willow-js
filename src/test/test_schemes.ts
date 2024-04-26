@@ -383,20 +383,13 @@ export const testSchemePayload: PayloadScheme<ArrayBuffer> = {
 };
 
 export function addBytes(a: Uint8Array, b: Uint8Array, length: number) {
-  if (
-    a.byteLength < length ||
-    b.byteLength < length
-  ) {
-    throw new Error("i'm not doing that");
-  }
-
   const bytes = new Uint8Array(length);
 
   let carried = 0;
 
   for (let i = 0; i < length; i++) {
-    const byteA = a[a.byteLength - 1 - i];
-    const byteB = b[b.byteLength - 1 - i];
+    const byteA = a[a.byteLength - 1 - i] || 0;
+    const byteB = b[b.byteLength - 1 - i] || 0;
 
     const added = carried + byteA + byteB;
 
@@ -412,9 +405,11 @@ export const testSchemeFingerprint: FingerprintScheme<
   TestNamespace,
   TestSubspace,
   Uint8Array,
+  Uint8Array,
   Uint8Array
 > = {
-  neutral: new Uint8Array(32),
+  neutral: new Uint8Array(0),
+  neutralFinalised: new Uint8Array(32),
   async fingerprintSingleton(lengthy) {
     const encodedEntry = encodeEntry({
       namespaceScheme: testSchemeNamespace,
@@ -430,7 +425,12 @@ export const testSchemeFingerprint: FingerprintScheme<
     );
   },
   fingerprintCombine(a, b) {
-    return addBytes(a, b, 32);
+    return addBytes(a, b, 64);
+  },
+  fingerprintFinalise: async (pre) => {
+    return new Uint8Array(
+      await crypto.subtle.digest("SHA-256", pre),
+    );
   },
   isEqual: (a, b) => {
     return orderBytes(a, b) === 0;
