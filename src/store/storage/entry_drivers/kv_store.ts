@@ -2,6 +2,7 @@ import {
   decodeEntry,
   encodeEntry,
   Entry,
+  equalsBytes,
   PathScheme,
 } from "../../../../deps.ts";
 import {
@@ -17,6 +18,7 @@ import { PrefixIterator } from "../prefix_iterators/types.ts";
 import { TripleStorage } from "../storage_3d/triple_storage.ts";
 import { Storage3d } from "../storage_3d/types.ts";
 import { LinearStorage } from "../summarisable_storage/linear_summarisable_storage.ts";
+import { Skiplist } from "../summarisable_storage/monoid_skiplist.ts";
 import { EntryDriver, PayloadReferenceCounter } from "../types.ts";
 
 type EntryDriverKvOpts<
@@ -70,6 +72,8 @@ export class EntryDriverKvStore<
   private kvDriver: KvDriver;
   prefixIterator: PrefixIterator<Uint8Array>;
 
+  private wafDriver: KvDriver;
+
   private getPayloadLength: (digest: PayloadDigest) => Promise<bigint>;
 
   payloadReferenceCounter: PayloadReferenceCounter<PayloadDigest>;
@@ -92,6 +96,8 @@ export class EntryDriverKvStore<
     this.kvDriver = opts.kvDriver;
 
     const prefixedKvDriver = new PrefixedDriver(["prefix"], this.kvDriver);
+
+    this.wafDriver = new PrefixedDriver(["waf"], this.kvDriver);
 
     this.prefixIterator = new SimpleKeyIterator<Uint8Array>(prefixedKvDriver);
 
@@ -144,21 +150,21 @@ export class EntryDriverKvStore<
   makeStorage(
     namespace: NamespaceId,
   ): Storage3d<NamespaceId, SubspaceId, PayloadDigest, Prefingerprint> {
-    const prefixedStorageDriver = new PrefixedDriver(
-      ["entries"],
-      this.kvDriver,
-    );
-
     return new TripleStorage({
       namespace,
       createSummarisableStorage: (
         monoid,
         id,
       ) => {
-        return new LinearStorage({
+        const prefixedStorageDriver = new PrefixedDriver(
+          ["entries", id],
+          this.kvDriver,
+        );
+
+        return new Skiplist({
           monoid,
-          kv: new PrefixedDriver([id], prefixedStorageDriver),
-          // logicalValueEq: equalsBytes,
+          kv: prefixedStorageDriver,
+          logicalValueEq: equalsBytes,
         });
       },
       fingerprintScheme: this.fingerprintScheme,
@@ -171,7 +177,7 @@ export class EntryDriverKvStore<
 
   writeAheadFlag = {
     wasInserting: async () => {
-      const maybeInsertion = await this.kvDriver.get<Uint8Array>([
+      const maybeInsertion = await this.wafDriver.get<Uint8Array>([
         "waf",
         "insert",
       ]);
@@ -180,7 +186,7 @@ export class EntryDriverKvStore<
         return;
       }
 
-      const probablyAuthTokenHash = await this.kvDriver.get<Uint8Array>([
+      const probablyAuthTokenHash = await this.wafDriver.get<Uint8Array>([
         "waf",
         "insert",
         "authTokenHash",
@@ -209,7 +215,7 @@ export class EntryDriverKvStore<
       };
     },
     wasRemoving: async () => {
-      const maybeRemoval = await this.kvDriver.get<Uint8Array>([
+      const maybeRemoval = await this.wafDriver.get<Uint8Array>([
         "waf",
         "remove",
       ]);
@@ -240,12 +246,12 @@ export class EntryDriverKvStore<
 
       const authHashEncoded = this.payloadScheme.encode(authTokenHash);
 
-      await this.kvDriver.set(
+      await this.wafDriver.set(
         ["waf", "insert"],
         entryEncoded,
       );
 
-      await this.kvDriver.set(
+      await this.wafDriver.set(
         ["waf", "insert", "authTokenHash"],
         authHashEncoded,
       );
@@ -259,15 +265,15 @@ export class EntryDriverKvStore<
         payloadScheme: this.payloadScheme,
       }, entry);
 
-      return this.kvDriver.set(["waf", "remove"], entryEncoded);
+      return this.wafDriver.set(["waf", "remove"], entryEncoded);
     },
 
     unflagInsertion: async () => {
-      await this.kvDriver.delete(["waf", "insert"]);
-      await this.kvDriver.delete(["waf", "insert", "authTokenHash"]);
+      await this.wafDriver.delete(["waf", "insert"]);
+      await this.wafDriver.delete(["waf", "insert", "authTokenHash"]);
     },
     unflagRemoval: async () => {
-      await this.kvDriver.delete(["waf", "remove"]);
+      await this.wafDriver.delete(["waf", "remove"]);
     },
   };
 }

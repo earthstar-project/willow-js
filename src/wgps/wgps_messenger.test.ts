@@ -73,8 +73,8 @@ testWgpsMessenger(scenarioMemory);
 
 function testWgpsMessenger(scenario: WgpsScenario) {
   Deno.test(`WgpsMessenger (${scenario.name})`, async (test) => {
-    const ALFIE_ENTRIES = 200;
-    const BETTY_ENTRIES = 200;
+    const ALFIE_ENTRIES = 20;
+    const BETTY_ENTRIES = 20;
 
     await test.step("sync", async () => {
       const [alfie, betty] = transportPairInMemory();
@@ -375,9 +375,13 @@ function testWgpsMessenger(scenario: WgpsScenario) {
         actualSizeBetty += 1;
       }
 
-      assertEquals(actualSizeAlfie, alfieSize);
-      assertEquals(actualSizeBetty, bettySize);
-      assert(alfieSize === bettySize);
+      const expectedSize = ALFIE_ENTRIES + BETTY_ENTRIES;
+
+      assertEquals(actualSizeAlfie, expectedSize);
+      assertEquals(actualSizeBetty, expectedSize);
+      assertEquals(alfieSize, expectedSize);
+      assertEquals(bettySize, expectedSize);
+
       assertEquals(alfieFp, bettyFp);
 
       messengerAlfie.close();

@@ -662,8 +662,11 @@ export class Store<
       );
     }
 
+    const acquisitionId = await this.ingestionMutex.acquire();
+
     await this.storage.updateAvailablePayload(entry.subspaceId, entry.path);
 
+    this.ingestionMutex.release(acquisitionId);
     return {
       kind: "success",
     };
