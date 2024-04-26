@@ -32,14 +32,14 @@ export class PayloadIngester<
       PayloadDigest
     >;
   }) {
-    onAsyncIterate(this.events, (event) => {
+    onAsyncIterate(this.events, async (event) => {
       if (event === CANCELLATION) {
         this.currentIngestion.push(CANCELLATION);
       } else if ("entry" in event) {
         this.currentIngestion.push(CANCELLATION);
         this.currentIngestion = new FIFO();
 
-        const store = opts.getStore(event.entry.namespaceId);
+        const store = await opts.getStore(event.entry.namespaceId);
 
         store.ingestPayload({
           path: event.entry.path,

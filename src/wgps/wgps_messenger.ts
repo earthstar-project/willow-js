@@ -75,14 +75,16 @@ export type GetStoreFn<
   PayloadDigest,
 > = (
   namespace: NamespaceId,
-) => Store<
-  NamespaceId,
-  SubspaceId,
-  PayloadDigest,
-  AuthorisationOpts,
-  AuthorisationToken,
-  Prefingerprint,
-  Fingerprint
+) => Promise<
+  Store<
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts,
+    AuthorisationToken,
+    Prefingerprint,
+    Fingerprint
+  >
 >;
 
 export type WgpsMessengerOpts<
@@ -898,8 +900,8 @@ export class WgpsMessenger<
     // Whenever the area of interest intersection finder finds an intersection from the setup phase...
     onAsyncIterate(
       this.aoiIntersectionFinder.intersections(),
-      (intersection) => {
-        const store = this.getStore(intersection.namespace);
+      async (intersection) => {
+        const store = await this.getStore(intersection.namespace);
 
         const aoiOurs = this.handlesAoisOurs.get(intersection.ours);
 
@@ -1303,7 +1305,7 @@ export class WgpsMessenger<
           );
         }
 
-        const store = this.getStore(
+        const store = await this.getStore(
           this.currentlyReceivingEntries.namespace,
         );
 
@@ -1372,7 +1374,7 @@ export class WgpsMessenger<
           message.dynamicToken,
         );
 
-        const store = this.getStore(message.entry.namespaceId);
+        const store = await this.getStore(message.entry.namespaceId);
 
         const result = await store.ingestEntry(message.entry, authToken);
 
@@ -1396,12 +1398,12 @@ export class WgpsMessenger<
           throw new WgpsMessageValidationError("Partner sent too many bytes.");
         }
 
+        this.currentlyReceivedOffset += message.amount;
+
         const endHere = this.currentlyReceivedOffset ===
           this.currentlyReceivedEntry.payloadLength;
 
         this.payloadIngester.push(message.bytes, endHere);
-
-        this.currentlyReceivedOffset += message.amount;
 
         break;
       }

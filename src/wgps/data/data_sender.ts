@@ -76,7 +76,7 @@ export class DataSender<
     dynamicToken: DynamicToken,
     offset: number,
   ) {
-    const store = this.opts.getStore(entry.namespaceId);
+    const store = await this.opts.getStore(entry.namespaceId);
 
     const payload = await store.getPayload(entry);
 
@@ -99,7 +99,7 @@ export class DataSender<
     const payloadRequest = await this.opts.handlesPayloadRequestsTheirs
       .getEventually(handle);
 
-    const store = this.opts.getStore(payloadRequest.entry.namespaceId);
+    const store = await this.opts.getStore(payloadRequest.entry.namespaceId);
 
     const payload = await store.getPayload(payloadRequest.entry);
 
