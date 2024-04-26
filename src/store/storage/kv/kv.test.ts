@@ -1154,6 +1154,8 @@ Deno.test({
 
         const idbKv = new KvDriverIndexedDB();
         await runTestCase(ops, queries, idbKv);
+
+        await idbKv.clear();
       }
     }
   },
