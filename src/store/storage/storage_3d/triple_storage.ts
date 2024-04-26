@@ -232,8 +232,6 @@ export class TripleStorage<
   async summarise(
     range: Range3d<SubspaceId>,
   ): Promise<{ fingerprint: Fingerprint; size: number }> {
-    console.group("summarise", range);
-
     let fingerprint = this.fingerprintScheme.neutral;
     /** The size of the fingerprint. */
     let size = 0;
@@ -260,15 +258,11 @@ export class TripleStorage<
 
     /** Run this when we detect a contiguous range of included entries. */
     const updateFingerprint = async (start: KvKey) => {
-      console.group("update fingerprint");
-
       const { fingerprint: includedFp, size: includedSize } = await this
         .tspStorage.summarise(
           start,
           leastExcluded,
         );
-
-      console.log({ start, leastExcluded, includedSize });
 
       fingerprint = this.fingerprintScheme.fingerprintCombine(
         fingerprint,
@@ -277,24 +271,16 @@ export class TripleStorage<
 
       size += includedSize;
 
-      console.log({ size });
-
       // Prevent this from running again until we run into another included entry.
       leastIncluded = undefined;
-
-      console.groupEnd();
     };
 
     for await (const entry of timeEntries) {
-      console.log("-----------\n");
-
       // Decode the key.
       const { timestamp, path, subspace } = this.decodeEntryKey(
         entry.key,
         "timestamp",
       );
-
-      console.log({ timestamp, path, subspace });
 
       const isIncluded = isIncluded3d(
         this.subspaceScheme.order,
@@ -305,8 +291,6 @@ export class TripleStorage<
           subspace,
         },
       );
-
-      console.log({ isIncluded });
 
       // If it's not included, and we ran into an included item earlier,
       // that indicates the end of a contiguous range.
@@ -334,8 +318,6 @@ export class TripleStorage<
     if (leastIncluded) {
       await updateFingerprint(leastIncluded);
     }
-
-    console.groupEnd();
 
     return {
       fingerprint,

@@ -189,7 +189,7 @@ Deno.test("WgpsMessenger", async (test) => {
     });
 
     for (let i = 0; i < BETTY_ENTRIES; i++) {
-      const res = await bettyStore.set({
+      await bettyStore.set({
         subspace: TestSubspace.Gemma,
         payload: new TextEncoder().encode(`Originated from Betty! (${i})`),
         path: [
@@ -198,10 +198,6 @@ Deno.test("WgpsMessenger", async (test) => {
           new Uint8Array([i]),
         ],
       }, TestSubspace.Gemma);
-
-      if (res.kind === "success") {
-        console.log(encodeBase32(new Uint8Array(res.entry.payloadDigest)));
-      }
     }
 
     const messengerBetty = new WgpsMessenger({

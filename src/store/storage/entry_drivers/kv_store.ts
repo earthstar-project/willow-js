@@ -2,7 +2,6 @@ import {
   decodeEntry,
   encodeEntry,
   Entry,
-  equalsBytes,
   PathScheme,
 } from "../../../../deps.ts";
 import {
@@ -18,7 +17,6 @@ import { PrefixIterator } from "../prefix_iterators/types.ts";
 import { TripleStorage } from "../storage_3d/triple_storage.ts";
 import { Storage3d } from "../storage_3d/types.ts";
 import { LinearStorage } from "../summarisable_storage/linear_summarisable_storage.ts";
-import { Skiplist } from "../summarisable_storage/monoid_skiplist.ts";
 import { EntryDriver, PayloadReferenceCounter } from "../types.ts";
 
 type EntryDriverKvOpts<

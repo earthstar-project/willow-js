@@ -2,6 +2,7 @@
 
 import "https://deno.land/x/indexeddb@1.3.5/polyfill_memory.ts";
 import { assertEquals } from "https://deno.land/std@0.223.0/assert/assert_equals.ts";
+import { delay } from "https://deno.land/std@0.223.0/async/delay.ts";
 
 import {
   compareKeys,
@@ -941,6 +942,9 @@ Deno.test({
 
     const indexDbKv = new KvDriverIndexedDB();
     await runTestCase(ops, queries, indexDbKv);
+    await indexDbKv.clear();
+    // Let IndexedDB polyfill timers run their course.
+    await delay(0);
   },
 });
 
@@ -965,6 +969,9 @@ Deno.test({
 
     const indexDbKv = new KvDriverIndexedDB();
     await runTestCase(ops, queries, indexDbKv);
+    await indexDbKv.clear();
+    // Let IndexedDB polyfill timers run their course.
+    await delay(0);
   },
 });
 
@@ -1043,6 +1050,9 @@ Deno.test({
 
     const indexDbKv = new KvDriverIndexedDB();
     await runTestCase(ops, queries, indexDbKv);
+    await indexDbKv.clear();
+    // Let IndexedDB polyfill timers run their course.
+    await delay(0);
   },
 });
 
@@ -1109,6 +1119,9 @@ Deno.test({
 
     const indexDbKv = new KvDriverIndexedDB();
     await runTestCase(ops, queries, indexDbKv);
+    await indexDbKv.clear();
+    // Let IndexedDB polyfill timers run their course.
+    await delay(0);
   },
 });
 
@@ -1134,6 +1147,8 @@ Deno.test({
         await runTestCase(ops, queries, idbKv);
 
         await idbKv.clear();
+        // Let IndexedDB polyfill timers run their course.
+        await delay(0);
       }
     }
 
@@ -1156,6 +1171,8 @@ Deno.test({
         await runTestCase(ops, queries, idbKv);
 
         await idbKv.clear();
+        // Let IndexedDB polyfill timers run their course.
+        await delay(0);
       }
     }
   },

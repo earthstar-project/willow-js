@@ -118,15 +118,18 @@ export class KvDriverDeno implements KvDriver {
       prefix = undefined;
     }
 
-    const iter = this.kv.list<Value>({
-      prefix,
-      start,
-      end,
-    }, {
-      reverse,
-      limit,
-      batchSize,
-    });
+    const iter = this.kv.list<Value>(
+      <Deno.KvListSelector> {
+        prefix,
+        start,
+        end,
+      },
+      {
+        reverse,
+        limit,
+        batchSize,
+      },
+    );
 
     for await (const entry of iter) {
       yield { key: entry.key as KvKey, value: entry.value };
