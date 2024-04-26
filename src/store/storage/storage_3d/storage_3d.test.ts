@@ -8,6 +8,7 @@ import {
   concat,
   encodeBase64,
   encodeEntry,
+  encodePath,
   Entry,
   equalsBytes,
   isIncluded3d,
@@ -41,14 +42,14 @@ import {
   randomTimestamp,
 } from "../../../test/utils.ts";
 import { LengthyEntry, QueryOrder, StoreSchemes } from "../../types.ts";
-import { encodePathWithSeparators, TripleStorage } from "./triple_storage.ts";
+import { TripleStorage } from "./triple_storage.ts";
 import { RangeOfInterest, Storage3d } from "./types.ts";
 import { assertEquals } from "https://deno.land/std@0.202.0/assert/assert_equals.ts";
 import { sample } from "https://deno.land/std@0.202.0/collections/mod.ts";
 
 import { Store } from "../../store.ts";
 import { RadixTree } from "../prefix_iterators/radix_tree.ts";
-import { SingleKeySkiplist } from "../summarisable_storage/monoid_skiplist.ts";
+import { Skiplist } from "../summarisable_storage/monoid_skiplist.ts";
 import { KvDriverInMemory } from "../kv/kv_driver_in_memory.ts";
 
 export type Storage3dScenario<
@@ -57,6 +58,7 @@ export type Storage3dScenario<
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
+  Prefingerprint,
   Fingerprint,
 > = {
   name: string;
@@ -68,6 +70,7 @@ export type Storage3dScenario<
       PayloadDigest,
       AuthorisationOpts,
       AuthorisationToken,
+      Prefingerprint,
       Fingerprint
     >,
   ) => Promise<
@@ -91,6 +94,7 @@ const tripleStorageScenario = {
     PayloadDigest,
     AuthorisationOpts,
     AuthorisationToken,
+    Prefingerprint,
     Fingerprint,
   >(
     namespace: NamespaceId,
@@ -100,6 +104,7 @@ const tripleStorageScenario = {
       PayloadDigest,
       AuthorisationOpts,
       AuthorisationToken,
+      Prefingerprint,
       Fingerprint
     >,
   ) => {
@@ -110,7 +115,7 @@ const tripleStorageScenario = {
       payloadScheme: params.payload,
       fingerprintScheme: params.fingerprint,
       createSummarisableStorage: (monoid) => {
-        return new SingleKeySkiplist({
+        return new Skiplist({
           monoid,
           kv: new KvDriverInMemory(),
           logicalValueEq: equalsBytes,
@@ -249,7 +254,10 @@ Deno.test("Storage3d.summarise", async () => {
 
       return newFingerprint;
     },
+    fingerprintFinalise: (pre: Array<[number, Path, bigint, bigint]>) =>
+      Promise.resolve(pre),
     neutral: [] as Array<[number, Path, bigint, bigint]>,
+    neutralFinalised: [] as Array<[number, Path, bigint, bigint]>,
 
     isEqual: (
       a: [number, Path, bigint, bigint][],
@@ -477,12 +485,12 @@ Deno.test("Storage3d.summarise", async () => {
       const aKey = concat(
         bigintToBytes(a.timestamp),
         new Uint8Array([a.subspaceId]),
-        encodePathWithSeparators(a.path),
+        encodePath(testSchemePath, a.path),
       );
       const bKey = concat(
         bigintToBytes(b.timestamp),
         new Uint8Array([b.subspaceId]),
-        encodePathWithSeparators(b.path),
+        encodePath(testSchemePath, b.path),
       );
 
       return orderBytes(aKey, bKey) * -1;

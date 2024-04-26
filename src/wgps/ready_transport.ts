@@ -29,6 +29,14 @@ export class ReadyTransport implements Transport {
     return this.transport.send(bytes);
   }
 
+  close(): void {
+    return this.transport.close();
+  }
+
+  get isClosed() {
+    return this.transport.isClosed;
+  }
+
   private commitmentAcc: Uint8Array = new Uint8Array();
 
   async *[Symbol.asyncIterator]() {

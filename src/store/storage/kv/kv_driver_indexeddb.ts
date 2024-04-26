@@ -1,4 +1,10 @@
-import { KvBatch, KvDriver, KvKey } from "./types.ts";
+import {
+  compareKeys,
+  isFirstKeyPrefixOfSecondKey,
+  KvBatch,
+  KvDriver,
+  KvKey,
+} from "./types.ts";
 import { pack, unpack } from "./key_codec/kv_key_codec.ts";
 
 import { WillowError } from "../../../errors.ts";
@@ -106,11 +112,11 @@ export class KvDriverIndexedDB implements KvDriver {
       end?: KvKey | undefined;
       prefix?: KvKey | undefined;
     },
-    opts?: {
+    opts: {
       reverse?: boolean | undefined;
       limit?: number | undefined;
       batchSize?: number | undefined;
-    } | undefined,
+    } | undefined = {},
   ): AsyncIterable<{ key: KvKey; value: Value }> {
     const db = await this.db;
 
@@ -119,6 +125,9 @@ export class KvDriverIndexedDB implements KvDriver {
     );
 
     const openCursorParam = selectorToIdbBound(selector);
+    if (openCursorParam === "notMatchingAnything") {
+      return;
+    }
 
     const direction = opts?.reverse ? "prevunique" : "nextunique";
 
@@ -132,7 +141,7 @@ export class KvDriverIndexedDB implements KvDriver {
 
     cursor.onsuccess = () => {
       if (cursor.result) {
-        if (opts?.limit && count >= opts.limit) {
+        if ((opts.limit !== undefined) && count >= opts.limit) {
           resultFifo.push(END_LIST);
         } else if (cursor.result.key instanceof ArrayBuffer) {
           resultFifo.push({
@@ -180,6 +189,10 @@ export class KvDriverIndexedDB implements KvDriver {
     );
 
     const openCursorParam = opts ? selectorToIdbBound(opts) : undefined;
+
+    if (openCursorParam === "notMatchingAnything") {
+      return Promise.resolve();
+    }
 
     const cleared = deferred<void>();
 
@@ -258,34 +271,74 @@ function selectorToIdbBound({ start, end, prefix }: {
   start?: KvKey;
   end?: KvKey;
   prefix?: KvKey;
-}): typeof IDBKeyRange | undefined {
-  if (
-    prefix && prefix.length === 0 && start === undefined && end === undefined
-  ) {
-    return undefined;
-  } else if (
-    start && end === undefined
-  ) {
-    const lowerKey = pack(start);
-    return IDBKeyRange.lowerBound(lowerKey);
-  } else if (
-    start === undefined && end
-  ) {
-    const upperKey = pack(end);
-    return IDBKeyRange.upperBound(upperKey, true);
-  } else if (
-    start && end
-  ) {
-    const lowerKey = pack(start);
-    const upperKey = pack(end);
-
-    return IDBKeyRange.bound(lowerKey, upperKey, false, true);
-  } else if (start === undefined && end === undefined && prefix) {
-    const lowerKey = pack(prefix);
-    const upperKey = successorBytesFixedWidth(lowerKey);
-
-    return IDBKeyRange.bound(lowerKey, upperKey, false, true);
+}): IDBKeyRange | undefined | "notMatchingAnything" {
+  function isPrefixRelevant(prefix?: KvKey): boolean {
+    return prefix !== undefined && prefix.length !== 0;
   }
 
-  return undefined;
+  if (
+    !isPrefixRelevant(prefix) &&
+    start === undefined && end === undefined
+  ) {
+    // No constraints at all.
+    return undefined;
+  }
+
+  if (isPrefixRelevant(prefix)) {
+    // We have a prefix. That complicates things a bit, because IndexDB has no built-in support for working with prefixes.
+
+    // If start is strictly less than the prefix, then use the prefix instead of start. Else, if start is prefixed by the prefix, we can ignore the prefix (for start-purposes, it might still determine the end). Else (start greater than prefix and not prefixed by it), the range will not match anything.
+    let actualStart = prefix;
+    if (start !== undefined) {
+      if (isFirstKeyPrefixOfSecondKey(prefix!, start)) {
+        actualStart = start;
+      } else if (compareKeys(start, prefix!) > 0) {
+        return "notMatchingAnything";
+      }
+    }
+    const actualPackedStart = actualStart === undefined
+      ? undefined
+      : pack(actualStart);
+
+    // For the end, we might need to compute an upper bound from the prefix.
+    // (To simplify the code, we just always compute it, but we might end up not using it).
+    const packedPrefix = pack(prefix!);
+    const exclusiveEndFromPrefix = successorBytesFixedWidth(packedPrefix);
+
+    // Similar reasoning applies to end.
+    let actualPackedEnd = exclusiveEndFromPrefix === null
+      ? undefined
+      : exclusiveEndFromPrefix;
+    if (end !== undefined) {
+      if (isFirstKeyPrefixOfSecondKey(prefix!, end)) {
+        // Can ignore prefix, just use end instead.
+        actualPackedEnd = pack(end);
+      } else if (compareKeys(end, prefix!) < 0) {
+        return "notMatchingAnything";
+        // And else, if end is greater than prefix and but prefix is not a prefix o end, than we use exclusiveEndFromPrefix.
+      }
+    }
+
+    return IDBKeyRange.bound(actualPackedStart, actualPackedEnd, false, true);
+  } else {
+    // The simple cases: no prefix to consider.
+    if (
+      start && end === undefined
+    ) {
+      const lowerKey = pack(start);
+      return IDBKeyRange.lowerBound(lowerKey);
+    } else if (
+      start === undefined && end
+    ) {
+      const upperKey = pack(end);
+      return IDBKeyRange.upperBound(upperKey, true);
+    } else if (
+      start && end
+    ) {
+      const lowerKey = pack(start);
+      const upperKey = pack(end);
+
+      return IDBKeyRange.bound(lowerKey, upperKey, false, true);
+    }
+  }
 }

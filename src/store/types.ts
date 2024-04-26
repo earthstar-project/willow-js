@@ -51,16 +51,21 @@ export type FingerprintScheme<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
+  PreFingerprint,
   Fingerprint,
 > = {
   fingerprintSingleton(
     entry: LengthyEntry<NamespaceId, SubspaceId, PayloadDigest>,
-  ): Promise<Fingerprint>;
+  ): Promise<PreFingerprint>;
   fingerprintCombine(
-    a: Fingerprint,
-    b: Fingerprint,
-  ): Fingerprint;
-  neutral: Fingerprint;
+    a: PreFingerprint,
+    b: PreFingerprint,
+  ): PreFingerprint;
+  fingerprintFinalise(
+    prefingerprint: PreFingerprint,
+  ): Promise<Fingerprint>;
+  neutral: PreFingerprint;
+  neutralFinalised: Fingerprint;
   isEqual: (a: Fingerprint, b: Fingerprint) => boolean;
   encoding: EncodingScheme<Fingerprint>;
 };
@@ -72,6 +77,7 @@ export interface StoreSchemes<
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
+  Prefingerprint,
   Fingerprint,
 > {
   path: PathScheme;
@@ -95,6 +101,7 @@ export interface StoreSchemes<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
+    Prefingerprint,
     Fingerprint
   >;
 }
@@ -105,6 +112,7 @@ export type StoreOpts<
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
+  Prefingerprint,
   Fingerprint,
 > = {
   /** The public key of the namespace this store holds entries for. */
@@ -116,6 +124,7 @@ export type StoreOpts<
     PayloadDigest,
     AuthorisationOpts,
     AuthorisationToken,
+    Prefingerprint,
     Fingerprint
   >;
   /** An optional driver used to store and retrieve a store's entries. */
@@ -123,7 +132,7 @@ export type StoreOpts<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
-    Fingerprint
+    Prefingerprint
   >;
   /** An optional driver used to store and retrieve a store's payloads.  */
   payloadDriver?: PayloadDriver<PayloadDigest>;

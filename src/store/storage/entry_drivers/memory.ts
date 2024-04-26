@@ -4,7 +4,7 @@ import {
   SubspaceScheme,
 } from "../../types.ts";
 import { LiftingMonoid } from "../summarisable_storage/lifting_monoid.ts";
-import { SingleKeySkiplist } from "../summarisable_storage/monoid_skiplist.ts";
+import { Skiplist } from "../summarisable_storage/monoid_skiplist.ts";
 import { KvDriverInMemory } from "../kv/kv_driver_in_memory.ts";
 import { EntryDriver } from "../types.ts";
 import { Storage3d } from "../storage_3d/types.ts";
@@ -16,11 +16,14 @@ import {
   PathScheme,
 } from "../../../../deps.ts";
 import { RadixTree } from "../prefix_iterators/radix_tree.ts";
+import { KvKey } from "../kv/types.ts";
+import { LinearStorage } from "../summarisable_storage/linear_summarisable_storage.ts";
 
 type EntryDriverMemoryOpts<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
+  Prefingerprint,
   Fingerprint,
 > = {
   subspaceScheme: SubspaceScheme<SubspaceId>;
@@ -30,6 +33,7 @@ type EntryDriverMemoryOpts<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
+    Prefingerprint,
     Fingerprint
   >;
   getPayloadLength: (digest: PayloadDigest) => Promise<bigint>;
@@ -40,13 +44,16 @@ export class EntryDriverMemory<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
+  Prefingerprint,
   Fingerprint,
-> implements EntryDriver<NamespaceId, SubspaceId, PayloadDigest, Fingerprint> {
+> implements
+  EntryDriver<NamespaceId, SubspaceId, PayloadDigest, Prefingerprint> {
   constructor(
     readonly opts: EntryDriverMemoryOpts<
       NamespaceId,
       SubspaceId,
       PayloadDigest,
+      Prefingerprint,
       Fingerprint
     >,
   ) {}
@@ -62,16 +69,15 @@ export class EntryDriverMemory<
 
   makeStorage(
     namespace: NamespaceId,
-  ): Storage3d<NamespaceId, SubspaceId, PayloadDigest, Fingerprint> {
+  ): Storage3d<NamespaceId, SubspaceId, PayloadDigest, Prefingerprint> {
     return new TripleStorage({
       namespace,
       createSummarisableStorage: (
-        monoid: LiftingMonoid<[Uint8Array, Uint8Array], Fingerprint>,
+        monoid: LiftingMonoid<[KvKey, Uint8Array], Prefingerprint>,
       ) => {
-        return new SingleKeySkiplist({
+        return new LinearStorage({
           monoid,
           kv: new KvDriverInMemory(),
-          logicalValueEq: equalsBytes,
         });
       },
       fingerprintScheme: this.opts.fingerprintScheme,

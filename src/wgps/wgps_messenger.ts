@@ -11,7 +11,11 @@ import {
   orderBytes,
   Range3d,
 } from "../../deps.ts";
-import { ValidationError, WgpsMessageValidationError } from "../errors.ts";
+import {
+  ValidationError,
+  WgpsMessageValidationError,
+  WillowError,
+} from "../errors.ts";
 import { decodeMessages } from "./decoding/decode_messages.ts";
 import { MessageEncoder } from "./encoding/message_encoder.ts";
 import { ReadyTransport } from "./ready_transport.ts";
@@ -50,16 +54,36 @@ import {
 } from "./types.ts";
 import { Intersection } from "./pai/types.ts";
 import { onAsyncIterate } from "./util.ts";
-import { WillowError } from "../../mod.universal.ts";
+
 import { GuaranteedQueue } from "./guaranteed_queue.ts";
 import { AoiIntersectionFinder } from "./reconciliation/aoi_intersection_finder.ts";
-import { StoreDriverCallback, StoreMap } from "./store_map.ts";
 import { Reconciler } from "./reconciliation/reconciler.ts";
 import { ReconcilerMap } from "./reconciliation/reconciler_map.ts";
 import { Announcer } from "./reconciliation/announcer.ts";
 import { CapFinder } from "./cap_finder.ts";
 import { DataSender } from "./data/data_sender.ts";
 import { PayloadIngester } from "./data/payload_ingester.ts";
+import { Store } from "../store/store.ts";
+
+export type GetStoreFn<
+  Prefingerprint,
+  Fingerprint,
+  AuthorisationToken,
+  AuthorisationOpts,
+  NamespaceId,
+  SubspaceId,
+  PayloadDigest,
+> = (
+  namespace: NamespaceId,
+) => Store<
+  NamespaceId,
+  SubspaceId,
+  PayloadDigest,
+  AuthorisationOpts,
+  AuthorisationToken,
+  Prefingerprint,
+  Fingerprint
+>;
 
 export type WgpsMessengerOpts<
   ReadCapability,
@@ -72,6 +96,7 @@ export type WgpsMessengerOpts<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Prefingerprint,
   Fingerprint,
   AuthorisationToken,
   StaticToken,
@@ -104,6 +129,7 @@ export type WgpsMessengerOpts<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     StaticToken,
@@ -119,8 +145,11 @@ export type WgpsMessengerOpts<
     AreaOfInterest<SubspaceId>[]
   >;
 
-  getStoreDrivers: StoreDriverCallback<
+  getStore: GetStoreFn<
+    Prefingerprint,
     Fingerprint,
+    AuthorisationToken,
+    AuthorisationOpts,
     NamespaceId,
     SubspaceId,
     PayloadDigest
@@ -139,6 +168,7 @@ export class WgpsMessenger<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Prefingerprint,
   Fingerprint,
   AuthorisationToken,
   StaticToken,
@@ -148,6 +178,8 @@ export class WgpsMessenger<
   PayloadDigest,
   AuthorisationOpts,
 > {
+  private closed = false;
+
   private interests: Map<
     ReadAuthorisation<ReadCapability, SubspaceCapability>,
     AreaOfInterest<SubspaceId>[]
@@ -165,6 +197,7 @@ export class WgpsMessenger<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     StaticToken,
@@ -201,6 +234,7 @@ export class WgpsMessenger<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     StaticToken,
@@ -237,13 +271,14 @@ export class WgpsMessenger<
 
   // Reconciliation
 
-  private storeMap: StoreMap<
+  private getStore: GetStoreFn<
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
+    AuthorisationOpts,
     NamespaceId,
     SubspaceId,
-    PayloadDigest,
-    AuthorisationOpts
+    PayloadDigest
   >;
 
   private reconcilerMap = new ReconcilerMap<
@@ -252,12 +287,14 @@ export class WgpsMessenger<
     PayloadDigest,
     AuthorisationOpts,
     AuthorisationToken,
+    Prefingerprint,
     Fingerprint
   >();
 
   private aoiIntersectionFinder: AoiIntersectionFinder<NamespaceId, SubspaceId>;
 
   private announcer: Announcer<
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     StaticToken,
@@ -300,6 +337,7 @@ export class WgpsMessenger<
   }>();
 
   private dataSender: DataSender<
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     DynamicToken,
@@ -310,6 +348,7 @@ export class WgpsMessenger<
   >;
 
   private payloadIngester: PayloadIngester<
+    Prefingerprint,
     Fingerprint,
     AuthorisationToken,
     NamespaceId,
@@ -330,6 +369,7 @@ export class WgpsMessenger<
       SubspaceReceiver,
       SyncSubspaceSignature,
       SubspaceSecretKey,
+      Prefingerprint,
       Fingerprint,
       AuthorisationToken,
       StaticToken,
@@ -395,11 +435,6 @@ export class WgpsMessenger<
 
     // Reconciliation helpers
 
-    this.storeMap = new StoreMap({
-      getStoreDrivers: opts.getStoreDrivers,
-      schemes: opts.schemes,
-    });
-
     this.aoiIntersectionFinder = new AoiIntersectionFinder({
       namespaceScheme: this.schemes.namespace,
       subspaceScheme: this.schemes.subspace,
@@ -414,6 +449,8 @@ export class WgpsMessenger<
     });
 
     // Data
+
+    this.getStore = opts.getStore;
 
     this.currentlyReceivedEntry = defaultEntry(
       this.schemes.namespace.defaultNamespaceId,
@@ -437,11 +474,11 @@ export class WgpsMessenger<
 
     this.dataSender = new DataSender({
       handlesPayloadRequestsTheirs: this.handlesPayloadRequestsTheirs,
-      storeMap: this.storeMap,
+      getStore: this.getStore,
     });
 
     this.payloadIngester = new PayloadIngester({
-      storeMap: this.storeMap,
+      getStore: this.getStore,
     });
 
     // Send encoded messages
@@ -638,6 +675,8 @@ export class WgpsMessenger<
     // Begin handling decoded messages
     onAsyncIterate(decodedMessages, async (message) => {
       await this.handleMessage(message);
+    }, () => {
+      this.close();
     });
 
     // Set private variables for commitment scheme
@@ -860,7 +899,7 @@ export class WgpsMessenger<
     onAsyncIterate(
       this.aoiIntersectionFinder.intersections(),
       (intersection) => {
-        const store = this.storeMap.get(intersection.namespace);
+        const store = this.getStore(intersection.namespace);
 
         const aoiOurs = this.handlesAoisOurs.get(intersection.ours);
 
@@ -919,7 +958,7 @@ export class WgpsMessenger<
     );
   }
 
-  setupData() {
+  private setupData() {
     onAsyncIterate(this.dataSender.messages(), (msg) => {
       this.encoder.encode(msg);
     });
@@ -1264,7 +1303,7 @@ export class WgpsMessenger<
           );
         }
 
-        const store = this.storeMap.get(
+        const store = this.getStore(
           this.currentlyReceivingEntries.namespace,
         );
 
@@ -1333,7 +1372,7 @@ export class WgpsMessenger<
           message.dynamicToken,
         );
 
-        const store = this.storeMap.get(message.entry.namespaceId);
+        const store = this.getStore(message.entry.namespaceId);
 
         const result = await store.ingestEntry(message.entry, authToken);
 
@@ -1435,5 +1474,10 @@ export class WgpsMessenger<
       default:
         throw new WgpsMessageValidationError("Unhandled message type");
     }
+  }
+
+  close() {
+    this.closed = true;
+    this.transport.close();
   }
 }

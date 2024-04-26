@@ -11,7 +11,7 @@ export interface Storage3d<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
-  Fingerprint,
+  Prefingerprint,
 > {
   /** Retrieve a value */
   get(
@@ -45,7 +45,7 @@ export interface Storage3d<
   // Used during sync
   summarise(
     range: Range3d<SubspaceId>,
-  ): Promise<{ fingerprint: Fingerprint; size: number }>;
+  ): Promise<{ fingerprint: Prefingerprint; size: number }>;
 
   splitRange(
     range: Range3d<SubspaceId>,

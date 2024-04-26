@@ -2,8 +2,6 @@ import {
   decodeEntry,
   encodeEntry,
   Entry,
-  equalsBytes,
-  orderBytes,
   PathScheme,
 } from "../../../../deps.ts";
 import {
@@ -12,25 +10,20 @@ import {
   PayloadScheme,
   SubspaceScheme,
 } from "../../types.ts";
-import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
-import { KvDriverInMemory } from "../kv/kv_driver_in_memory.ts";
 import { PrefixedDriver } from "../kv/prefixed_driver.ts";
 import { KvDriver } from "../kv/types.ts";
 import { SimpleKeyIterator } from "../prefix_iterators/simple_key_iterator.ts";
 import { PrefixIterator } from "../prefix_iterators/types.ts";
 import { TripleStorage } from "../storage_3d/triple_storage.ts";
 import { Storage3d } from "../storage_3d/types.ts";
-import { LiftingMonoid } from "../summarisable_storage/lifting_monoid.ts";
-import {
-  SingleKeySkiplist,
-  Skiplist,
-} from "../summarisable_storage/monoid_skiplist.ts";
+import { LinearStorage } from "../summarisable_storage/linear_summarisable_storage.ts";
 import { EntryDriver, PayloadReferenceCounter } from "../types.ts";
 
 type EntryDriverKvOpts<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
+  Prefingerprint,
   Fingerprint,
 > = {
   kvDriver: KvDriver;
@@ -42,6 +35,7 @@ type EntryDriverKvOpts<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
+    Prefingerprint,
     Fingerprint
   >;
   getPayloadLength: (digest: PayloadDigest) => Promise<bigint>;
@@ -52,13 +46,14 @@ export class EntryDriverKvStore<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
+  Prefingerprint,
   Fingerprint,
 > implements
   EntryDriver<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
-    Fingerprint
+    Prefingerprint
   > {
   private namespaceScheme: NamespaceScheme<NamespaceId>;
   private subspaceScheme: SubspaceScheme<SubspaceId>;
@@ -68,6 +63,7 @@ export class EntryDriverKvStore<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
+    Prefingerprint,
     Fingerprint
   >;
 
@@ -83,6 +79,7 @@ export class EntryDriverKvStore<
       NamespaceId,
       SubspaceId,
       PayloadDigest,
+      Prefingerprint,
       Fingerprint
     >,
   ) {
@@ -146,7 +143,7 @@ export class EntryDriverKvStore<
 
   makeStorage(
     namespace: NamespaceId,
-  ): Storage3d<NamespaceId, SubspaceId, PayloadDigest, Fingerprint> {
+  ): Storage3d<NamespaceId, SubspaceId, PayloadDigest, Prefingerprint> {
     const prefixedStorageDriver = new PrefixedDriver(
       ["entries"],
       this.kvDriver,
@@ -158,10 +155,10 @@ export class EntryDriverKvStore<
         monoid,
         id,
       ) => {
-        return new SingleKeySkiplist({
+        return new LinearStorage({
           monoid,
           kv: new PrefixedDriver([id], prefixedStorageDriver),
-          logicalValueEq: equalsBytes,
+          // logicalValueEq: equalsBytes,
         });
       },
       fingerprintScheme: this.fingerprintScheme,

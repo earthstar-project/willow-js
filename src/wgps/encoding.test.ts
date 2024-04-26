@@ -676,6 +676,7 @@ Deno.test("Encoding roundtrip test", async () => {
     TestSubspace,
     Uint8Array,
     Uint8Array,
+    Uint8Array,
     TestSubspace,
     Uint8Array,
     TestNamespace,

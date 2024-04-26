@@ -118,6 +118,8 @@ export interface KvDriver {
   /**
    * Matches an entry whose key is exactly `prefix` (unlike Deno.Kv).
    * `limit` must not be zero (like Deno.Kv).
+   * 
+   * Entries must match both the prefix *and* be included in the start-end range.
    */
   list<Value>(
     selector: { start?: KvKey; end?: KvKey; prefix?: KvKey },
@@ -128,7 +130,7 @@ export interface KvDriver {
     },
   ): AsyncIterable<{ key: KvKey; value: Value }>;
   /**
-   * If prefix is specified, then start and end must be prefixed by it, otherwise unspecified behavior.
+   * Entries must match both the prefix *and* be included in the start-end range to be cleared.
    */
   clear(opts?: { prefix?: KvKey; start?: KvKey; end?: KvKey }): Promise<void>;
   batch(): KvBatch;

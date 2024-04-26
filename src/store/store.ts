@@ -46,6 +46,7 @@ export class Store<
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
+  Prefingerprint,
   Fingerprint,
 > extends EventTarget {
   namespace: NamespaceId;
@@ -56,6 +57,7 @@ export class Store<
     PayloadDigest,
     AuthorisationOpts,
     AuthorisationToken,
+    Prefingerprint,
     Fingerprint
   >;
 
@@ -63,7 +65,7 @@ export class Store<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
-    Fingerprint
+    Prefingerprint
   >;
   private payloadDriver: PayloadDriver<PayloadDigest>;
 
@@ -71,7 +73,7 @@ export class Store<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
-    Fingerprint
+    Prefingerprint
   >;
 
   private checkedWriteAheadFlag = deferred();
@@ -85,6 +87,7 @@ export class Store<
       PayloadDigest,
       AuthorisationOpts,
       AuthorisationToken,
+      Prefingerprint,
       Fingerprint
     >,
   ) {
@@ -280,7 +283,7 @@ export class Store<
     // Check for collisions with stored entries
 
     for await (
-      const { entry: otherEntry, authTokenHash: otherAuthTokenDigest } of this
+      const { entry: otherEntry } of this
         .storage.query(
           {
             range: {
@@ -712,7 +715,7 @@ export class Store<
 
   summarise(
     range: Range3d<SubspaceId>,
-  ): Promise<{ fingerprint: Fingerprint; size: number }> {
+  ): Promise<{ fingerprint: Prefingerprint; size: number }> {
     return this.storage.summarise(range);
   }
 
