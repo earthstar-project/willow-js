@@ -7,9 +7,7 @@ import {
   PathScheme,
 } from "../../../deps.ts";
 import {
-  MSG_SETUP_BIND_AREA_OF_INTEREST,
-  MSG_SETUP_BIND_READ_CAPABILITY,
-  MSG_SETUP_BIND_STATIC_TOKEN,
+  MsgKind,
   MsgSetupBindAreaOfInterest,
   MsgSetupBindReadCapability,
   MsgSetupBindStaticToken,
@@ -49,7 +47,7 @@ export async function decodeSetupBindReadCapability<
   const signature = await decodeSignature(bytes);
 
   return {
-    kind: MSG_SETUP_BIND_READ_CAPABILITY,
+    kind: MsgKind.SetupBindReadCapability,
     handle: BigInt(handle),
     capability,
     signature,
@@ -89,7 +87,7 @@ export async function decodeSetupBindAreaOfInterest<SubspaceId>(
 
   if (!hasALimit) {
     return {
-      kind: MSG_SETUP_BIND_AREA_OF_INTEREST,
+      kind: MsgKind.SetupBindAreaOfInterest,
       areaOfInterest: {
         area: area,
         maxCount: 0,
@@ -122,7 +120,7 @@ export async function decodeSetupBindAreaOfInterest<SubspaceId>(
   bytes.prune(1 + compactWidthCount + compactWidthSize);
 
   return {
-    kind: MSG_SETUP_BIND_AREA_OF_INTEREST,
+    kind: MsgKind.SetupBindAreaOfInterest,
     areaOfInterest: {
       area: area,
       maxCount: Number(maxCount),
@@ -143,7 +141,7 @@ export async function decodeSetupBindStaticToken<StaticToken>(
   const staticToken = await decodeStaticToken(bytes);
 
   return {
-    kind: MSG_SETUP_BIND_STATIC_TOKEN,
+    kind: MsgKind.SetupBindStaticToken,
     staticToken,
   };
 }

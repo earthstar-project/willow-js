@@ -8,16 +8,12 @@ import {
   PathScheme,
 } from "../../../deps.ts";
 import {
-  MSG_DATA_BIND_PAYLOAD_REQUEST,
-  MSG_DATA_REPLY_PAYLOAD,
-  MSG_DATA_SEND_ENTRY,
-  MSG_DATA_SEND_PAYLOAD,
-  MSG_DATA_SET_EAGERNESS,
   MsgDataBindPayloadRequest,
   MsgDataReplyPayload,
   MsgDataSendEntry,
   MsgDataSendPayload,
-  MsgDataSetEagerness,
+  MsgDataSetMetadata,
+  MsgKind,
 } from "../types.ts";
 import { compactWidthFromEndOfByte } from "./util.ts";
 
@@ -159,7 +155,7 @@ export async function decodeDataSendEntry<
   }
 
   return {
-    kind: MSG_DATA_SEND_ENTRY,
+    kind: MsgKind.DataSendEntry,
     entry,
     dynamicToken,
     offset,
@@ -192,7 +188,7 @@ export async function decodeDataSendPayload(
   bytes.prune(1 + compactWidthAmount + amount);
 
   return {
-    kind: MSG_DATA_SEND_PAYLOAD,
+    kind: MsgKind.DataSendPayload,
     amount: BigInt(amount),
     bytes: msgBytes,
   };
@@ -200,7 +196,7 @@ export async function decodeDataSendPayload(
 
 export async function decodeDataSetEagerness(
   bytes: GrowingBytes,
-): Promise<MsgDataSetEagerness> {
+): Promise<MsgDataSetMetadata> {
   await bytes.nextAbsolute(2);
 
   const [firstByte, secondByte] = bytes.array;
@@ -231,7 +227,7 @@ export async function decodeDataSetEagerness(
   bytes.prune(2 + compactWidthSenderHandle + compactWidthReceiverHandle);
 
   return {
-    kind: MSG_DATA_SET_EAGERNESS,
+    kind: MsgKind.DataSetMetadata,
     isEager,
     receiverHandle,
     senderHandle,
@@ -358,7 +354,7 @@ export async function decodeDataBindPayloadRequest<
   }
 
   return {
-    kind: MSG_DATA_BIND_PAYLOAD_REQUEST,
+    kind: MsgKind.DataBindPayloadRequest,
     capability,
     entry,
     offset,
@@ -381,7 +377,7 @@ export async function decodeDataReplyPayload(
   bytes.prune(1 + compactWidthHandle);
 
   return {
-    kind: MSG_DATA_REPLY_PAYLOAD,
+    kind: MsgKind.DataReplyPayload,
     handle,
   };
 }

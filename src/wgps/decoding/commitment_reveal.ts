@@ -1,5 +1,5 @@
 import { GrowingBytes } from "../../../deps.ts";
-import { MSG_COMMITMENT_REVEAL, MsgCommitmentReveal } from "../types.ts";
+import { MsgCommitmentReveal, MsgKind } from "../types.ts";
 
 export async function decodeCommitmentReveal(
   bytes: GrowingBytes,
@@ -10,7 +10,7 @@ export async function decodeCommitmentReveal(
   bytes.prune(1 + challengeLength);
 
   return {
-    kind: MSG_COMMITMENT_REVEAL,
+    kind: MsgKind.CommitmentReveal,
     nonce: commitmentBytes.subarray(1, 1 + challengeLength),
   };
 }

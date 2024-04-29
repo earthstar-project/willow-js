@@ -1,7 +1,4 @@
-import {
-  assert,
-  assertEquals,
-} from "https://deno.land/std@0.202.0/assert/mod.ts";
+import { assertEquals } from "https://deno.land/std@0.202.0/assert/mod.ts";
 import { transportPairInMemory } from "./transports/in_memory.ts";
 import { GetStoreFn, WgpsMessenger } from "./wgps_messenger.ts";
 import {
@@ -73,8 +70,8 @@ testWgpsMessenger(scenarioMemory);
 
 function testWgpsMessenger(scenario: WgpsScenario) {
   Deno.test(`WgpsMessenger (${scenario.name})`, async (test) => {
-    const ALFIE_ENTRIES = 20;
-    const BETTY_ENTRIES = 20;
+    const ALFIE_ENTRIES = 150;
+    const BETTY_ENTRIES = 150;
 
     await test.step("sync", async () => {
       const [alfie, betty] = transportPairInMemory();
