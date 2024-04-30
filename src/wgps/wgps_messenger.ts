@@ -1464,6 +1464,8 @@ export class WgpsMessenger<
     }
 
     this.handlesCapsTheirs.bind(message.capability);
+
+    this.paiFinder.receivedReadCapForIntersection(message.handle);
   }
 
   private async handleMsgAreaOfInterest(

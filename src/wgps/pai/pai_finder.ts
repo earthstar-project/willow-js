@@ -44,6 +44,7 @@ export type PaiFinderOpts<
 const DO_NOTHING = Symbol("do_nothing");
 const BIND_READ_CAP = Symbol("bind_read_cap");
 const REQUEST_SUBSPACE_CAP = Symbol("req_subspace_cap");
+const REPLY_READ_CAP = Symbol("reply_read_cap");
 
 /** Some locally stored information about a given fragment group */
 type LocalFragmentInfo<
@@ -77,6 +78,14 @@ type LocalFragmentInfo<
   path: Path;
   namespace: NamespaceId;
   subspace: typeof ANY_SUBSPACE;
+} | {
+  onIntersection: typeof REPLY_READ_CAP;
+  authorisation: {
+    capability: ReadCapability;
+  };
+  path: Path;
+  namespace: NamespaceId;
+  subspace: SubspaceId | typeof ANY_SUBSPACE;
 };
 
 /** Given `ReadAuthorisation`s, emits intersected  */
@@ -201,7 +210,7 @@ export class PaiFinder<
           });
         } else {
           this.fragmentsInfo.set(groupHandle, {
-            onIntersection: DO_NOTHING,
+            onIntersection: REPLY_READ_CAP,
             authorisation: authorisation,
             namespace,
             path,
@@ -227,7 +236,7 @@ export class PaiFinder<
           });
         } else {
           this.fragmentsInfo.set(groupHandle, {
-            onIntersection: DO_NOTHING,
+            onIntersection: REPLY_READ_CAP,
             authorisation: authorisation,
             namespace,
             path,
@@ -464,6 +473,56 @@ export class PaiFinder<
         end: OPEN_END,
       },
     };
+  }
+
+  receivedReadCapForIntersection(theirIntersectionHandle: bigint) {
+    // This handle is theirs.
+    // Find which one of ours it intersects.
+    // Return the namespace and outer area.
+    const theirIntersection = this.intersectionHandlesTheirs.get(
+      theirIntersectionHandle,
+    );
+
+    if (theirIntersection === undefined) {
+      throw new WgpsMessageValidationError(
+        "Partner tried to bind read capability for unknown intersection handle",
+      );
+    }
+
+    for (const [ourHandle, ourIntersection] of this.intersectionHandlesOurs) {
+      if (!ourIntersection.isComplete) {
+        continue;
+      }
+
+      // Continue here to avoid the false positive of same namespace + path but different subspaces.
+      if (ourIntersection.isSecondary && theirIntersection.isSecondary) {
+        continue;
+      }
+
+      // Check for equality.
+      if (
+        !this.paiScheme.isGroupEqual(
+          ourIntersection.group,
+          theirIntersection.group,
+        )
+      ) {
+        continue;
+      }
+
+      const fragmentInfo = this.fragmentsInfo.get(ourHandle);
+
+      if (!fragmentInfo) {
+        throw new WillowError("Had no fragment info!");
+      }
+
+      if (fragmentInfo.onIntersection === REPLY_READ_CAP) {
+        this.intersectionQueue.push([
+          fragmentInfo.namespace,
+          fragmentInfo.authorisation,
+          ourHandle,
+        ]);
+      }
+    }
   }
 
   getIntersectionPrivy(
