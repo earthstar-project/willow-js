@@ -619,8 +619,8 @@ export class WgpsMessenger<
       transport: this.transport,
       challengeLength: opts.challengeLength,
       schemes: this.schemes,
-      getCap: (handle) => {
-        return this.handlesCapsOurs.getEventually(handle);
+      getTheirCap: (handle) => {
+        return this.handlesCapsTheirs.getEventually(handle);
       },
       getIntersectionPrivy: (handle) => {
         return this.paiFinder.getIntersectionPrivy(handle);
