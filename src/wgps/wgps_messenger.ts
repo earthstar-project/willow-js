@@ -507,7 +507,7 @@ export class WgpsMessenger<
 
     this.encoder = new MessageEncoder(opts.schemes, {
       getIntersectionPrivy: (handle) => {
-        return this.paiFinder.getIntersectionPrivy(handle);
+        return this.paiFinder.getIntersectionPrivy(handle, true);
       },
       getCap: (handle) => {
         const cap = this.handlesCapsOurs.get(handle);
@@ -623,7 +623,7 @@ export class WgpsMessenger<
         return this.handlesCapsTheirs.getEventually(handle);
       },
       getIntersectionPrivy: (handle) => {
-        return this.paiFinder.getIntersectionPrivy(handle);
+        return this.paiFinder.getIntersectionPrivy(handle, false);
       },
       defaultNamespaceId: this.schemes.namespace.defaultNamespaceId,
       defaultSubspaceId: this.schemes.subspace.minimalSubspaceId,
@@ -1138,6 +1138,7 @@ export class WgpsMessenger<
           message.handle,
           namespace,
         );
+
         this.handlesIntersectionsOurs.decrementHandleReference(message.handle);
         break;
       }

@@ -527,37 +527,48 @@ export class PaiFinder<
 
   getIntersectionPrivy(
     handle: bigint,
+    ours: boolean,
   ): ReadCapPrivy<NamespaceId, SubspaceId> {
-    // This handle is theirs.
-    // Find which one of ours it intersects.
-    // Return the namespace and outer area.
-    const theirIntersection = this.intersectionHandlesTheirs.get(handle);
+    const storeToGetHandleFrom = ours
+      ? this.intersectionHandlesOurs
+      : this.intersectionHandlesTheirs;
+    const storeToCheckAgainst = ours
+      ? this.intersectionHandlesTheirs
+      : this.intersectionHandlesOurs;
 
-    if (theirIntersection === undefined) {
-      throw new WgpsMessageValidationError(
-        "Partner tried to bind read capability for unknown intersection handle",
-      );
+    const intersection = storeToGetHandleFrom.get(handle);
+
+    if (!intersection) {
+      throw new WillowError("Tried to get a handle we don't have");
     }
 
-    for (const [ourHandle, ourIntersection] of this.intersectionHandlesOurs) {
-      if (!ourIntersection.isComplete) {
+    // Here we are looping through the whole contents of the handle store because...
+    // otherwise we need to build a special handle store just for intersections.
+    // Which we might do one day, but I'm not convinced it's worth it yet.
+    for (
+      const [otherHandle, otherIntersection] of storeToCheckAgainst
+    ) {
+      if (!otherIntersection.isComplete) {
         continue;
       }
 
       // Continue here to avoid the false positive of same namespace + path but different subspaces.
-      if (ourIntersection.isSecondary && theirIntersection.isSecondary) {
+      if (intersection.isSecondary && otherIntersection.isSecondary) {
         continue;
       }
 
       // Check for equality.
       if (
         !this.paiScheme.isGroupEqual(
-          ourIntersection.group,
-          theirIntersection.group,
+          intersection.group,
+          otherIntersection.group,
         )
       ) {
         continue;
       }
+
+      // If there is an intersection, check what we have to do!
+      const ourHandle = ours ? handle : otherHandle;
 
       const fragmentInfo = this.fragmentsInfo.get(ourHandle);
 
