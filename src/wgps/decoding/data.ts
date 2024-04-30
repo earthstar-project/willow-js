@@ -245,7 +245,11 @@ export async function decodeDataBindPayloadRequest<
     decodeSubspaceId: (bytes: GrowingBytes) => Promise<SubspaceId>;
     decodePayloadDigest: (bytes: GrowingBytes) => Promise<PayloadDigest>;
     pathScheme: PathScheme;
-    currentlyReceivedEntry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+    getCurrentlyReceivedEntry: () => Entry<
+      NamespaceId,
+      SubspaceId,
+      PayloadDigest
+    >;
     aoiHandlesToArea: (
       senderHandle: bigint,
       receiverHandle: bigint,
@@ -316,7 +320,7 @@ export async function decodeDataBindPayloadRequest<
         pathScheme: opts.pathScheme,
       },
       bytes,
-      opts.currentlyReceivedEntry,
+      opts.getCurrentlyReceivedEntry(),
     );
   } else if (
     !isEncodedRelativeToCurrEntry && compactWidthSenderHandle > 0 &&

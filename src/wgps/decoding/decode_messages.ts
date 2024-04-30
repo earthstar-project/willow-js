@@ -200,7 +200,7 @@ export async function* decodeMessages<
         decodePayloadDigest: opts.schemes.payload.decodeStream,
         decodeSubspaceId: opts.schemes.subspace.decodeStream,
         pathScheme: opts.schemes.path,
-        currentlyReceivedEntry: opts.getCurrentlyReceivedEntry(),
+        getCurrentlyReceivedEntry: () => opts.getCurrentlyReceivedEntry(),
         aoiHandlesToNamespace: opts.aoiHandlesToNamespace,
         aoiHandlesToArea: opts.aoiHandlesToArea,
       });

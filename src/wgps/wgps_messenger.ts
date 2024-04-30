@@ -30,7 +30,6 @@ import {
   IntersectionChannelMsg,
   IS_ALFIE,
   LogicalChannel,
-  messageNames,
   MsgKind,
   NoChannelMsg,
   PayloadRequestChannelMsg,
@@ -696,12 +695,30 @@ export class WgpsMessenger<
 
     // Begin handling decoded messages
     onAsyncIterate(decodedMessages, (msg) => {
+      /*
       console.log(
         `%c${this.transport.role === IS_ALFIE ? "Alfie" : "Betty"} got: ${
           messageNames[msg.kind]
         }`,
         `color: ${this.transport.role === IS_ALFIE ? "red" : "blue"}`,
       );
+      */
+
+      if (msg.kind === MsgKind.DataSendEntry) {
+        this.currentlyReceivedEntry = msg.entry;
+        this.currentlyReceivedOffset = msg.offset;
+      } else if (msg.kind === MsgKind.DataReplyPayload) {
+        const request = this.handlesPayloadRequestsOurs.get(msg.handle);
+
+        if (!request) {
+          throw new WillowError(
+            "Could not dereference handle for payload request",
+          );
+        }
+
+        this.currentlyReceivedEntry = request.entry;
+        this.currentlyReceivedOffset = request.offset;
+      }
 
       switch (msg.kind) {
         case MsgKind.PaiBindFragment:
@@ -1051,6 +1068,20 @@ export class WgpsMessenger<
   private setupData() {
     onAsyncIterate(this.dataSender.messages(), (msg) => {
       this.encoder.encode(msg);
+
+      if (msg.kind === MsgKind.DataSendEntry) {
+        this.currentlySentEntry = msg.entry;
+      } else if (msg.kind === MsgKind.DataReplyPayload) {
+        const request = this.handlesPayloadRequestsTheirs.get(msg.handle);
+
+        if (!request) {
+          throw new WillowError(
+            "Could not dereference handle for payload request",
+          );
+        }
+
+        this.currentlySentEntry = request.entry;
+      }
     });
   }
 
@@ -1390,9 +1421,6 @@ export class WgpsMessenger<
           throw new WgpsMessageValidationError(result.message);
         }
 
-        this.currentlyReceivedEntry = message.entry;
-        this.currentlyReceivedOffset = message.offset;
-
         this.payloadIngester.target(message.entry);
 
         break;
@@ -1422,9 +1450,6 @@ export class WgpsMessenger<
             "Could not dereference payload request handle",
           );
         }
-
-        this.currentlyReceivedEntry = result.entry;
-        this.currentlyReceivedOffset = result.offset;
 
         this.payloadIngester.target(result.entry);
 
@@ -1464,7 +1489,7 @@ export class WgpsMessenger<
       );
     }
 
-    this.handlesCapsTheirs.bind(message.capability);
+    const newHandle = this.handlesCapsTheirs.bind(message.capability);
 
     this.paiFinder.receivedReadCapForIntersection(message.handle);
   }
@@ -1522,12 +1547,14 @@ export class WgpsMessenger<
     );
 
     if (
-      !this.schemes.namespace.isEqual(
+      this.schemes.namespace.isEqual(
         message.entry.namespaceId,
         grantedNamespace,
-      )
+      ) === false
     ) {
-      throw new WgpsMessageValidationError("Cap did not match entry");
+      throw new WgpsMessageValidationError(
+        "Cap did not match entry's namespace",
+      );
     }
 
     const position = entryPosition(message.entry);
@@ -1541,7 +1568,7 @@ export class WgpsMessenger<
     );
 
     if (!isEntryWithinCap) {
-      throw new WgpsMessageValidationError("Cap did not match entry");
+      throw new WgpsMessageValidationError("Entry not covered by capability");
     }
 
     const handle = this.handlesPayloadRequestsTheirs.bind({
