@@ -3,12 +3,10 @@ import { HandleStore } from "../handle_store.ts";
 import { WillowError } from "../../errors.ts";
 import { Payload } from "../../store/types.ts";
 import {
-  MSG_DATA_REPLY_PAYLOAD,
-  MSG_DATA_SEND_ENTRY,
-  MSG_DATA_SEND_PAYLOAD,
   MsgDataReplyPayload,
   MsgDataSendEntry,
   MsgDataSendPayload,
+  MsgKind,
 } from "../types.ts";
 import { GetStoreFn } from "../wgps_messenger.ts";
 
@@ -124,7 +122,7 @@ export class DataSender<
     for await (const pack of this.internalQueue) {
       if ("entry" in pack) {
         yield {
-          kind: MSG_DATA_SEND_ENTRY,
+          kind: MsgKind.DataSendEntry,
           entry: pack.entry,
           offset: BigInt(pack.offset),
           dynamicToken: pack.dynamicToken,
@@ -132,7 +130,7 @@ export class DataSender<
         };
       } else {
         yield {
-          kind: MSG_DATA_REPLY_PAYLOAD,
+          kind: MsgKind.DataReplyPayload,
           handle: pack.handle,
         };
       }
@@ -141,11 +139,14 @@ export class DataSender<
 
       for await (const chunk of payloadIterator) {
         yield {
-          kind: MSG_DATA_SEND_PAYLOAD,
+          kind: MsgKind.DataSendPayload,
           amount: BigInt(chunk.byteLength),
           bytes: chunk,
         };
       }
+
+      console.groupEnd();
+      console.groupEnd();
     }
   }
 }

@@ -9,9 +9,7 @@ import {
   Range3d,
 } from "../../../deps.ts";
 import {
-  MSG_RECONCILIATION_ANNOUNCE_ENTRIES,
-  MSG_RECONCILIATION_SEND_ENTRY,
-  MSG_RECONCILIATION_SEND_FINGERPRINT,
+  MsgKind,
   MsgReconciliationAnnounceEntries,
   MsgReconciliationSendEntry,
   MsgReconciliationSendFingerprint,
@@ -139,7 +137,7 @@ export async function decodeReconciliationSendFingerprint<
   );
 
   return {
-    kind: MSG_RECONCILIATION_SEND_FINGERPRINT,
+    kind: MsgKind.ReconciliationSendFingerprint,
     fingerprint,
     range,
     receiverHandle,
@@ -256,7 +254,7 @@ export async function decodeReconciliationAnnounceEntries<
   );
 
   return {
-    kind: MSG_RECONCILIATION_ANNOUNCE_ENTRIES,
+    kind: MsgKind.ReconciliationAnnounceEntries,
     range,
     count,
     receiverHandle,
@@ -369,7 +367,7 @@ export async function decodeReconciliationSendEntry<
   }
 
   return {
-    kind: MSG_RECONCILIATION_SEND_ENTRY,
+    kind: MsgKind.ReconciliationSendEntry,
     dynamicToken,
     entry: {
       available,

@@ -2,18 +2,13 @@ import { decodeCompactWidth, GrowingBytes } from "../../../deps.ts";
 import {
   HandleType,
   LogicalChannel,
-  MSG_CONTROL_ABSOLVE,
-  MSG_CONTROL_ANNOUNCE_DROPPING,
-  MSG_CONTROL_APOLOGISE,
-  MSG_CONTROL_FREE,
-  MSG_CONTROL_ISSUE_GUARANTEE,
-  MSG_CONTROL_PLEAD,
   MsgControlAbsolve,
   MsgControlAnnounceDropping,
   MsgControlApologise,
   MsgControlFree,
   MsgControlIssueGuarantee,
   MsgControlPlead,
+  MsgKind,
 } from "../types.ts";
 import { compactWidthFromEndOfByte } from "./util.ts";
 
@@ -89,7 +84,7 @@ export async function decodeControlIssueGuarantee(
   bytes.prune(2 + compactWidth);
 
   return {
-    kind: MSG_CONTROL_ISSUE_GUARANTEE,
+    kind: MsgKind.ControlIssueGuarantee,
     channel,
     amount: BigInt(amount),
   };
@@ -113,7 +108,7 @@ export async function decodeControlAbsolve(
   bytes.prune(2 + compactWidth);
 
   return {
-    kind: MSG_CONTROL_ABSOLVE,
+    kind: MsgKind.ControlAbsolve,
     channel,
     amount: BigInt(amount),
   };
@@ -137,7 +132,7 @@ export async function decodeControlPlead(
   bytes.prune(2 + compactWidth);
 
   return {
-    kind: MSG_CONTROL_PLEAD,
+    kind: MsgKind.ControlPlead,
     channel,
     target: BigInt(target),
   };
@@ -153,7 +148,7 @@ export async function decodeControlAnnounceDropping(
   bytes.prune(1);
 
   return {
-    kind: MSG_CONTROL_ANNOUNCE_DROPPING,
+    kind: MsgKind.ControlAnnounceDropping,
     channel,
   };
 }
@@ -168,7 +163,7 @@ export async function decodeControlApologise(
   bytes.prune(1);
 
   return {
-    kind: MSG_CONTROL_APOLOGISE,
+    kind: MsgKind.ControlApologise,
     channel,
   };
 }
@@ -193,7 +188,7 @@ export async function decodeControlFree(
   bytes.prune(2 + compactWidth);
 
   return {
-    kind: MSG_CONTROL_FREE,
+    kind: MsgKind.ControlFree,
     handleType,
     handle: BigInt(handle),
     mine,

@@ -84,7 +84,7 @@ export type DecodeMessagesOpts<
   getIntersectionPrivy: (
     handle: bigint,
   ) => ReadCapPrivy<NamespaceId, SubspaceId>;
-  getCap: (handle: bigint) => Promise<ReadCapability>;
+  getTheirCap: (handle: bigint) => Promise<ReadCapability>;
   getCurrentlyReceivedEntry: () => Entry<
     NamespaceId,
     SubspaceId,
@@ -200,7 +200,7 @@ export async function* decodeMessages<
         decodePayloadDigest: opts.schemes.payload.decodeStream,
         decodeSubspaceId: opts.schemes.subspace.decodeStream,
         pathScheme: opts.schemes.path,
-        currentlyReceivedEntry: opts.getCurrentlyReceivedEntry(),
+        getCurrentlyReceivedEntry: () => opts.getCurrentlyReceivedEntry(),
         aoiHandlesToNamespace: opts.aoiHandlesToNamespace,
         aoiHandlesToArea: opts.aoiHandlesToArea,
       });
@@ -295,7 +295,7 @@ export async function* decodeMessages<
       yield await decodeSetupBindAreaOfInterest(
         bytes,
         async (authHandle) => {
-          const cap = await opts.getCap(authHandle);
+          const cap = await opts.getTheirCap(authHandle);
           return opts.schemes.accessControl.getGrantedArea(cap);
         },
         opts.schemes.subspace.decodeStream,

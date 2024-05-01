@@ -89,15 +89,13 @@ export class Announcer<
     this.staticTokenHandleStoreOurs = opts.staticTokenHandleStoreOurs;
   }
 
-  private async getStaticTokenHandle(
+  private getStaticTokenHandle(
     staticToken: StaticToken,
-  ): Promise<{ handle: bigint; alreadyExisted: boolean }> {
+  ): { handle: bigint; alreadyExisted: boolean } {
     const encoded = this.authorisationTokenScheme.encodings.staticToken.encode(
       staticToken,
     );
-    const digest = await this.payloadScheme.fromBytes(encoded);
-    const encodedDigest = this.payloadScheme.encode(digest);
-    const base64 = encodeBase64(encodedDigest);
+    const base64 = encodeBase64(encoded);
 
     const existingHandle = this.staticTokenHandleMap.get(base64);
 
@@ -155,7 +153,7 @@ export class Announcer<
       const {
         handle: staticTokenHandle,
         alreadyExisted: staticTokenHandleAlreadyExisted,
-      } = await this.getStaticTokenHandle(staticToken);
+      } = this.getStaticTokenHandle(staticToken);
 
       if (!staticTokenHandleAlreadyExisted) {
         staticTokenBinds.push(staticToken);

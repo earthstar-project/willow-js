@@ -5,28 +5,7 @@ import { transportPairInMemory } from "./transports/in_memory.ts";
 import {
   HandleType,
   LogicalChannel,
-  MSG_COMMITMENT_REVEAL,
-  MSG_CONTROL_ABSOLVE,
-  MSG_CONTROL_ANNOUNCE_DROPPING,
-  MSG_CONTROL_APOLOGISE,
-  MSG_CONTROL_FREE,
-  MSG_CONTROL_ISSUE_GUARANTEE,
-  MSG_CONTROL_PLEAD,
-  MSG_DATA_BIND_PAYLOAD_REQUEST,
-  MSG_DATA_REPLY_PAYLOAD,
-  MSG_DATA_SEND_ENTRY,
-  MSG_DATA_SEND_PAYLOAD,
-  MSG_DATA_SET_EAGERNESS,
-  MSG_PAI_BIND_FRAGMENT,
-  MSG_PAI_REPLY_FRAGMENT,
-  MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
-  MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
-  MSG_RECONCILIATION_ANNOUNCE_ENTRIES,
-  MSG_RECONCILIATION_SEND_ENTRY,
-  MSG_RECONCILIATION_SEND_FINGERPRINT,
-  MSG_SETUP_BIND_AREA_OF_INTEREST,
-  MSG_SETUP_BIND_READ_CAPABILITY,
-  MSG_SETUP_BIND_STATIC_TOKEN,
+  MsgKind,
   MsgReconciliationAnnounceEntries,
   MsgReconciliationSendEntry,
   SyncMessage,
@@ -74,98 +53,98 @@ const vectors: SyncMessage<
   ArrayBuffer
 >[] = [
   {
-    kind: MSG_COMMITMENT_REVEAL,
+    kind: MsgKind.CommitmentReveal,
     nonce: crypto.getRandomValues(new Uint8Array(4)),
   },
   {
-    kind: MSG_CONTROL_ISSUE_GUARANTEE,
+    kind: MsgKind.ControlIssueGuarantee,
     channel: LogicalChannel.IntersectionChannel,
     amount: BigInt(1),
   },
   {
-    kind: MSG_CONTROL_ISSUE_GUARANTEE,
+    kind: MsgKind.ControlIssueGuarantee,
     channel: LogicalChannel.CapabilityChannel,
     amount: BigInt(256),
   },
   {
-    kind: MSG_CONTROL_ISSUE_GUARANTEE,
+    kind: MsgKind.ControlIssueGuarantee,
     channel: LogicalChannel.IntersectionChannel,
     amount: BigInt(65536),
   },
   {
-    kind: MSG_CONTROL_ISSUE_GUARANTEE,
+    kind: MsgKind.ControlIssueGuarantee,
     channel: LogicalChannel.CapabilityChannel,
     amount: BigInt(2147483648),
   },
   {
-    kind: MSG_CONTROL_ABSOLVE,
+    kind: MsgKind.ControlAbsolve,
     channel: LogicalChannel.IntersectionChannel,
     amount: BigInt(1),
   },
   {
-    kind: MSG_CONTROL_ABSOLVE,
+    kind: MsgKind.ControlAbsolve,
     channel: LogicalChannel.CapabilityChannel,
     amount: BigInt(256),
   },
   {
-    kind: MSG_CONTROL_ABSOLVE,
+    kind: MsgKind.ControlAbsolve,
     channel: LogicalChannel.IntersectionChannel,
     amount: BigInt(65536),
   },
 
   {
-    kind: MSG_CONTROL_ABSOLVE,
+    kind: MsgKind.ControlAbsolve,
     channel: LogicalChannel.IntersectionChannel,
     amount: BigInt(2147483648),
   },
   {
-    kind: MSG_CONTROL_PLEAD,
+    kind: MsgKind.ControlPlead,
     channel: LogicalChannel.CapabilityChannel,
     target: BigInt(1),
   },
   {
-    kind: MSG_CONTROL_PLEAD,
+    kind: MsgKind.ControlPlead,
     channel: LogicalChannel.IntersectionChannel,
     target: BigInt(256),
   },
   {
-    kind: MSG_CONTROL_PLEAD,
+    kind: MsgKind.ControlPlead,
     channel: LogicalChannel.CapabilityChannel,
     target: BigInt(65536),
   },
   {
-    kind: MSG_CONTROL_PLEAD,
+    kind: MsgKind.ControlPlead,
     channel: LogicalChannel.IntersectionChannel,
     target: BigInt(2147483648),
   },
   {
-    kind: MSG_CONTROL_ANNOUNCE_DROPPING,
+    kind: MsgKind.ControlAnnounceDropping,
     channel: LogicalChannel.CapabilityChannel,
   },
   {
-    kind: MSG_CONTROL_APOLOGISE,
+    kind: MsgKind.ControlApologise,
     channel: LogicalChannel.IntersectionChannel,
   },
   {
-    kind: MSG_CONTROL_FREE,
+    kind: MsgKind.ControlFree,
     handle: BigInt(1),
     handleType: HandleType.IntersectionHandle,
     mine: true,
   },
   {
-    kind: MSG_CONTROL_FREE,
+    kind: MsgKind.ControlFree,
     handle: BigInt(256),
     handleType: HandleType.CapabilityHandle,
     mine: false,
   },
   {
-    kind: MSG_CONTROL_FREE,
+    kind: MsgKind.ControlFree,
     handle: BigInt(65536),
     handleType: HandleType.IntersectionHandle,
     mine: true,
   },
   {
-    kind: MSG_CONTROL_FREE,
+    kind: MsgKind.ControlFree,
     handle: BigInt(2147483648),
     handleType: HandleType.IntersectionHandle,
     mine: false,
@@ -174,56 +153,56 @@ const vectors: SyncMessage<
   // PAI
 
   {
-    kind: MSG_PAI_BIND_FRAGMENT,
+    kind: MsgKind.PaiBindFragment,
     isSecondary: false,
     groupMember: crypto.getRandomValues(new Uint8Array(32)),
   },
   {
-    kind: MSG_PAI_BIND_FRAGMENT,
+    kind: MsgKind.PaiBindFragment,
     isSecondary: true,
     groupMember: crypto.getRandomValues(new Uint8Array(32)),
   },
 
   {
-    kind: MSG_PAI_REPLY_FRAGMENT,
+    kind: MsgKind.PaiReplyFragment,
     groupMember: crypto.getRandomValues(new Uint8Array(32)),
     handle: BigInt(1),
   },
   {
-    kind: MSG_PAI_REPLY_FRAGMENT,
+    kind: MsgKind.PaiReplyFragment,
     groupMember: crypto.getRandomValues(new Uint8Array(32)),
     handle: BigInt(256),
   },
   {
-    kind: MSG_PAI_REPLY_FRAGMENT,
+    kind: MsgKind.PaiReplyFragment,
     groupMember: crypto.getRandomValues(new Uint8Array(32)),
     handle: BigInt(65536),
   },
   {
-    kind: MSG_PAI_REPLY_FRAGMENT,
+    kind: MsgKind.PaiReplyFragment,
     groupMember: crypto.getRandomValues(new Uint8Array(32)),
     handle: BigInt(2147483648),
   },
 
   {
-    kind: MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiRequestSubspaceCapability,
     handle: BigInt(1),
   },
   {
-    kind: MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiRequestSubspaceCapability,
     handle: BigInt(256),
   },
   {
-    kind: MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiRequestSubspaceCapability,
     handle: BigInt(65536),
   },
   {
-    kind: MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiRequestSubspaceCapability,
     handle: BigInt(2147483648),
   },
 
   {
-    kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiReplySubspaceCapability,
     handle: BigInt(1),
     capability: {
       namespace: TestNamespace.Family,
@@ -238,7 +217,7 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiReplySubspaceCapability,
     handle: BigInt(256),
     capability: {
       namespace: TestNamespace.Family,
@@ -252,7 +231,7 @@ const vectors: SyncMessage<
     signature: crypto.getRandomValues(new Uint8Array(33)),
   },
   {
-    kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiReplySubspaceCapability,
     handle: BigInt(65536),
     capability: {
       namespace: TestNamespace.Family,
@@ -266,7 +245,7 @@ const vectors: SyncMessage<
     signature: crypto.getRandomValues(new Uint8Array(33)),
   },
   {
-    kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiReplySubspaceCapability,
     handle: BigInt(2147483648),
     capability: {
       namespace: TestNamespace.Family,
@@ -283,7 +262,7 @@ const vectors: SyncMessage<
   // Setup
 
   {
-    kind: MSG_SETUP_BIND_READ_CAPABILITY,
+    kind: MsgKind.SetupBindReadCapability,
     capability: {
       receiver: TestSubspace.Alfie,
       namespace: TestNamespace.Family,
@@ -299,7 +278,7 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_SETUP_BIND_READ_CAPABILITY,
+    kind: MsgKind.SetupBindReadCapability,
     capability: {
       receiver: TestSubspace.Alfie,
       namespace: TestNamespace.Project,
@@ -315,7 +294,7 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_SETUP_BIND_AREA_OF_INTEREST,
+    kind: MsgKind.SetupBindAreaOfInterest,
     authorisation: BigInt(23),
     areaOfInterest: {
       area: {
@@ -332,7 +311,7 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_SETUP_BIND_AREA_OF_INTEREST,
+    kind: MsgKind.SetupBindAreaOfInterest,
     authorisation: BigInt(5),
     areaOfInterest: {
       area: {
@@ -349,14 +328,14 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_SETUP_BIND_STATIC_TOKEN,
+    kind: MsgKind.SetupBindStaticToken,
     staticToken: TestSubspace.Epson,
   },
 
   // Reconciliation
 
   {
-    kind: MSG_RECONCILIATION_SEND_FINGERPRINT,
+    kind: MsgKind.ReconciliationSendFingerprint,
     fingerprint: crypto.getRandomValues(new Uint8Array(32)),
     receiverHandle: 2048n,
     senderHandle: 500000n,
@@ -377,7 +356,7 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_RECONCILIATION_SEND_FINGERPRINT,
+    kind: MsgKind.ReconciliationSendFingerprint,
     fingerprint: crypto.getRandomValues(new Uint8Array(32)),
     receiverHandle: 0n,
     senderHandle: 0n,
@@ -402,7 +381,7 @@ const vectors: SyncMessage<
   // Data
 
   {
-    kind: MSG_DATA_SEND_ENTRY,
+    kind: MsgKind.DataSendEntry,
     dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
     staticTokenHandle: 8000000000n,
     entry: {
@@ -417,7 +396,7 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_DATA_SEND_ENTRY,
+    kind: MsgKind.DataSendEntry,
     dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
     staticTokenHandle: 23n,
     entry: {
@@ -432,7 +411,7 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_DATA_SEND_ENTRY,
+    kind: MsgKind.DataSendEntry,
     dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
     staticTokenHandle: 23n,
     entry: {
@@ -447,27 +426,27 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_DATA_SEND_PAYLOAD,
+    kind: MsgKind.DataSendPayload,
     amount: 32n,
     bytes: crypto.getRandomValues(new Uint8Array(32)),
   },
 
   {
-    kind: MSG_DATA_SET_EAGERNESS,
+    kind: MsgKind.DataSetMetadata,
     isEager: true,
     receiverHandle: 3n,
     senderHandle: 579n,
   },
 
   {
-    kind: MSG_DATA_SET_EAGERNESS,
+    kind: MsgKind.DataSetMetadata,
     isEager: false,
     receiverHandle: 0n,
     senderHandle: 21555n,
   },
 
   {
-    kind: MSG_DATA_BIND_PAYLOAD_REQUEST,
+    kind: MsgKind.DataBindPayloadRequest,
     capability: 43n,
     entry: {
       namespaceId: TestNamespace.Family,
@@ -481,7 +460,7 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_DATA_BIND_PAYLOAD_REQUEST,
+    kind: MsgKind.DataBindPayloadRequest,
     capability: 1000n,
     entry: {
       namespaceId: TestNamespace.Family,
@@ -495,7 +474,7 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_DATA_REPLY_PAYLOAD,
+    kind: MsgKind.DataReplyPayload,
     handle: 400n,
   },
 ];
@@ -512,7 +491,7 @@ const sendEntryVectors: (
   >
 )[] = [
   {
-    kind: MSG_RECONCILIATION_ANNOUNCE_ENTRIES,
+    kind: MsgKind.ReconciliationAnnounceEntries,
     receiverHandle: 220n,
     senderHandle: 250n,
     wantResponse: true,
@@ -534,7 +513,7 @@ const sendEntryVectors: (
     },
   },
   {
-    kind: MSG_RECONCILIATION_SEND_ENTRY,
+    kind: MsgKind.ReconciliationSendEntry,
     dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
     staticTokenHandle: 8n,
     entry: {
@@ -550,7 +529,7 @@ const sendEntryVectors: (
     },
   },
   {
-    kind: MSG_RECONCILIATION_ANNOUNCE_ENTRIES,
+    kind: MsgKind.ReconciliationAnnounceEntries,
     receiverHandle: 0n,
     senderHandle: 0n,
     wantResponse: false,
@@ -572,7 +551,7 @@ const sendEntryVectors: (
     },
   },
   {
-    kind: MSG_RECONCILIATION_ANNOUNCE_ENTRIES,
+    kind: MsgKind.ReconciliationAnnounceEntries,
     receiverHandle: 0n,
     senderHandle: 0n,
     wantResponse: false,
@@ -595,7 +574,7 @@ const sendEntryVectors: (
   },
 
   {
-    kind: MSG_RECONCILIATION_SEND_ENTRY,
+    kind: MsgKind.ReconciliationSendEntry,
     dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
     staticTokenHandle: 80n,
     entry: {
@@ -611,7 +590,7 @@ const sendEntryVectors: (
     },
   },
   {
-    kind: MSG_RECONCILIATION_SEND_ENTRY,
+    kind: MsgKind.ReconciliationSendEntry,
     dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
     staticTokenHandle: 800n,
     entry: {
@@ -627,7 +606,7 @@ const sendEntryVectors: (
     },
   },
   {
-    kind: MSG_RECONCILIATION_SEND_ENTRY,
+    kind: MsgKind.ReconciliationSendEntry,
     dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
     staticTokenHandle: 8000000n,
     entry: {
@@ -643,7 +622,7 @@ const sendEntryVectors: (
     },
   },
   {
-    kind: MSG_RECONCILIATION_SEND_ENTRY,
+    kind: MsgKind.ReconciliationSendEntry,
     dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
     staticTokenHandle: 8000000000n,
     entry: {

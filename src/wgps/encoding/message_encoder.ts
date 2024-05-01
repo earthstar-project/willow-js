@@ -2,28 +2,7 @@ import { Entry, FIFO } from "../../../deps.ts";
 import { WillowError } from "../../errors.ts";
 import {
   LogicalChannel,
-  MSG_COMMITMENT_REVEAL,
-  MSG_CONTROL_ABSOLVE,
-  MSG_CONTROL_ANNOUNCE_DROPPING,
-  MSG_CONTROL_APOLOGISE,
-  MSG_CONTROL_FREE,
-  MSG_CONTROL_ISSUE_GUARANTEE,
-  MSG_CONTROL_PLEAD,
-  MSG_DATA_BIND_PAYLOAD_REQUEST,
-  MSG_DATA_REPLY_PAYLOAD,
-  MSG_DATA_SEND_ENTRY,
-  MSG_DATA_SEND_PAYLOAD,
-  MSG_DATA_SET_EAGERNESS,
-  MSG_PAI_BIND_FRAGMENT,
-  MSG_PAI_REPLY_FRAGMENT,
-  MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
-  MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
-  MSG_RECONCILIATION_ANNOUNCE_ENTRIES,
-  MSG_RECONCILIATION_SEND_ENTRY,
-  MSG_RECONCILIATION_SEND_FINGERPRINT,
-  MSG_SETUP_BIND_AREA_OF_INTEREST,
-  MSG_SETUP_BIND_READ_CAPABILITY,
-  MSG_SETUP_BIND_STATIC_TOKEN,
+  MsgKind,
   ReadCapPrivy,
   SyncMessage,
   SyncSchemes,
@@ -64,6 +43,7 @@ import {
   encodeDataSendPayload,
   encodeDataSetEagerness,
 } from "./data.ts";
+import { msgLogicalChannels } from "../channels.ts";
 
 export type EncodedSyncMessage = {
   channel: LogicalChannel | null;
@@ -166,97 +146,83 @@ export class MessageEncoder<
       });
     };
 
+    let bytes: Uint8Array;
+
     switch (message.kind) {
       // Control messages
-      case MSG_CONTROL_ISSUE_GUARANTEE: {
-        const bytes = encodeControlIssueGuarantee(message);
-        push(null, bytes);
+      case MsgKind.ControlIssueGuarantee: {
+        bytes = encodeControlIssueGuarantee(message);
         break;
       }
-      case MSG_CONTROL_ABSOLVE: {
-        const bytes = encodeControlAbsolve(message);
-        push(null, bytes);
+      case MsgKind.ControlAbsolve: {
+        bytes = encodeControlAbsolve(message);
         break;
       }
-      case MSG_CONTROL_PLEAD: {
-        const bytes = encodeControlPlead(message);
-        push(null, bytes);
+      case MsgKind.ControlPlead: {
+        bytes = encodeControlPlead(message);
         break;
       }
-      case MSG_CONTROL_ANNOUNCE_DROPPING: {
-        const bytes = encodeControlAnnounceDropping(message);
-        push(null, bytes);
+      case MsgKind.ControlAnnounceDropping: {
+        bytes = encodeControlAnnounceDropping(message);
         break;
       }
-      case MSG_CONTROL_APOLOGISE: {
-        const bytes = encodeControlApologise(message);
-        push(null, bytes);
+      case MsgKind.ControlApologise: {
+        bytes = encodeControlApologise(message);
         break;
       }
-      case MSG_CONTROL_FREE: {
-        const bytes = encodeControlFree(message);
-        push(null, bytes);
+      case MsgKind.ControlFree: {
+        bytes = encodeControlFree(message);
         break;
       }
 
       // Commitment scheme and PAI
-      case MSG_COMMITMENT_REVEAL: {
-        const bytes = encodeCommitmentReveal(message);
-        push(null, bytes);
+      case MsgKind.CommitmentReveal: {
+        bytes = encodeCommitmentReveal(message);
         break;
       }
-      case MSG_PAI_BIND_FRAGMENT: {
-        const bytes = encodePaiBindFragment(
+      case MsgKind.PaiBindFragment: {
+        bytes = encodePaiBindFragment(
           message,
           this.schemes.pai.groupMemberEncoding.encode,
         );
-        push(LogicalChannel.IntersectionChannel, bytes);
         break;
       }
-      case MSG_PAI_REPLY_FRAGMENT: {
-        const bytes = encodePaiReplyFragment(
+      case MsgKind.PaiReplyFragment: {
+        bytes = encodePaiReplyFragment(
           message,
           this.schemes.pai.groupMemberEncoding.encode,
         );
-        push(LogicalChannel.IntersectionChannel, bytes);
         break;
       }
-      case MSG_PAI_REQUEST_SUBSPACE_CAPABILITY: {
-        const bytes = encodePaiRequestSubspaceCapability(message);
-        push(LogicalChannel.IntersectionChannel, bytes);
+      case MsgKind.PaiRequestSubspaceCapability: {
+        bytes = encodePaiRequestSubspaceCapability(message);
         break;
       }
-      case MSG_PAI_REPLY_SUBSPACE_CAPABILITY: {
-        const bytes = encodePaiReplySubspaceCapability(
+      case MsgKind.PaiReplySubspaceCapability: {
+        bytes = encodePaiReplySubspaceCapability(
           message,
           this.schemes.subspaceCap.encodings.subspaceCapability.encode,
           this.schemes.subspaceCap.encodings.syncSubspaceSignature.encode,
         );
-        push(LogicalChannel.IntersectionChannel, bytes);
         break;
       }
 
       // Setup
-      case MSG_SETUP_BIND_READ_CAPABILITY: {
+      case MsgKind.SetupBindReadCapability: {
         const privy = this.opts.getIntersectionPrivy(message.handle);
-
-        const bytes = encodeSetupBindReadCapability(
+        bytes = encodeSetupBindReadCapability(
           message,
           this.schemes.accessControl.encodings.readCapability.encode,
           this.schemes.accessControl.encodings.syncSignature.encode,
           privy,
         );
-
-        push(LogicalChannel.CapabilityChannel, bytes);
         break;
       }
 
-      case MSG_SETUP_BIND_AREA_OF_INTEREST: {
+      case MsgKind.SetupBindAreaOfInterest: {
         const cap = this.opts.getCap(message.authorisation);
-
         const outer = this.schemes.accessControl.getGrantedArea(cap);
-
-        const bytes = encodeSetupBindAreaOfInterest(
+        bytes = encodeSetupBindAreaOfInterest(
           message,
           {
             encodeSubspace: this.schemes.subspace.encode,
@@ -265,25 +231,21 @@ export class MessageEncoder<
             outer,
           },
         );
-
-        push(LogicalChannel.AreaOfInterestChannel, bytes);
         break;
       }
 
-      case MSG_SETUP_BIND_STATIC_TOKEN: {
-        const bytes = encodeSetupBindStaticToken(
+      case MsgKind.SetupBindStaticToken: {
+        bytes = encodeSetupBindStaticToken(
           message,
           this.schemes.authorisationToken.encodings.staticToken.encode,
         );
-
-        push(LogicalChannel.StaticTokenChannel, bytes);
         break;
       }
 
       // Reconciliation
 
-      case MSG_RECONCILIATION_SEND_FINGERPRINT: {
-        const bytes = encodeReconciliationSendFingerprint(
+      case MsgKind.ReconciliationSendFingerprint: {
+        bytes = encodeReconciliationSendFingerprint(
           message,
           {
             isFingerprintNeutral: (fp) => {
@@ -299,31 +261,23 @@ export class MessageEncoder<
             encodeFingerprint: this.schemes.fingerprint.encoding.encode,
           },
         );
-
-        push(LogicalChannel.ReconciliationChannel, bytes);
-
         this.reconcileMsgTracker.onSendFingerprint(message);
-
         break;
       }
 
-      case MSG_RECONCILIATION_ANNOUNCE_ENTRIES: {
-        const bytes = encodeReconciliationAnnounceEntries(message, {
+      case MsgKind.ReconciliationAnnounceEntries: {
+        bytes = encodeReconciliationAnnounceEntries(message, {
           encodeSubspaceId: this.schemes.subspace.encode,
           orderSubspace: this.schemes.subspace.order,
           pathScheme: this.schemes.path,
           privy: this.reconcileMsgTracker.getPrivy(),
         });
-
-        push(LogicalChannel.ReconciliationChannel, bytes);
-
         this.reconcileMsgTracker.onAnnounceEntries(message);
-
         break;
       }
 
-      case MSG_RECONCILIATION_SEND_ENTRY: {
-        const bytes = encodeReconciliationSendEntry(
+      case MsgKind.ReconciliationSendEntry: {
+        bytes = encodeReconciliationSendEntry(
           message,
           {
             privy: this.reconcileMsgTracker.getPrivy(),
@@ -337,18 +291,14 @@ export class MessageEncoder<
             isEqualNamespace: this.schemes.namespace.isEqual,
           },
         );
-
-        push(LogicalChannel.ReconciliationChannel, bytes);
-
         this.reconcileMsgTracker.onSendEntry(message);
-
         break;
       }
 
       // Data
 
-      case MSG_DATA_SEND_ENTRY: {
-        const bytes = encodeDataSendEntry(message, {
+      case MsgKind.DataSendEntry: {
+        bytes = encodeDataSendEntry(message, {
           encodeNamespaceId: this.schemes.namespace.encode,
           encodeDynamicToken:
             this.schemes.authorisationToken.encodings.dynamicToken.encode,
@@ -359,25 +309,21 @@ export class MessageEncoder<
           pathScheme: this.schemes.path,
           currentlySentEntry: this.opts.getCurrentlySentEntry(),
         });
-
-        push(LogicalChannel.DataChannel, bytes);
         break;
       }
 
-      case MSG_DATA_SEND_PAYLOAD: {
-        const bytes = encodeDataSendPayload(message);
-        push(LogicalChannel.DataChannel, bytes);
+      case MsgKind.DataSendPayload: {
+        bytes = encodeDataSendPayload(message);
         break;
       }
 
-      case MSG_DATA_SET_EAGERNESS: {
-        const bytes = encodeDataSetEagerness(message);
-        push(null, bytes);
+      case MsgKind.DataSetMetadata: {
+        bytes = encodeDataSetEagerness(message);
         break;
       }
 
-      case MSG_DATA_BIND_PAYLOAD_REQUEST: {
-        const bytes = encodeDataBindPayloadRequest(message, {
+      case MsgKind.DataBindPayloadRequest: {
+        bytes = encodeDataBindPayloadRequest(message, {
           encodeNamespaceId: this.schemes.namespace.encode,
           encodeSubspaceId: this.schemes.subspace.encode,
           encodePayloadDigest: this.schemes.payload.encode,
@@ -386,22 +332,20 @@ export class MessageEncoder<
           pathScheme: this.schemes.path,
           currentlySentEntry: this.opts.getCurrentlySentEntry(),
         });
-
-        push(LogicalChannel.PayloadRequestChannel, bytes);
         break;
       }
 
-      case MSG_DATA_REPLY_PAYLOAD: {
-        const bytes = encodeDataReplyPayload(message);
-
-        push(LogicalChannel.DataChannel, bytes);
+      case MsgKind.DataReplyPayload: {
+        bytes = encodeDataReplyPayload(message);
         break;
       }
 
       default:
-        new WillowError(
+        throw new WillowError(
           `Did not know how to encode a message: ${message}`,
         );
     }
+
+    push(msgLogicalChannels[message.kind], bytes);
   }
 }

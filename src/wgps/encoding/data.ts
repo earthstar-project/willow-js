@@ -12,7 +12,7 @@ import {
   MsgDataReplyPayload,
   MsgDataSendEntry,
   MsgDataSendPayload,
-  MsgDataSetEagerness,
+  MsgDataSetMetadata,
 } from "../types.ts";
 import { compactWidthOr } from "./util.ts";
 
@@ -113,7 +113,7 @@ export function encodeDataSendPayload(msg: MsgDataSendPayload): Uint8Array {
   );
 }
 
-export function encodeDataSetEagerness(msg: MsgDataSetEagerness): Uint8Array {
+export function encodeDataSetEagerness(msg: MsgDataSetMetadata): Uint8Array {
   const messageKind = 0x68;
   const eagernessFlag = msg.isEager ? 0x2 : 0x0;
 

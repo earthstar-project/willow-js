@@ -42,7 +42,7 @@ export type ReconcilerOpts<
   >;
 };
 
-const SEND_ENTRIES_THRESHOLD = 16;
+const SEND_ENTRIES_THRESHOLD = 8;
 
 export class Reconciler<
   NamespaceId,
