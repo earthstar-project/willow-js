@@ -15,12 +15,18 @@ export class PayloadIngester<
   AuthorisationOpts,
 > {
   private currentIngestion = new FIFO<Uint8Array | typeof CANCELLATION>();
+  private currentEntry:
+    | Entry<NamespaceId, SubspaceId, PayloadDigest>
+    | undefined;
   private events = new FIFO<
     Uint8Array | {
       entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
     } | typeof CANCELLATION
   >();
-  private processReceivedPayload: (bytes: Uint8Array) => Uint8Array;
+  private processReceivedPayload: (
+    bytes: Uint8Array,
+    entryLength: bigint,
+  ) => Uint8Array;
 
   constructor(opts: {
     getStore: GetStoreFn<
@@ -32,7 +38,10 @@ export class PayloadIngester<
       SubspaceId,
       PayloadDigest
     >;
-    processReceivedPayload: (bytes: Uint8Array) => Uint8Array;
+    processReceivedPayload: (
+      bytes: Uint8Array,
+      entryLength: bigint,
+    ) => Uint8Array;
   }) {
     this.processReceivedPayload = opts.processReceivedPayload;
 
@@ -44,6 +53,8 @@ export class PayloadIngester<
         this.currentIngestion = new FIFO();
 
         const store = await opts.getStore(event.entry.namespaceId);
+
+        this.currentEntry = event.entry;
 
         store.ingestPayload({
           path: event.entry.path,
@@ -59,7 +70,12 @@ export class PayloadIngester<
           },
         );
       } else {
-        this.currentIngestion.push(event);
+        const transformed = this.processReceivedPayload(
+          event,
+          this.currentEntry!.payloadLength,
+        );
+
+        this.currentIngestion.push(transformed);
       }
     });
   }
@@ -69,9 +85,7 @@ export class PayloadIngester<
   }
 
   push(bytes: Uint8Array, end: boolean) {
-    const processed = this.processReceivedPayload(bytes);
-
-    this.events.push(processed);
+    this.events.push(bytes);
 
     if (end) {
       this.events.push(CANCELLATION);
