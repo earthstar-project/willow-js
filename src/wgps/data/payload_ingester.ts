@@ -20,6 +20,7 @@ export class PayloadIngester<
       entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
     } | typeof CANCELLATION
   >();
+  private processReceivedPayload: (bytes: Uint8Array) => Uint8Array;
 
   constructor(opts: {
     getStore: GetStoreFn<
@@ -31,7 +32,10 @@ export class PayloadIngester<
       SubspaceId,
       PayloadDigest
     >;
+    processReceivedPayload: (bytes: Uint8Array) => Uint8Array;
   }) {
+    this.processReceivedPayload = opts.processReceivedPayload;
+
     onAsyncIterate(this.events, async (event) => {
       if (event === CANCELLATION) {
         this.currentIngestion.push(CANCELLATION);
@@ -65,7 +69,9 @@ export class PayloadIngester<
   }
 
   push(bytes: Uint8Array, end: boolean) {
-    this.events.push(bytes);
+    const processed = this.processReceivedPayload(bytes);
+
+    this.events.push(processed);
 
     if (end) {
       this.events.push(CANCELLATION);

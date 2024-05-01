@@ -225,6 +225,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
             maxSize: BigInt(0),
           }],
         ]]),
+        transformPayload: (bytes) => bytes,
+        processReceivedPayload: (bytes) => bytes,
       });
 
       const storeMapBetty = new StoreMap(
@@ -319,6 +321,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
             maxSize: BigInt(0),
           }],
         ]]),
+        transformPayload: (bytes) => bytes,
+        processReceivedPayload: (bytes) => bytes,
       });
 
       await delay(20 * scenario.timeMultiplier);
@@ -543,6 +547,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
             maxSize: BigInt(0),
           }],
         ]]),
+        transformPayload: (bytes) => bytes,
+        processReceivedPayload: (bytes) => bytes,
       });
 
       const storeMapBetty = new StoreMap(
@@ -632,6 +638,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
             maxSize: BigInt(0),
           }],
         ]]),
+        transformPayload: (bytes) => bytes,
+        processReceivedPayload: (bytes) => bytes,
       });
 
       await delay(20 * scenario.timeMultiplier);
@@ -818,6 +826,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
             maxSize: BigInt(0),
           }],
         ]]),
+        transformPayload: (bytes) => bytes,
+        processReceivedPayload: (bytes) => bytes,
       });
 
       const storeMapBetty = new StoreMap(
@@ -909,6 +919,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
             maxSize: BigInt(0),
           }],
         ]]),
+        transformPayload: (bytes) => bytes,
+        processReceivedPayload: (bytes) => bytes,
       });
 
       await delay(20 * scenario.timeMultiplier);
@@ -1091,6 +1103,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
             maxSize: BigInt(0),
           }],
         ]]),
+        transformPayload: (bytes) => bytes,
+        processReceivedPayload: (bytes) => bytes,
       });
 
       const storeMapBetty = new StoreMap(
@@ -1181,6 +1195,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
             maxSize: BigInt(0),
           }],
         ]]),
+        transformPayload: (bytes) => bytes,
+        processReceivedPayload: (bytes) => bytes,
       });
 
       await delay(20 * scenario.timeMultiplier);
@@ -1355,6 +1371,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
               maxSize: BigInt(0),
             }],
           ]]),
+          transformPayload: (bytes) => bytes,
+          processReceivedPayload: (bytes) => bytes,
         });
 
         const storeMapBetty = new StoreMap(
@@ -1454,6 +1472,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
               maxSize: BigInt(0),
             }],
           ]]),
+          transformPayload: (bytes) => bytes,
+          processReceivedPayload: (bytes) => bytes,
         });
 
         await delay(20 * scenario.timeMultiplier);
@@ -1641,6 +1661,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
               maxSize: BigInt(0),
             }],
           ]]),
+          transformPayload: (bytes) => bytes,
+          processReceivedPayload: (bytes) => bytes,
         });
 
         const storeMapBetty = new StoreMap(
@@ -1732,6 +1754,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
               maxSize: BigInt(0),
             }],
           ]]),
+          transformPayload: (bytes) => bytes,
+          processReceivedPayload: (bytes) => bytes,
         });
 
         await delay(20 * scenario.timeMultiplier);
@@ -1906,6 +1930,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
               maxSize: BigInt(0),
             }],
           ]]),
+          transformPayload: (bytes) => bytes,
+          processReceivedPayload: (bytes) => bytes,
         });
 
         const storeMapBetty = new StoreMap(
@@ -1997,6 +2023,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
               maxSize: BigInt(0),
             }],
           ]]),
+          transformPayload: (bytes) => bytes,
+          processReceivedPayload: (bytes) => bytes,
         });
 
         await delay(20 * scenario.timeMultiplier);
@@ -2211,6 +2239,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
               maxSize: BigInt(0),
             }],
           ]]),
+          transformPayload: (bytes) => bytes,
+          processReceivedPayload: (bytes) => bytes,
         });
 
         const storeMapBetty = new StoreMap(
@@ -2342,6 +2372,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
               maxSize: BigInt(0),
             }],
           ]]),
+          transformPayload: (bytes) => bytes,
+          processReceivedPayload: (bytes) => bytes,
         });
 
         await delay(20 * scenario.timeMultiplier);

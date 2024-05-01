@@ -143,6 +143,11 @@ export type WgpsMessengerOpts<
     SubspaceId,
     PayloadDigest
   >;
+
+  /** A (not necessarily deterministic) algorithm that converts a chunk of a payload into another bytestring. */
+  transformPayload: (chunk: Uint8Array) => Uint8Array;
+  /** Process transformed payload chunks. */
+  processReceivedPayload: (chunk: Uint8Array) => Uint8Array;
 };
 
 /** Coordinates a complete WGPS synchronisation session. */
@@ -496,10 +501,12 @@ export class WgpsMessenger<
     this.dataSender = new DataSender({
       handlesPayloadRequestsTheirs: this.handlesPayloadRequestsTheirs,
       getStore: this.getStore,
+      transformPayload: opts.transformPayload,
     });
 
     this.payloadIngester = new PayloadIngester({
       getStore: this.getStore,
+      processReceivedPayload: opts.processReceivedPayload,
     });
 
     // Send encoded messages

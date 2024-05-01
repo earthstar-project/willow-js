@@ -54,6 +54,7 @@ export class DataSender<
         SubspaceId,
         PayloadDigest
       >;
+      transformPayload: (chunk: Uint8Array) => Uint8Array;
     },
   ) {
   }
@@ -138,10 +139,12 @@ export class DataSender<
       const payloadIterator = await pack.payload.stream(pack.offset);
 
       for await (const chunk of payloadIterator) {
+        const transformed = this.opts.transformPayload(chunk);
+
         yield {
           kind: MsgKind.DataSendPayload,
-          amount: BigInt(chunk.byteLength),
-          bytes: chunk,
+          amount: BigInt(transformed.byteLength),
+          bytes: transformed,
         };
       }
 
