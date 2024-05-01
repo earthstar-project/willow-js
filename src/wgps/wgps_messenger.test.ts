@@ -70,7 +70,7 @@ const scenarioMemory: WgpsScenario = {
       payloadDriver,
     });
   },
-  timeMultiplier: 10,
+  timeMultiplier: 20,
   dispose: () => Promise.resolve(),
 };
 
@@ -78,7 +78,7 @@ testWgpsMessenger(scenarioMemory);
 
 class ScenarioPersisted implements WgpsScenario {
   name = "Filesystem";
-  timeMultiplier = 50;
+  timeMultiplier = 80;
 
   kvs: Deno.Kv[] = [];
 

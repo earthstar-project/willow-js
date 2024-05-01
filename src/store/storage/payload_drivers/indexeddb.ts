@@ -1,3 +1,4 @@
+import { delay } from "https://deno.land/std@0.202.0/async/delay.ts";
 import { concat, deferred } from "../../../../deps.ts";
 import { ValidationError, WillowError } from "../../../errors.ts";
 import { Payload, PayloadScheme } from "../../types.ts";
@@ -198,11 +199,11 @@ export class PayloadDriverIndexedDb<PayloadDigest>
         PAYLOAD_STORE,
       );
 
-    const request = payloadStore.put(bytes, key);
-
     const didSet = deferred<
       { digest: PayloadDigest; length: bigint; payload: Payload }
     >();
+
+    const request = payloadStore.put(bytes, key);
 
     request.onsuccess = () => {
       didSet.resolve({
@@ -261,20 +262,20 @@ export class PayloadDriverIndexedDb<PayloadDigest>
 
     const finalBytes = concat(existingBytes, receivedBytes);
 
-    const payloadStore2 = db.transaction([PAYLOAD_STORE], "readwrite")
+    const digest = await this.payloadScheme.fromBytes(
+      new Uint8Array(finalBytes),
+    );
+
+    const payloadStore = db.transaction([PAYLOAD_STORE], "readwrite")
       .objectStore(
         PAYLOAD_STORE,
       );
-
-    const request = payloadStore2.put(finalBytes, key);
 
     const didSet = deferred<
       { digest: PayloadDigest; length: bigint }
     >();
 
-    const digest = await this.payloadScheme.fromBytes(
-      new Uint8Array(finalBytes),
-    );
+    const request = payloadStore.put(finalBytes, key);
 
     request.onsuccess = () => {
       didSet.resolve({

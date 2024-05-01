@@ -810,7 +810,7 @@ Deno.test("Encoding roundtrip test", async () => {
       aoiHandlesToRange3d: () => {
         return Promise.resolve(defaultRange3d(TestSubspace.Alfie));
       },
-      getCap: (handle) => {
+      getTheirCap: (handle) => {
         if (handle === BigInt(23)) {
           return Promise.resolve({
             namespace: TestNamespace.Bookclub,
