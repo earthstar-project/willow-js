@@ -1,43 +1,78 @@
 import {
   areaIsIncluded,
   AreaOfInterest,
+  defaultEntry,
   deferred,
+  Entry,
+  entryPosition,
+  FIFO,
+  intersectArea,
+  isIncluded3d,
+  isIncludedArea,
   orderBytes,
+  Range3d,
 } from "../../deps.ts";
-import { ValidationError, WgpsMessageValidationError } from "../errors.ts";
+import {
+  ValidationError,
+  WgpsMessageValidationError,
+  WillowError,
+} from "../errors.ts";
 import { decodeMessages } from "./decoding/decode_messages.ts";
 import { MessageEncoder } from "./encoding/message_encoder.ts";
 import { ReadyTransport } from "./ready_transport.ts";
 import { HandleStore } from "./handle_store.ts";
 import { PaiFinder } from "./pai/pai_finder.ts";
 import {
+  AreaOfInterestChannelMsg,
+  CapabilityChannelMsg,
+  DataChannelMsg,
   HandleType,
+  IntersectionChannelMsg,
   IS_ALFIE,
   LogicalChannel,
-  MSG_COMMITMENT_REVEAL,
-  MSG_CONTROL_ABSOLVE,
-  MSG_CONTROL_ANNOUNCE_DROPPING,
-  MSG_CONTROL_APOLOGISE,
-  MSG_CONTROL_FREE,
-  MSG_CONTROL_ISSUE_GUARANTEE,
-  MSG_CONTROL_PLEAD,
-  MSG_PAI_BIND_FRAGMENT,
-  MSG_PAI_REPLY_FRAGMENT,
-  MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
-  MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
-  MSG_SETUP_BIND_AREA_OF_INTEREST,
-  MSG_SETUP_BIND_READ_CAPABILITY,
-  MSG_SETUP_BIND_STATIC_TOKEN,
+  MsgKind,
+  NoChannelMsg,
+  PayloadRequestChannelMsg,
   ReadAuthorisation,
-  SyncEncodings,
-  SyncMessage,
+  ReconciliationChannelMsg,
+  StaticTokenChannelMsg,
   SyncSchemes,
   Transport,
 } from "./types.ts";
 import { Intersection } from "./pai/types.ts";
 import { onAsyncIterate } from "./util.ts";
-import { WillowError } from "../../mod.universal.ts";
+
 import { GuaranteedQueue } from "./guaranteed_queue.ts";
+import { AoiIntersectionFinder } from "./reconciliation/aoi_intersection_finder.ts";
+import { Reconciler } from "./reconciliation/reconciler.ts";
+import { ReconcilerMap } from "./reconciliation/reconciler_map.ts";
+import { Announcer } from "./reconciliation/announcer.ts";
+import { CapFinder } from "./cap_finder.ts";
+import { DataSender } from "./data/data_sender.ts";
+import { PayloadIngester } from "./data/payload_ingester.ts";
+import { Store } from "../store/store.ts";
+
+export type GetStoreFn<
+  Prefingerprint,
+  Fingerprint,
+  AuthorisationToken,
+  AuthorisationOpts,
+  NamespaceId,
+  SubspaceId,
+  PayloadDigest,
+> = (
+  namespace: NamespaceId,
+) => Promise<
+  Store<
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts,
+    AuthorisationToken,
+    Prefingerprint,
+    Fingerprint
+  >
+>;
 
 export type WgpsMessengerOpts<
   ReadCapability,
@@ -50,9 +85,15 @@ export type WgpsMessengerOpts<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Prefingerprint,
+  Fingerprint,
+  AuthorisationToken,
   StaticToken,
+  DynamicToken,
   NamespaceId,
   SubspaceId,
+  PayloadDigest,
+  AuthorisationOpts,
 > = {
   transport: Transport;
 
@@ -77,17 +118,30 @@ export type WgpsMessengerOpts<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    Prefingerprint,
+    Fingerprint,
+    AuthorisationToken,
     StaticToken,
+    DynamicToken,
     NamespaceId,
-    SubspaceId
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts
   >;
 
   interests: Map<
-    ReadAuthorisation<
-      ReadCapability,
-      SubspaceCapability
-    >,
+    ReadAuthorisation<ReadCapability, SubspaceCapability>,
     AreaOfInterest<SubspaceId>[]
+  >;
+
+  getStore: GetStoreFn<
+    Prefingerprint,
+    Fingerprint,
+    AuthorisationToken,
+    AuthorisationOpts,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest
   >;
 };
 
@@ -103,15 +157,20 @@ export class WgpsMessenger<
   SubspaceReceiver,
   SyncSubspaceSignature,
   SubspaceSecretKey,
+  Prefingerprint,
+  Fingerprint,
+  AuthorisationToken,
   StaticToken,
+  DynamicToken,
   NamespaceId,
   SubspaceId,
+  PayloadDigest,
+  AuthorisationOpts,
 > {
+  private closed = false;
+
   private interests: Map<
-    ReadAuthorisation<
-      ReadCapability,
-      SubspaceCapability
-    >,
+    ReadAuthorisation<ReadCapability, SubspaceCapability>,
     AreaOfInterest<SubspaceId>[]
   >;
 
@@ -127,13 +186,55 @@ export class WgpsMessenger<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    Prefingerprint,
+    Fingerprint,
+    AuthorisationToken,
     StaticToken,
+    DynamicToken,
     NamespaceId,
-    SubspaceId
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts
   >;
-  private intersectionChannel = new GuaranteedQueue();
-  private capabilityChannel = new GuaranteedQueue();
-  private areaOfInterestChannel = new GuaranteedQueue();
+  private outChannelReconciliation = new GuaranteedQueue();
+  private outChannelData = new GuaranteedQueue();
+  private outChannelIntersection = new GuaranteedQueue();
+  private outChannelCapability = new GuaranteedQueue();
+  private outChannelAreaOfInterest = new GuaranteedQueue();
+  private outChannelPayloadRequest = new GuaranteedQueue();
+  private outChannelStaticToken = new GuaranteedQueue();
+
+  private inChannelReconciliation = new FIFO<
+    ReconciliationChannelMsg<
+      DynamicToken,
+      Fingerprint,
+      NamespaceId,
+      SubspaceId,
+      PayloadDigest
+    >
+  >();
+  private inChannelData = new FIFO<
+    DataChannelMsg<
+      DynamicToken,
+      NamespaceId,
+      SubspaceId,
+      PayloadDigest
+    >
+  >();
+  private inChannelIntersection = new FIFO<IntersectionChannelMsg<PsiGroup>>();
+  private inChannelCapability = new FIFO<
+    CapabilityChannelMsg<ReadCapability, SyncSignature>
+  >();
+  private inChannelAreaOfInterest = new FIFO<
+    AreaOfInterestChannelMsg<SubspaceId>
+  >();
+  private inChannelPayloadRequest = new FIFO<
+    PayloadRequestChannelMsg<NamespaceId, SubspaceId, PayloadDigest>
+  >();
+  private inChannelStaticToken = new FIFO<StaticTokenChannelMsg<StaticToken>>();
+  private inChannelNone = new FIFO<
+    NoChannelMsg<PsiGroup, SubspaceCapability, SyncSubspaceSignature>
+  >();
 
   // Commitment scheme
   private maxPayloadSizePower: number;
@@ -154,9 +255,15 @@ export class WgpsMessenger<
     SubspaceReceiver,
     SyncSubspaceSignature,
     SubspaceSecretKey,
+    Prefingerprint,
+    Fingerprint,
+    AuthorisationToken,
     StaticToken,
+    DynamicToken,
     NamespaceId,
-    SubspaceId
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts
   >;
 
   // Private area intersection
@@ -183,6 +290,94 @@ export class WgpsMessenger<
   private handlesStaticTokensOurs = new HandleStore<StaticToken>();
   private handlesStaticTokensTheirs = new HandleStore<StaticToken>();
 
+  // Reconciliation
+
+  private getStore: GetStoreFn<
+    Prefingerprint,
+    Fingerprint,
+    AuthorisationToken,
+    AuthorisationOpts,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest
+  >;
+
+  private reconcilerMap = new ReconcilerMap<
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts,
+    AuthorisationToken,
+    Prefingerprint,
+    Fingerprint
+  >();
+
+  private aoiIntersectionFinder: AoiIntersectionFinder<NamespaceId, SubspaceId>;
+
+  private announcer: Announcer<
+    Prefingerprint,
+    Fingerprint,
+    AuthorisationToken,
+    StaticToken,
+    DynamicToken,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts
+  >;
+
+  private currentlyReceivingEntries: {
+    namespace: NamespaceId;
+    range: Range3d<SubspaceId>;
+    remaining: bigint;
+  } | undefined;
+
+  // Data
+
+  private capFinder: CapFinder<
+    ReadCapability,
+    Receiver,
+    SyncSignature,
+    ReceiverSecretKey,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest
+  >;
+
+  private currentlySentEntry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+  private currentlyReceivedEntry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+  private currentlyReceivedOffset = 0n;
+
+  private handlesPayloadRequestsOurs = new HandleStore<{
+    offset: bigint;
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+  }>();
+  private handlesPayloadRequestsTheirs = new HandleStore<{
+    offset: bigint;
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+  }>();
+
+  private dataSender: DataSender<
+    Prefingerprint,
+    Fingerprint,
+    AuthorisationToken,
+    DynamicToken,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts
+  >;
+
+  private payloadIngester: PayloadIngester<
+    Prefingerprint,
+    Fingerprint,
+    AuthorisationToken,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts
+  >;
+
   constructor(
     opts: WgpsMessengerOpts<
       ReadCapability,
@@ -195,9 +390,15 @@ export class WgpsMessenger<
       SubspaceReceiver,
       SyncSubspaceSignature,
       SubspaceSecretKey,
+      Prefingerprint,
+      Fingerprint,
+      AuthorisationToken,
       StaticToken,
+      DynamicToken,
       NamespaceId,
-      SubspaceId
+      SubspaceId,
+      PayloadDigest,
+      AuthorisationOpts
     >,
   ) {
     if (opts.maxPayloadSizePower < 0 || opts.maxPayloadSizePower > 64) {
@@ -217,7 +418,7 @@ export class WgpsMessenger<
       );
 
       for (const aoi of areas) {
-        // Check that granted area is in granted area.
+        // Check that AOI area is in granted area.
         const isWithin = areaIsIncluded(
           opts.schemes.subspace.order,
           aoi.area,
@@ -253,30 +454,59 @@ export class WgpsMessenger<
       intersectionHandlesTheirs: this.handlesIntersectionsTheirs,
     });
 
-    const encodings: SyncEncodings<
-      ReadCapability,
-      SyncSignature,
-      PsiGroup,
-      SubspaceCapability,
-      SyncSubspaceSignature,
-      StaticToken,
-      NamespaceId,
-      SubspaceId
-    > = {
-      readCapability: opts.schemes.accessControl.encodings.readCapability,
-      syncSignature: opts.schemes.accessControl.encodings.syncSignature,
-      groupMember: opts.schemes.pai.groupMemberEncoding,
-      subspaceCapability: opts.schemes.subspaceCap.encodings.subspaceCapability,
-      syncSubspaceSignature:
-        opts.schemes.subspaceCap.encodings.syncSubspaceSignature,
-      subspace: opts.schemes.subspace,
-      staticToken: opts.schemes.authorisationToken.encodings.staticToken,
-    };
+    // Reconciliation helpers
+
+    this.aoiIntersectionFinder = new AoiIntersectionFinder({
+      namespaceScheme: this.schemes.namespace,
+      subspaceScheme: this.schemes.subspace,
+      handlesOurs: this.handlesAoisOurs,
+      handlesTheirs: this.handlesAoisTheirs,
+    });
+
+    this.announcer = new Announcer({
+      authorisationTokenScheme: this.schemes.authorisationToken,
+      payloadScheme: this.schemes.payload,
+      staticTokenHandleStoreOurs: this.handlesStaticTokensOurs,
+    });
+
+    // Data
+
+    this.getStore = opts.getStore;
+
+    this.currentlyReceivedEntry = defaultEntry(
+      this.schemes.namespace.defaultNamespaceId,
+      this.schemes.subspace.minimalSubspaceId,
+      this.schemes.payload.defaultDigest,
+    );
+    this.currentlySentEntry = defaultEntry(
+      this.schemes.namespace.defaultNamespaceId,
+      this.schemes.subspace.minimalSubspaceId,
+      this.schemes.payload.defaultDigest,
+    );
+
+    this.capFinder = new CapFinder({
+      handleStoreOurs: this.handlesCapsOurs,
+      schemes: {
+        accessControl: this.schemes.accessControl,
+        namespace: this.schemes.namespace,
+        subspace: this.schemes.subspace,
+      },
+    });
+
+    this.dataSender = new DataSender({
+      handlesPayloadRequestsTheirs: this.handlesPayloadRequestsTheirs,
+      getStore: this.getStore,
+    });
+
+    this.payloadIngester = new PayloadIngester({
+      getStore: this.getStore,
+    });
 
     // Send encoded messages
-    this.encoder = new MessageEncoder(encodings, opts.schemes, {
+
+    this.encoder = new MessageEncoder(opts.schemes, {
       getIntersectionPrivy: (handle) => {
-        return this.paiFinder.getIntersectionPrivy(handle);
+        return this.paiFinder.getIntersectionPrivy(handle, true);
       },
       getCap: (handle) => {
         const cap = this.handlesCapsOurs.get(handle);
@@ -287,28 +517,92 @@ export class WgpsMessenger<
 
         return cap;
       },
+      defaultNamespaceId: this.schemes.namespace.defaultNamespaceId,
+      defaultSubspaceId: this.schemes.subspace.minimalSubspaceId,
+      defaultPayloadDigest: this.schemes.payload.defaultDigest,
+      handleToNamespaceId: (handle) => {
+        const res = this.aoiIntersectionFinder.handleToNamespaceId(
+          handle,
+          true,
+        );
+
+        if (res === undefined) {
+          throw new WgpsMessageValidationError(
+            "Couldn't find namespace corresponding to handle!",
+          );
+        }
+
+        return res;
+      },
+      aoiHandlesToRange3d: (senderAoiHandle, receiverAoiHandle) => {
+        const reconciler = this.reconcilerMap.getReconciler(
+          senderAoiHandle,
+          receiverAoiHandle,
+        );
+
+        return reconciler.range;
+      },
+      getCurrentlySentEntry: () => {
+        return this.currentlySentEntry;
+      },
     });
 
-    onAsyncIterate(this.intersectionChannel, async (message) => {
+    onAsyncIterate(this.outChannelReconciliation, async (message) => {
       await this.transport.send(message);
     });
 
-    onAsyncIterate(this.capabilityChannel, async (message) => {
+    onAsyncIterate(this.outChannelData, async (message) => {
+      await this.transport.send(message);
+    });
+
+    onAsyncIterate(this.outChannelIntersection, async (message) => {
+      await this.transport.send(message);
+    });
+
+    onAsyncIterate(this.outChannelCapability, async (message) => {
+      await this.transport.send(message);
+    });
+
+    onAsyncIterate(this.outChannelAreaOfInterest, async (message) => {
+      await this.transport.send(message);
+    });
+
+    onAsyncIterate(this.outChannelPayloadRequest, async (message) => {
+      await this.transport.send(message);
+    });
+
+    onAsyncIterate(this.outChannelStaticToken, async (message) => {
       await this.transport.send(message);
     });
 
     onAsyncIterate(this.encoder, async ({ channel, message }) => {
       switch (channel) {
+        case LogicalChannel.ReconciliationChannel: {
+          this.outChannelReconciliation.push(message);
+          break;
+        }
+        case LogicalChannel.DataChannel: {
+          this.outChannelData.push(message);
+          break;
+        }
         case LogicalChannel.IntersectionChannel: {
-          this.intersectionChannel.push(message);
+          this.outChannelIntersection.push(message);
           break;
         }
         case LogicalChannel.CapabilityChannel: {
-          this.capabilityChannel.push(message);
+          this.outChannelCapability.push(message);
           break;
         }
         case LogicalChannel.AreaOfInterestChannel: {
-          this.areaOfInterestChannel.push(message);
+          this.outChannelAreaOfInterest.push(message);
+          break;
+        }
+        case LogicalChannel.PayloadRequestChannel: {
+          this.outChannelPayloadRequest.push(message);
+          break;
+        }
+        case LogicalChannel.StaticTokenChannel: {
+          this.outChannelStaticToken.push(message);
           break;
         }
         case null:
@@ -323,27 +617,183 @@ export class WgpsMessenger<
     const decodedMessages = decodeMessages({
       transport: this.transport,
       challengeLength: opts.challengeLength,
-      encodings: encodings,
       schemes: this.schemes,
-      getCap: (handle) => {
-        return this.handlesCapsOurs.getEventually(handle);
+      getTheirCap: (handle) => {
+        return this.handlesCapsTheirs.getEventually(handle);
       },
       getIntersectionPrivy: (handle) => {
-        return this.paiFinder.getIntersectionPrivy(handle);
+        return this.paiFinder.getIntersectionPrivy(handle, false);
+      },
+      defaultNamespaceId: this.schemes.namespace.defaultNamespaceId,
+      defaultSubspaceId: this.schemes.subspace.minimalSubspaceId,
+      defaultPayloadDigest: this.schemes.payload.defaultDigest,
+      handleToNamespaceId: (handle) => {
+        const res = this.aoiIntersectionFinder.handleToNamespaceId(
+          handle,
+          false,
+        );
+
+        if (res === undefined) {
+          throw new WgpsMessageValidationError(
+            "Couldn't find namespace corresponding to handle!",
+          );
+        }
+
+        return res;
+      },
+      aoiHandlesToRange3d: (senderAoiHandle, receiverAoiHandle) => {
+        const reconciler = this.reconcilerMap.getReconciler(
+          receiverAoiHandle,
+          senderAoiHandle,
+        );
+
+        return reconciler.range;
+      },
+      // TODO: this might need to be async and use handleStore.getEventually
+      aoiHandlesToArea: (senderHandle, receiverHandle) => {
+        const senderAoi = this.handlesAoisTheirs.get(senderHandle);
+        const receiverAoi = this.handlesAoisOurs.get(receiverHandle);
+
+        if (!senderAoi) {
+          throw new WgpsMessageValidationError(
+            "Failed to retrieve unbound sender AOI handle",
+          );
+        }
+
+        if (!receiverAoi) {
+          throw new WgpsMessageValidationError(
+            "Failed to retrieve unbound receiver AOI handle",
+          );
+        }
+
+        const intersectingArea = intersectArea(
+          this.schemes.subspace.order,
+          senderAoi.area,
+          receiverAoi.area,
+        );
+
+        if (!intersectingArea) {
+          throw new WgpsMessageValidationError(
+            "No intersecting area between two AOI handles",
+          );
+        }
+
+        return intersectingArea;
+      },
+      aoiHandlesToNamespace: (senderHandle, receiverHandle) => {
+        const reconciler = this.reconcilerMap.getReconciler(
+          receiverHandle,
+          senderHandle,
+        );
+
+        return reconciler.store.namespace;
+      },
+      getCurrentlyReceivedEntry: () => {
+        return this.currentlyReceivedEntry;
       },
     });
 
     // Begin handling decoded messages
-    onAsyncIterate(decodedMessages, (message) => {
-      this.handleMessage(message);
+    onAsyncIterate(decodedMessages, (msg) => {
+      /*
+      console.log(
+        `%c${this.transport.role === IS_ALFIE ? "Alfie" : "Betty"} got: ${
+          messageNames[msg.kind]
+        }`,
+        `color: ${this.transport.role === IS_ALFIE ? "red" : "blue"}`,
+      );
+      */
+
+      if (msg.kind === MsgKind.DataSendEntry) {
+        this.currentlyReceivedEntry = msg.entry;
+        this.currentlyReceivedOffset = msg.offset;
+      } else if (msg.kind === MsgKind.DataReplyPayload) {
+        const request = this.handlesPayloadRequestsOurs.get(msg.handle);
+
+        if (!request) {
+          throw new WillowError(
+            "Could not dereference handle for payload request",
+          );
+        }
+
+        this.currentlyReceivedEntry = request.entry;
+        this.currentlyReceivedOffset = request.offset;
+      }
+
+      switch (msg.kind) {
+        case MsgKind.PaiBindFragment:
+          this.inChannelIntersection.push(msg);
+          break;
+        case MsgKind.SetupBindReadCapability:
+          this.inChannelCapability.push(msg);
+          break;
+        case MsgKind.SetupBindAreaOfInterest:
+          this.inChannelAreaOfInterest.push(msg);
+          break;
+        case MsgKind.SetupBindStaticToken:
+          this.inChannelStaticToken.push(msg);
+          break;
+        case MsgKind.ReconciliationSendFingerprint:
+        case MsgKind.ReconciliationAnnounceEntries:
+        case MsgKind.ReconciliationSendEntry:
+          this.inChannelReconciliation.push(msg);
+          break;
+        case MsgKind.DataSendEntry:
+        case MsgKind.DataReplyPayload:
+        case MsgKind.DataSendPayload:
+          this.inChannelData.push(msg);
+          break;
+        case MsgKind.DataBindPayloadRequest:
+          this.inChannelPayloadRequest.push(msg);
+          break;
+        default:
+          this.inChannelNone.push(msg);
+      }
+    }, () => {
+      this.close();
+    });
+
+    // Handle received messages
+    onAsyncIterate(this.inChannelReconciliation, async (msg) => {
+      await this.handleMsgReconciliation(msg);
+    });
+
+    onAsyncIterate(this.inChannelData, async (msg) => {
+      await this.handleMsgData(msg);
+    });
+
+    onAsyncIterate(this.inChannelIntersection, (msg) => {
+      this.handleMsgIntersection(msg);
+    });
+
+    onAsyncIterate(this.inChannelCapability, async (msg) => {
+      await this.handleMsgCapability(msg);
+    });
+
+    onAsyncIterate(this.inChannelAreaOfInterest, async (msg) => {
+      await this.handleMsgAreaOfInterest(msg);
+    });
+
+    onAsyncIterate(this.inChannelPayloadRequest, async (msg) => {
+      await this.handleMsgPayloadRequest(msg);
+    });
+
+    onAsyncIterate(this.inChannelStaticToken, (msg) => {
+      this.handleMsgStaticToken(msg);
+    });
+
+    onAsyncIterate(this.inChannelNone, async (msg) => {
+      await this.handleMsg(msg);
     });
 
     // Set private variables for commitment scheme
     this.maxPayloadSizePower = opts.maxPayloadSizePower;
     this.challengeHash = opts.challengeHash;
 
-    // Initiate commitment scheme.
+    // Get this ball rolling.
     this.initiate();
+    this.setupData();
+    this.setupReconciliation();
     this.setupPai(Array.from(opts.interests.keys()));
   }
 
@@ -363,31 +813,60 @@ export class WgpsMessenger<
     // Now safe to send commitment reveal message.
 
     this.encoder.encode({
-      kind: MSG_COMMITMENT_REVEAL,
+      kind: MsgKind.CommitmentReveal,
       nonce: this.nonce,
     });
 
     this.encoder.encode({
-      kind: MSG_CONTROL_ISSUE_GUARANTEE,
+      kind: MsgKind.ControlIssueGuarantee,
+      channel: LogicalChannel.ReconciliationChannel,
+      amount: BigInt(Number.MAX_SAFE_INTEGER),
+    });
+
+    this.encoder.encode({
+      kind: MsgKind.ControlIssueGuarantee,
+      channel: LogicalChannel.DataChannel,
+      amount: BigInt(Number.MAX_SAFE_INTEGER),
+    });
+
+    this.encoder.encode({
+      kind: MsgKind.ControlIssueGuarantee,
       channel: LogicalChannel.IntersectionChannel,
       amount: BigInt(Number.MAX_SAFE_INTEGER),
     });
 
     this.encoder.encode({
-      kind: MSG_CONTROL_ISSUE_GUARANTEE,
+      kind: MsgKind.ControlIssueGuarantee,
       channel: LogicalChannel.CapabilityChannel,
+      amount: BigInt(Number.MAX_SAFE_INTEGER),
+    });
+
+    this.encoder.encode({
+      kind: MsgKind.ControlIssueGuarantee,
+      channel: LogicalChannel.AreaOfInterestChannel,
+      amount: BigInt(Number.MAX_SAFE_INTEGER),
+    });
+
+    this.encoder.encode({
+      kind: MsgKind.ControlIssueGuarantee,
+      channel: LogicalChannel.PayloadRequestChannel,
+      amount: BigInt(Number.MAX_SAFE_INTEGER),
+    });
+
+    this.encoder.encode({
+      kind: MsgKind.ControlIssueGuarantee,
+      channel: LogicalChannel.StaticTokenChannel,
       amount: BigInt(Number.MAX_SAFE_INTEGER),
     });
   }
 
-  private setupPai(authorisations: ReadAuthorisation<
-    ReadCapability,
-    SubspaceCapability
-  >[]) {
+  private setupPai(
+    authorisations: ReadAuthorisation<ReadCapability, SubspaceCapability>[],
+  ) {
     // Hook up the PAI finder
     onAsyncIterate(this.paiFinder.fragmentBinds(), (bind) => {
       this.encoder.encode({
-        kind: MSG_PAI_BIND_FRAGMENT,
+        kind: MsgKind.PaiBindFragment,
         groupMember: bind.group,
         isSecondary: bind.isSecondary,
       });
@@ -395,7 +874,7 @@ export class WgpsMessenger<
 
     onAsyncIterate(this.paiFinder.fragmentReplies(), (reply) => {
       this.encoder.encode({
-        kind: MSG_PAI_REPLY_FRAGMENT,
+        kind: MsgKind.PaiReplyFragment,
         handle: reply.handle,
         groupMember: reply.groupMember,
       });
@@ -403,7 +882,7 @@ export class WgpsMessenger<
 
     onAsyncIterate(this.paiFinder.subspaceCapRequests(), (handle) => {
       this.encoder.encode({
-        kind: MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+        kind: MsgKind.PaiRequestSubspaceCapability,
         handle,
       });
     });
@@ -424,7 +903,7 @@ export class WgpsMessenger<
       );
 
       this.encoder.encode({
-        kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
+        kind: MsgKind.PaiReplySubspaceCapability,
         handle: reply.handle,
         capability: reply.subspaceCap,
         signature,
@@ -433,7 +912,7 @@ export class WgpsMessenger<
 
     onAsyncIterate(
       this.paiFinder.intersections(),
-      async ({ authorisation, handle }) => {
+      async ({ namespace, authorisation, handle }) => {
         // Encode and sign the challenge using the receiver of the read cap.
         const receiver = this.schemes.accessControl.getReceiver(
           authorisation.capability,
@@ -450,9 +929,11 @@ export class WgpsMessenger<
 
         const capHandle = this.handlesCapsOurs.bind(authorisation.capability);
 
+        this.capFinder.addCap(capHandle);
+
         // Send capability
         this.encoder.encode({
-          kind: MSG_SETUP_BIND_READ_CAPABILITY,
+          kind: MsgKind.SetupBindReadCapability,
           capability: authorisation.capability,
           handle,
           signature,
@@ -466,10 +947,16 @@ export class WgpsMessenger<
 
         // And areas of interest.
         for (const aoi of aois) {
-          this.handlesAoisOurs.bind(aoi);
+          const handle = this.handlesAoisOurs.bind(aoi);
+
+          this.aoiIntersectionFinder.addAoiHandleForNamespace(
+            handle,
+            namespace,
+            true,
+          );
 
           this.encoder.encode({
-            kind: MSG_SETUP_BIND_AREA_OF_INTEREST,
+            kind: MsgKind.SetupBindAreaOfInterest,
             areaOfInterest: aoi,
             authorisation: capHandle,
           });
@@ -482,19 +969,127 @@ export class WgpsMessenger<
     }
   }
 
-  private async handleMessage(
-    message: SyncMessage<
-      ReadCapability,
-      SyncSignature,
-      PsiGroup,
-      SubspaceCapability,
-      SyncSubspaceSignature,
-      StaticToken,
-      SubspaceId
-    >,
+  private setupReconciliation() {
+    // When our announcer releases an 'announcement pack' (everything needed to announce and send some entries)...
+    onAsyncIterate(this.announcer.announcementPacks(), (pack) => {
+      // Bind any static tokens first.
+      for (const staticToken of pack.staticTokenBinds) {
+        this.encoder.encode({
+          kind: MsgKind.SetupBindStaticToken,
+          staticToken,
+        });
+      }
+
+      // Then announce the entries.
+      this.encoder.encode({
+        kind: MsgKind.ReconciliationAnnounceEntries,
+        count: BigInt(pack.announcement.count),
+        range: pack.announcement.range,
+        wantResponse: pack.announcement.wantResponse,
+        willSort: true,
+        receiverHandle: pack.announcement.receiverHandle,
+        senderHandle: pack.announcement.senderHandle,
+      });
+
+      // Then send the entries.
+      for (const entry of pack.entries) {
+        this.encoder.encode({
+          kind: MsgKind.ReconciliationSendEntry,
+          entry: entry.lengthyEntry,
+          dynamicToken: entry.dynamicToken,
+          staticTokenHandle: entry.staticTokenHandle,
+        });
+      }
+    });
+
+    // Whenever the area of interest intersection finder finds an intersection from the setup phase...
+    onAsyncIterate(
+      this.aoiIntersectionFinder.intersections(),
+      async (intersection) => {
+        const store = await this.getStore(intersection.namespace);
+
+        const aoiOurs = this.handlesAoisOurs.get(intersection.ours);
+
+        if (!aoiOurs) {
+          throw new WillowError("Couldn't dereference AOI handle");
+        }
+
+        const aoiTheirs = this.handlesAoisTheirs.get(intersection.theirs);
+
+        if (!aoiTheirs) {
+          throw new WillowError("Couldn't dereference AOI handle");
+        }
+
+        // Create a new reconciler
+        const reconciler = new Reconciler({
+          namespace: intersection.namespace,
+          aoiOurs,
+          aoiTheirs,
+          role: this.transport.role,
+          store,
+          subspaceScheme: this.schemes.subspace,
+          fingerprintScheme: this.schemes.fingerprint,
+        });
+
+        this.reconcilerMap.addReconciler(
+          intersection.ours,
+          intersection.theirs,
+          reconciler,
+        );
+
+        // Whenever the reconciler emits a fingerprint...
+        onAsyncIterate(reconciler.fingerprints(), ({ fingerprint, range }) => {
+          // Send a ReconciliationSendFingerprint message
+          this.encoder.encode({
+            kind: MsgKind.ReconciliationSendFingerprint,
+            fingerprint,
+            range,
+            senderHandle: intersection.ours,
+            receiverHandle: intersection.theirs,
+          });
+        });
+
+        // Whenever the reconciler emits an announcement...
+        onAsyncIterate(reconciler.entryAnnouncements(), (announcement) => {
+          // Let the announcer figure out what to do.
+          this.announcer.queueAnnounce({
+            namespace: intersection.namespace,
+            range: announcement.range,
+            store,
+            wantResponse: announcement.wantResponse,
+            receiverHandle: intersection.theirs,
+            senderHandle: intersection.ours,
+          });
+        });
+      },
+    );
+  }
+
+  private setupData() {
+    onAsyncIterate(this.dataSender.messages(), (msg) => {
+      this.encoder.encode(msg);
+
+      if (msg.kind === MsgKind.DataSendEntry) {
+        this.currentlySentEntry = msg.entry;
+      } else if (msg.kind === MsgKind.DataReplyPayload) {
+        const request = this.handlesPayloadRequestsTheirs.get(msg.handle);
+
+        if (!request) {
+          throw new WillowError(
+            "Could not dereference handle for payload request",
+          );
+        }
+
+        this.currentlySentEntry = request.entry;
+      }
+    });
+  }
+
+  private async handleMsg(
+    message: NoChannelMsg<PsiGroup, SubspaceCapability, SyncSubspaceSignature>,
   ) {
     switch (message.kind) {
-      case MSG_COMMITMENT_REVEAL: {
+      case MsgKind.CommitmentReveal: {
         // Determine challenges.
         const receivedCommitment = await this.transport.receivedCommitment;
         const digest = await this.challengeHash(message.nonce);
@@ -509,9 +1104,7 @@ export class WgpsMessenger<
           const xored = new Uint8Array(a.byteLength);
 
           for (let i = 0; i < a.byteLength; i++) {
-            xored.set([
-              complementary ? ~(a[i] ^ b[i]) : (a[i] ^ b[i]),
-            ], i);
+            xored.set([complementary ? ~(a[i] ^ b[i]) : a[i] ^ b[i]], i);
           }
 
           return xored;
@@ -529,79 +1122,13 @@ export class WgpsMessenger<
 
         break;
       }
-      case MSG_CONTROL_ISSUE_GUARANTEE: {
-        switch (message.channel) {
-          case LogicalChannel.IntersectionChannel:
-            this.intersectionChannel.addGuarantees(message.amount);
-            break;
-          case LogicalChannel.CapabilityChannel:
-            this.capabilityChannel.addGuarantees(message.amount);
-            break;
-        }
-
-        break;
-      }
-      case MSG_CONTROL_ABSOLVE: {
-        // Silently ignore.
-        break;
-      }
-      case MSG_CONTROL_PLEAD: {
-        const absolved = this.intersectionChannel.plead(message.target);
-
-        this.encoder.encode({
-          kind: MSG_CONTROL_ABSOLVE,
-          channel: message.channel,
-          amount: absolved,
-        });
-
-        break;
-      }
-      case MSG_CONTROL_ANNOUNCE_DROPPING: {
-        // Should not happen
-        throw new WgpsMessageValidationError(
-          "Partner announced dropping — but we never optimistically send.",
-        );
-      }
-      case MSG_CONTROL_APOLOGISE: {
-        // Should not happen
-        throw new WgpsMessageValidationError(
-          "Partner apologised — but we never drop messages.",
-        );
-      }
-      case MSG_CONTROL_FREE: {
-        switch (message.handleType) {
-          case HandleType.IntersectionHandle: {
-            // Remember: 'mine' is from the perspective of the sender.
-            if (message.mine) {
-              this.handlesIntersectionsTheirs.markForFreeing(message.handle);
-            } else {
-              this.handlesIntersectionsOurs.markForFreeing(message.handle);
-
-              this.encoder.encode({
-                kind: MSG_CONTROL_FREE,
-                handle: message.handle,
-                handleType: message.handleType,
-                mine: true,
-              });
-            }
-          }
-        }
-        break;
-      }
-
-      // PAI
-      case MSG_PAI_BIND_FRAGMENT: {
-        this.paiFinder.receivedBind(message.groupMember, message.isSecondary);
-
-        break;
-      }
-      case MSG_PAI_REPLY_FRAGMENT: {
+      case MsgKind.PaiReplyFragment: {
         this.handlesIntersectionsOurs.incrementHandleReference(message.handle);
         this.paiFinder.receivedReply(message.handle, message.groupMember);
         this.handlesIntersectionsOurs.decrementHandleReference(message.handle);
         break;
       }
-      case MSG_PAI_REQUEST_SUBSPACE_CAPABILITY: {
+      case MsgKind.PaiRequestSubspaceCapability: {
         this.handlesIntersectionsTheirs.incrementHandleReference(
           message.handle,
         );
@@ -611,15 +1138,13 @@ export class WgpsMessenger<
         );
         break;
       }
-      case MSG_PAI_REPLY_SUBSPACE_CAPABILITY: {
+      case MsgKind.PaiReplySubspaceCapability: {
         const isSubspaceCapValid = await this.schemes.subspaceCap.isValidCap(
           message.capability,
         );
 
         if (!isSubspaceCapValid) {
-          throw new WgpsMessageValidationError(
-            "PAI: Partner sent invalid cap",
-          );
+          throw new WgpsMessageValidationError("PAI: Partner sent invalid cap");
         }
 
         this.handlesIntersectionsOurs.incrementHandleReference(message.handle);
@@ -644,75 +1169,424 @@ export class WgpsMessenger<
           message.handle,
           namespace,
         );
+
         this.handlesIntersectionsOurs.decrementHandleReference(message.handle);
         break;
       }
-
-      // Setup
-      case MSG_SETUP_BIND_READ_CAPABILITY: {
-        const isValidCap = await this.schemes.accessControl.isValidCap(
-          message.capability,
-        );
-
-        if (!isValidCap) {
-          throw new WgpsMessageValidationError(
-            "Received SetupBindReadCapability with invalid capability",
-          );
+      case MsgKind.DataSetMetadata: {
+        // Do nothing (for now);
+        break;
+      }
+      case MsgKind.ControlIssueGuarantee: {
+        switch (message.channel) {
+          case LogicalChannel.ReconciliationChannel:
+            this.outChannelReconciliation.addGuarantees(message.amount);
+            break;
+          case LogicalChannel.DataChannel:
+            this.outChannelData.addGuarantees(message.amount);
+            break;
+          case LogicalChannel.IntersectionChannel:
+            this.outChannelIntersection.addGuarantees(message.amount);
+            break;
+          case LogicalChannel.CapabilityChannel:
+            this.outChannelCapability.addGuarantees(message.amount);
+            break;
+          case LogicalChannel.AreaOfInterestChannel:
+            this.outChannelAreaOfInterest.addGuarantees(message.amount);
+            break;
+          case LogicalChannel.PayloadRequestChannel:
+            this.outChannelPayloadRequest.addGuarantees(message.amount);
+            break;
+          case LogicalChannel.StaticTokenChannel:
+            this.outChannelStaticToken.addGuarantees(message.amount);
         }
-
-        const isAuthentic = await this.schemes.accessControl.signatures.verify(
-          this.schemes.accessControl.getReceiver(message.capability),
-          message.signature,
-          await this.theirChallenge,
-        );
-
-        if (!isAuthentic) {
-          throw new WgpsMessageValidationError(
-            "Received SetupBindReadCapability with bad signature",
-          );
-        }
-
-        this.handlesCapsTheirs.bind(message.capability);
 
         break;
       }
+      case MsgKind.ControlAbsolve: {
+        // Silently ignore.
+        break;
+      }
+      case MsgKind.ControlPlead: {
+        const absolved = this.outChannelIntersection.plead(message.target);
 
-      case MSG_SETUP_BIND_AREA_OF_INTEREST: {
-        const cap = this.handlesCapsTheirs.get(message.authorisation);
+        this.encoder.encode({
+          kind: MsgKind.ControlAbsolve,
+          channel: message.channel,
+          amount: absolved,
+        });
 
-        if (!cap) {
-          throw new WgpsMessageValidationError(
-            "Received SetupBindAreaOfInterest referring to non-existent handle.",
-          );
-        }
-
-        const grantedArea = this.schemes.accessControl.getGrantedArea(cap);
-
-        const isContained = areaIsIncluded(
-          this.schemes.subspace.order,
-          message.areaOfInterest.area,
-          grantedArea,
+        break;
+      }
+      case MsgKind.ControlAnnounceDropping: {
+        // Should not happen
+        throw new WgpsMessageValidationError(
+          "Partner announced dropping — but we never optimistically send.",
         );
+      }
+      case MsgKind.ControlApologise: {
+        // Should not happen
+        throw new WgpsMessageValidationError(
+          "Partner apologised — but we never drop messages.",
+        );
+      }
+      case MsgKind.ControlFree: {
+        switch (message.handleType) {
+          case HandleType.IntersectionHandle: {
+            // Remember: 'mine' is from the perspective of the sender.
+            if (message.mine) {
+              this.handlesIntersectionsTheirs.markForFreeing(message.handle);
+            } else {
+              this.handlesIntersectionsOurs.markForFreeing(message.handle);
 
-        if (!isContained) {
-          throw new WgpsMessageValidationError(
-            "Received SetupBindAreaOfInterest with AOI outside the read cap it is for.",
-          );
+              this.encoder.encode({
+                kind: MsgKind.ControlFree,
+                handle: message.handle,
+                handleType: message.handleType,
+                mine: true,
+              });
+            }
+          }
         }
-
-        this.handlesAoisTheirs.bind(message.areaOfInterest);
-
         break;
       }
-
-      case MSG_SETUP_BIND_STATIC_TOKEN: {
-        this.handlesStaticTokensTheirs.bind(message.staticToken);
-
-        break;
-      }
-
-      default:
-        throw new WgpsMessageValidationError("Unhandled message type");
     }
+  }
+
+  private async handleMsgReconciliation(
+    message: ReconciliationChannelMsg<
+      DynamicToken,
+      Fingerprint,
+      NamespaceId,
+      SubspaceId,
+      PayloadDigest
+    >,
+  ) {
+    switch (message.kind) {
+      case MsgKind.ReconciliationSendFingerprint: {
+        const reconciler = this.reconcilerMap.getReconciler(
+          message.receiverHandle,
+          message.senderHandle,
+        );
+
+        await reconciler.respond(message.range, message.fingerprint);
+
+        break;
+      }
+      case MsgKind.ReconciliationAnnounceEntries: {
+        if (
+          this.currentlyReceivingEntries &&
+          this.currentlyReceivingEntries.remaining > 0n
+        ) {
+          throw new WgpsMessageValidationError(
+            "Never received the entries we were promised...",
+          );
+        }
+        const reconciler = this.reconcilerMap.getReconciler(
+          message.receiverHandle,
+          message.senderHandle,
+        );
+
+        // Set the currently receiving namespace and range and expected count.
+        this.currentlyReceivingEntries = {
+          remaining: message.count,
+          namespace: reconciler.store.namespace,
+          range: message.range,
+        };
+
+        // If a response is wanted... queue up announcement
+        if (message.wantResponse) {
+          this.announcer.queueAnnounce({
+            namespace: reconciler.store.namespace,
+            store: reconciler.store,
+            range: message.range,
+            wantResponse: false,
+            receiverHandle: message.senderHandle,
+            senderHandle: message.receiverHandle,
+          });
+        }
+
+        break;
+      }
+      case MsgKind.ReconciliationSendEntry: {
+        if (!this.currentlyReceivingEntries) {
+          throw new WgpsMessageValidationError(
+            "Received entry when no entries have been announced.",
+          );
+        }
+
+        const entryPos = entryPosition(message.entry.entry);
+
+        const isInRange = isIncluded3d(
+          this.schemes.subspace.order,
+          this.currentlyReceivingEntries.range,
+          entryPos,
+        );
+
+        if (!isInRange) {
+          throw new WgpsMessageValidationError(
+            "Received entry which does not fall in the announced range!",
+          );
+        }
+
+        if (this.currentlyReceivingEntries.remaining <= 0n) {
+          throw new WgpsMessageValidationError(
+            "Received entry for an announcement when we are not expecting any more!",
+          );
+        }
+
+        const store = await this.getStore(
+          this.currentlyReceivingEntries.namespace,
+        );
+
+        const staticToken = await this.handlesStaticTokensTheirs.getEventually(
+          message.staticTokenHandle,
+        );
+
+        const authToken = this.schemes.authorisationToken.recomposeAuthToken(
+          staticToken,
+          message.dynamicToken,
+        );
+
+        const result = await store.ingestEntry(
+          message.entry.entry,
+          authToken,
+          "TODO_DEFINE_THIS_WHEN_PLUMTREES_GROW",
+        );
+
+        if (result.kind === "failure") {
+          throw new WgpsMessageValidationError(
+            `Entry ingestion FAILED: ${result.message}`,
+          );
+        }
+
+        this.currentlyReceivingEntries.remaining -= 1n;
+
+        if (
+          result.kind === "success" &&
+          message.entry.available === message.entry.entry.payloadLength
+        ) {
+          // Request the payload.
+
+          const capHandle = this.capFinder.findCapHandle(message.entry.entry);
+
+          if (capHandle === undefined) {
+            throw new WillowError(
+              "Couldn't get a capability for a given entry",
+            );
+          }
+
+          this.handlesPayloadRequestsOurs.bind({
+            entry: message.entry.entry,
+            offset: 0n,
+          });
+
+          this.encoder.encode({
+            kind: MsgKind.DataBindPayloadRequest,
+            entry: message.entry.entry,
+            offset: 0n,
+            capability: capHandle,
+          });
+        }
+
+        break;
+      }
+    }
+  }
+
+  private async handleMsgData(
+    message: DataChannelMsg<
+      DynamicToken,
+      NamespaceId,
+      SubspaceId,
+      PayloadDigest
+    >,
+  ) {
+    switch (message.kind) {
+      case MsgKind.DataSendEntry: {
+        const staticToken = await this.handlesStaticTokensTheirs.getEventually(
+          message.staticTokenHandle,
+        );
+
+        const authToken = this.schemes.authorisationToken.recomposeAuthToken(
+          staticToken,
+          message.dynamicToken,
+        );
+
+        const store = await this.getStore(message.entry.namespaceId);
+
+        const result = await store.ingestEntry(message.entry, authToken);
+
+        if (result.kind === "failure") {
+          throw new WgpsMessageValidationError(result.message);
+        }
+
+        this.payloadIngester.target(message.entry);
+
+        break;
+      }
+      case MsgKind.DataSendPayload: {
+        if (
+          message.amount + this.currentlyReceivedOffset >
+            this.currentlyReceivedEntry.payloadLength
+        ) {
+          throw new WgpsMessageValidationError("Partner sent too many bytes.");
+        }
+
+        this.currentlyReceivedOffset += message.amount;
+
+        const endHere = this.currentlyReceivedOffset ===
+          this.currentlyReceivedEntry.payloadLength;
+
+        this.payloadIngester.push(message.bytes, endHere);
+
+        break;
+      }
+      case MsgKind.DataReplyPayload: {
+        const result = this.handlesPayloadRequestsOurs.get(message.handle);
+
+        if (!result) {
+          throw new WgpsMessageValidationError(
+            "Could not dereference payload request handle",
+          );
+        }
+
+        this.payloadIngester.target(result.entry);
+
+        break;
+      }
+    }
+  }
+
+  private handleMsgIntersection(
+    message: IntersectionChannelMsg<PsiGroup>,
+  ) {
+    this.paiFinder.receivedBind(message.groupMember, message.isSecondary);
+  }
+
+  private async handleMsgCapability(
+    message: CapabilityChannelMsg<ReadCapability, SyncSignature>,
+  ) {
+    const isValidCap = await this.schemes.accessControl.isValidCap(
+      message.capability,
+    );
+
+    if (!isValidCap) {
+      throw new WgpsMessageValidationError(
+        "Received SetupBindReadCapability with invalid capability",
+      );
+    }
+
+    const isAuthentic = await this.schemes.accessControl.signatures.verify(
+      this.schemes.accessControl.getReceiver(message.capability),
+      message.signature,
+      await this.theirChallenge,
+    );
+
+    if (!isAuthentic) {
+      throw new WgpsMessageValidationError(
+        "Received SetupBindReadCapability with bad signature",
+      );
+    }
+
+    const newHandle = this.handlesCapsTheirs.bind(message.capability);
+
+    this.paiFinder.receivedReadCapForIntersection(message.handle);
+  }
+
+  private async handleMsgAreaOfInterest(
+    message: AreaOfInterestChannelMsg<SubspaceId>,
+  ) {
+    const cap = await this.handlesCapsTheirs.getEventually(
+      message.authorisation,
+    );
+
+    if (!cap) {
+      throw new WgpsMessageValidationError(
+        "Received SetupBindAreaOfInterest referring to non-existent handle.",
+      );
+    }
+
+    const grantedArea = this.schemes.accessControl.getGrantedArea(cap);
+
+    const isContained = areaIsIncluded(
+      this.schemes.subspace.order,
+      message.areaOfInterest.area,
+      grantedArea,
+    );
+
+    if (!isContained) {
+      throw new WgpsMessageValidationError(
+        "Received SetupBindAreaOfInterest with AOI outside the read cap it is for.",
+      );
+    }
+
+    const grantedNamespace = this.schemes.accessControl.getGrantedNamespace(
+      cap,
+    );
+
+    const handle = this.handlesAoisTheirs.bind(message.areaOfInterest);
+
+    this.aoiIntersectionFinder.addAoiHandleForNamespace(
+      handle,
+      grantedNamespace,
+      false,
+    );
+  }
+
+  private async handleMsgPayloadRequest(
+    message: PayloadRequestChannelMsg<NamespaceId, SubspaceId, PayloadDigest>,
+  ) {
+    // Check cap matches entry.
+    const cap = await this.handlesCapsTheirs.getEventually(
+      message.capability,
+    );
+
+    const grantedNamespace = this.schemes.accessControl.getGrantedNamespace(
+      cap,
+    );
+
+    if (
+      this.schemes.namespace.isEqual(
+        message.entry.namespaceId,
+        grantedNamespace,
+      ) === false
+    ) {
+      throw new WgpsMessageValidationError(
+        "Cap did not match entry's namespace",
+      );
+    }
+
+    const position = entryPosition(message.entry);
+
+    const grantedArea = this.schemes.accessControl.getGrantedArea(cap);
+
+    const isEntryWithinCap = isIncludedArea(
+      this.schemes.subspace.order,
+      grantedArea,
+      position,
+    );
+
+    if (!isEntryWithinCap) {
+      throw new WgpsMessageValidationError("Entry not covered by capability");
+    }
+
+    const handle = this.handlesPayloadRequestsTheirs.bind({
+      entry: message.entry,
+      offset: message.offset,
+    });
+
+    this.dataSender.queuePayloadRequest(handle);
+  }
+
+  private handleMsgStaticToken(
+    message: StaticTokenChannelMsg<StaticToken>,
+  ) {
+    this.handlesStaticTokensTheirs.bind(message.staticToken);
+  }
+
+  close() {
+    this.closed = true;
+    this.transport.close();
   }
 }

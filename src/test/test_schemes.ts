@@ -32,7 +32,6 @@ import {
 } from "../store/types.ts";
 import { PaiScheme } from "../wgps/pai/types.ts";
 import { x25519 } from "npm:@noble/curves/ed25519";
-import { encodePathWithSeparators } from "../store/storage/storage_3d/triple_storage.ts";
 import { isFragmentTriple } from "../wgps/pai/pai_finder.ts";
 
 // Namespace
@@ -45,6 +44,7 @@ export enum TestNamespace {
   Vibes,
 }
 export const testSchemeNamespace: NamespaceScheme<TestNamespace> = {
+  defaultNamespaceId: TestNamespace.Family,
   encode: (v) => {
     return new Uint8Array([v]);
   },
@@ -157,7 +157,7 @@ export const testSchemeSubspace: SubspaceScheme<TestSubspace> = {
         return TestSubspace.Muriarty;
     }
 
-    throw new Error("Badly encoded test namespace");
+    throw new Error("Badly encoded test subspace");
   },
   minimalSubspaceId: TestSubspace.Alfie,
   order: (a, b) => {
@@ -379,15 +379,37 @@ export const testSchemePayload: PayloadScheme<ArrayBuffer> = {
       | 0
       | -1;
   },
+  defaultDigest: new Uint8Array(32),
 };
+
+export function addBytes(a: Uint8Array, b: Uint8Array, length: number) {
+  const bytes = new Uint8Array(length);
+
+  let carried = 0;
+
+  for (let i = 0; i < length; i++) {
+    const byteA = a[a.byteLength - 1 - i] || 0;
+    const byteB = b[b.byteLength - 1 - i] || 0;
+
+    const added = carried + byteA + byteB;
+
+    carried = added >> 8;
+
+    bytes.set([added % 256], length - 1 - i);
+  }
+
+  return bytes;
+}
 
 export const testSchemeFingerprint: FingerprintScheme<
   TestNamespace,
   TestSubspace,
   Uint8Array,
+  Uint8Array,
   Uint8Array
 > = {
-  neutral: new Uint8Array(32),
+  neutral: new Uint8Array(0),
+  neutralFinalised: new Uint8Array(32),
   async fingerprintSingleton(lengthy) {
     const encodedEntry = encodeEntry({
       namespaceScheme: testSchemeNamespace,
@@ -403,13 +425,29 @@ export const testSchemeFingerprint: FingerprintScheme<
     );
   },
   fingerprintCombine(a, b) {
-    const bytes = new Uint8Array(32);
+    return addBytes(a, b, 64);
+  },
+  fingerprintFinalise: async (pre) => {
+    return new Uint8Array(
+      await crypto.subtle.digest("SHA-256", pre),
+    );
+  },
+  isEqual: (a, b) => {
+    return orderBytes(a, b) === 0;
+  },
+  encoding: {
+    encode: (fp) => fp,
+    decode: (encoded) => encoded.slice(0, 32),
+    encodedLength: () => 32,
+    decodeStream: async (bytes) => {
+      await bytes.nextAbsolute(32);
 
-    for (let i = 0; i < 32; i++) {
-      bytes.set([a[i] ^ b[i]], i);
-    }
+      const fp = bytes.array.slice(0, 32);
 
-    return bytes;
+      bytes.prune(32);
+
+      return fp;
+    },
   },
 };
 
@@ -502,7 +540,7 @@ export const testSchemePai: PaiScheme<
 
       const pairOrTripleByte = 1;
       const namespaceEnc = testSchemeNamespace.encode(namespace);
-      const pathEncoded = encodePathWithSeparators(path);
+      const pathEncoded = encodePath(testSchemePath, path);
 
       const bytes = concat(
         new Uint8Array([pairOrTripleByte]),
@@ -521,7 +559,7 @@ export const testSchemePai: PaiScheme<
     const namespaceEnc = testSchemeNamespace.encode(namespace);
     const subspaceEnc = testSchemeSubspace.encode(subspace);
 
-    const pathEncoded = encodePathWithSeparators(path);
+    const pathEncoded = encodePath(testSchemePath, path);
 
     const bytes = concat(
       new Uint8Array([pairOrTripleByte]),
@@ -564,6 +602,7 @@ export const testSchemeAccessControl: AccessControlScheme<
   TestNamespace,
   TestSubspace
 > = {
+  getGrantedNamespace: (cap) => cap.namespace,
   getGrantedArea: (cap) => {
     return {
       includedSubspaceId: cap.subspace,
@@ -699,9 +738,46 @@ export const testSchemeAccessControl: AccessControlScheme<
 };
 
 export const testSchemeAuthorisationToken: AuthorisationTokenScheme<
-  TestSubspace
+  Uint8Array,
+  TestSubspace,
+  Uint8Array
 > = {
+  decomposeAuthToken: (authToken) => {
+    const staticToken = authToken[0];
+
+    const dynamicToken = authToken.subarray(1);
+
+    return [staticToken, dynamicToken];
+  },
+  recomposeAuthToken: (staticToken, dynamicToken) => {
+    const bytes = new Uint8Array(33);
+
+    bytes.set([staticToken], 0);
+    bytes.set(dynamicToken, 1);
+
+    return bytes;
+  },
   encodings: {
+    dynamicToken: {
+      encode(hash) {
+        return new Uint8Array(hash);
+      },
+      decode(bytes) {
+        return bytes.subarray(0, 32);
+      },
+      encodedLength() {
+        return 32;
+      },
+      async decodeStream(bytes) {
+        await bytes.nextAbsolute(32);
+
+        const digest = bytes.array.subarray(0, 32);
+
+        bytes.prune(32);
+
+        return digest;
+      },
+    },
     staticToken: {
       encode: (subspace) => {
         return new Uint8Array([subspace]);

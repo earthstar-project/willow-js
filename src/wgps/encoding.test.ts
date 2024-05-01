@@ -5,21 +5,9 @@ import { transportPairInMemory } from "./transports/in_memory.ts";
 import {
   HandleType,
   LogicalChannel,
-  MSG_COMMITMENT_REVEAL,
-  MSG_CONTROL_ABSOLVE,
-  MSG_CONTROL_ANNOUNCE_DROPPING,
-  MSG_CONTROL_APOLOGISE,
-  MSG_CONTROL_FREE,
-  MSG_CONTROL_ISSUE_GUARANTEE,
-  MSG_CONTROL_PLEAD,
-  MSG_PAI_BIND_FRAGMENT,
-  MSG_PAI_REPLY_FRAGMENT,
-  MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
-  MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
-  MSG_SETUP_BIND_AREA_OF_INTEREST,
-  MSG_SETUP_BIND_READ_CAPABILITY,
-  MSG_SETUP_BIND_STATIC_TOKEN,
-  SyncEncodings,
+  MsgKind,
+  MsgReconciliationAnnounceEntries,
+  MsgReconciliationSendEntry,
   SyncMessage,
   SyncSchemes,
 } from "./types.ts";
@@ -29,10 +17,13 @@ import {
   TestNamespace,
   TestReadCap,
   testSchemeAccessControl,
+  testSchemeAuthorisation,
   testSchemeAuthorisationToken,
+  testSchemeFingerprint,
   testSchemeNamespace,
   testSchemePai,
   testSchemePath,
+  testSchemePayload,
   testSchemeSubspace,
   testSchemeSubspaceCap,
   TestSubspace,
@@ -40,7 +31,13 @@ import {
 } from "../test/test_schemes.ts";
 import { randomPath } from "../test/utils.ts";
 import { onAsyncIterate } from "./util.ts";
-import { ANY_SUBSPACE, OPEN_END } from "../../deps.ts";
+import {
+  ANY_SUBSPACE,
+  defaultEntry,
+  defaultRange3d,
+  fullArea,
+  OPEN_END,
+} from "../../deps.ts";
 
 const vectors: SyncMessage<
   TestReadCap,
@@ -48,102 +45,106 @@ const vectors: SyncMessage<
   Uint8Array,
   TestSubspaceReadCap,
   Uint8Array,
+  Uint8Array,
   TestSubspace,
-  TestSubspace
+  Uint8Array,
+  TestNamespace,
+  TestSubspace,
+  ArrayBuffer
 >[] = [
   {
-    kind: MSG_COMMITMENT_REVEAL,
+    kind: MsgKind.CommitmentReveal,
     nonce: crypto.getRandomValues(new Uint8Array(4)),
   },
   {
-    kind: MSG_CONTROL_ISSUE_GUARANTEE,
+    kind: MsgKind.ControlIssueGuarantee,
     channel: LogicalChannel.IntersectionChannel,
     amount: BigInt(1),
   },
   {
-    kind: MSG_CONTROL_ISSUE_GUARANTEE,
+    kind: MsgKind.ControlIssueGuarantee,
     channel: LogicalChannel.CapabilityChannel,
     amount: BigInt(256),
   },
   {
-    kind: MSG_CONTROL_ISSUE_GUARANTEE,
+    kind: MsgKind.ControlIssueGuarantee,
     channel: LogicalChannel.IntersectionChannel,
     amount: BigInt(65536),
   },
   {
-    kind: MSG_CONTROL_ISSUE_GUARANTEE,
+    kind: MsgKind.ControlIssueGuarantee,
     channel: LogicalChannel.CapabilityChannel,
     amount: BigInt(2147483648),
   },
   {
-    kind: MSG_CONTROL_ABSOLVE,
+    kind: MsgKind.ControlAbsolve,
     channel: LogicalChannel.IntersectionChannel,
     amount: BigInt(1),
   },
   {
-    kind: MSG_CONTROL_ABSOLVE,
+    kind: MsgKind.ControlAbsolve,
     channel: LogicalChannel.CapabilityChannel,
     amount: BigInt(256),
   },
   {
-    kind: MSG_CONTROL_ABSOLVE,
+    kind: MsgKind.ControlAbsolve,
     channel: LogicalChannel.IntersectionChannel,
     amount: BigInt(65536),
   },
 
   {
-    kind: MSG_CONTROL_ABSOLVE,
+    kind: MsgKind.ControlAbsolve,
     channel: LogicalChannel.IntersectionChannel,
     amount: BigInt(2147483648),
   },
   {
-    kind: MSG_CONTROL_PLEAD,
+    kind: MsgKind.ControlPlead,
     channel: LogicalChannel.CapabilityChannel,
     target: BigInt(1),
   },
   {
-    kind: MSG_CONTROL_PLEAD,
+    kind: MsgKind.ControlPlead,
     channel: LogicalChannel.IntersectionChannel,
     target: BigInt(256),
   },
   {
-    kind: MSG_CONTROL_PLEAD,
+    kind: MsgKind.ControlPlead,
     channel: LogicalChannel.CapabilityChannel,
     target: BigInt(65536),
   },
   {
-    kind: MSG_CONTROL_PLEAD,
+    kind: MsgKind.ControlPlead,
     channel: LogicalChannel.IntersectionChannel,
     target: BigInt(2147483648),
   },
   {
-    kind: MSG_CONTROL_ANNOUNCE_DROPPING,
+    kind: MsgKind.ControlAnnounceDropping,
     channel: LogicalChannel.CapabilityChannel,
   },
   {
-    kind: MSG_CONTROL_APOLOGISE,
+    kind: MsgKind.ControlApologise,
     channel: LogicalChannel.IntersectionChannel,
   },
   {
-    kind: MSG_CONTROL_FREE,
+    kind: MsgKind.ControlFree,
     handle: BigInt(1),
     handleType: HandleType.IntersectionHandle,
     mine: true,
   },
   {
-    kind: MSG_CONTROL_FREE,
+    kind: MsgKind.ControlFree,
     handle: BigInt(256),
     handleType: HandleType.CapabilityHandle,
     mine: false,
   },
   {
-    kind: MSG_CONTROL_FREE,
+    kind: MsgKind.ControlFree,
     handle: BigInt(65536),
     handleType: HandleType.IntersectionHandle,
     mine: true,
   },
   {
-    kind: MSG_CONTROL_FREE,
+    kind: MsgKind.ControlFree,
     handle: BigInt(2147483648),
     handleType: HandleType.IntersectionHandle,
     mine: false,
@@ -152,56 +153,56 @@ const vectors: SyncMessage<
   // PAI
 
   {
-    kind: MSG_PAI_BIND_FRAGMENT,
+    kind: MsgKind.PaiBindFragment,
     isSecondary: false,
     groupMember: crypto.getRandomValues(new Uint8Array(32)),
   },
   {
-    kind: MSG_PAI_BIND_FRAGMENT,
+    kind: MsgKind.PaiBindFragment,
     isSecondary: true,
     groupMember: crypto.getRandomValues(new Uint8Array(32)),
   },
 
   {
-    kind: MSG_PAI_REPLY_FRAGMENT,
+    kind: MsgKind.PaiReplyFragment,
     groupMember: crypto.getRandomValues(new Uint8Array(32)),
     handle: BigInt(1),
   },
   {
-    kind: MSG_PAI_REPLY_FRAGMENT,
+    kind: MsgKind.PaiReplyFragment,
     groupMember: crypto.getRandomValues(new Uint8Array(32)),
     handle: BigInt(256),
   },
   {
-    kind: MSG_PAI_REPLY_FRAGMENT,
+    kind: MsgKind.PaiReplyFragment,
     groupMember: crypto.getRandomValues(new Uint8Array(32)),
     handle: BigInt(65536),
   },
   {
-    kind: MSG_PAI_REPLY_FRAGMENT,
+    kind: MsgKind.PaiReplyFragment,
     groupMember: crypto.getRandomValues(new Uint8Array(32)),
     handle: BigInt(2147483648),
   },
 
   {
-    kind: MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiRequestSubspaceCapability,
     handle: BigInt(1),
   },
   {
-    kind: MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiRequestSubspaceCapability,
     handle: BigInt(256),
   },
   {
-    kind: MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiRequestSubspaceCapability,
     handle: BigInt(65536),
   },
   {
-    kind: MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiRequestSubspaceCapability,
     handle: BigInt(2147483648),
   },
 
   {
-    kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiReplySubspaceCapability,
     handle: BigInt(1),
     capability: {
       namespace: TestNamespace.Family,
@@ -216,7 +217,7 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiReplySubspaceCapability,
     handle: BigInt(256),
     capability: {
       namespace: TestNamespace.Family,
@@ -230,7 +231,7 @@ const vectors: SyncMessage<
     signature: crypto.getRandomValues(new Uint8Array(33)),
   },
   {
-    kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiReplySubspaceCapability,
     handle: BigInt(65536),
     capability: {
       namespace: TestNamespace.Family,
@@ -244,7 +245,7 @@ const vectors: SyncMessage<
     signature: crypto.getRandomValues(new Uint8Array(33)),
   },
   {
-    kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiReplySubspaceCapability,
     handle: BigInt(2147483648),
     capability: {
       namespace: TestNamespace.Family,
@@ -261,7 +262,7 @@ const vectors: SyncMessage<
   // Setup
 
   {
-    kind: MSG_SETUP_BIND_READ_CAPABILITY,
+    kind: MsgKind.SetupBindReadCapability,
     capability: {
       receiver: TestSubspace.Alfie,
       namespace: TestNamespace.Family,
@@ -277,7 +278,7 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_SETUP_BIND_READ_CAPABILITY,
+    kind: MsgKind.SetupBindReadCapability,
     capability: {
       receiver: TestSubspace.Alfie,
       namespace: TestNamespace.Project,
@@ -293,7 +294,7 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_SETUP_BIND_AREA_OF_INTEREST,
+    kind: MsgKind.SetupBindAreaOfInterest,
     authorisation: BigInt(23),
     areaOfInterest: {
       area: {
@@ -310,7 +311,7 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_SETUP_BIND_AREA_OF_INTEREST,
+    kind: MsgKind.SetupBindAreaOfInterest,
     authorisation: BigInt(5),
     areaOfInterest: {
       area: {
@@ -327,33 +328,319 @@ const vectors: SyncMessage<
   },
 
   {
-    kind: MSG_SETUP_BIND_STATIC_TOKEN,
+    kind: MsgKind.SetupBindStaticToken,
     staticToken: TestSubspace.Epson,
+  },
+
+  // Reconciliation
+
+  {
+    kind: MsgKind.ReconciliationSendFingerprint,
+    fingerprint: crypto.getRandomValues(new Uint8Array(32)),
+    receiverHandle: 2048n,
+    senderHandle: 500000n,
+    range: {
+      subspaceRange: {
+        start: TestSubspace.Alfie,
+        end: TestSubspace.Gemma,
+      },
+      pathRange: {
+        start: [new Uint8Array([1])],
+        end: [new Uint8Array([2])],
+      },
+      timeRange: {
+        start: 1000n,
+        end: 3500n,
+      },
+    },
+  },
+
+  {
+    kind: MsgKind.ReconciliationSendFingerprint,
+    fingerprint: crypto.getRandomValues(new Uint8Array(32)),
+    receiverHandle: 0n,
+    senderHandle: 0n,
+    range: {
+      subspaceRange: {
+        start: TestSubspace.Alfie,
+        end: TestSubspace.Gemma,
+      },
+      pathRange: {
+        start: [new Uint8Array([1])],
+        end: [new Uint8Array([2])],
+      },
+      timeRange: {
+        start: 1000n,
+        end: 3500n,
+      },
+    },
+  },
+
+  // (announce entries are a special case - see below)
+
+  // Data
+
+  {
+    kind: MsgKind.DataSendEntry,
+    dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
+    staticTokenHandle: 8000000000n,
+    entry: {
+      namespaceId: TestNamespace.Family,
+      path: [new Uint8Array([7])],
+      payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+      payloadLength: 500n,
+      subspaceId: TestSubspace.Betty,
+      timestamp: 40000n,
+    },
+    offset: 0n,
+  },
+
+  {
+    kind: MsgKind.DataSendEntry,
+    dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
+    staticTokenHandle: 23n,
+    entry: {
+      namespaceId: TestNamespace.Family,
+      path: [new Uint8Array([7, 3])],
+      payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+      payloadLength: 500n,
+      subspaceId: TestSubspace.Betty,
+      timestamp: 2n,
+    },
+    offset: 30n,
+  },
+
+  {
+    kind: MsgKind.DataSendEntry,
+    dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
+    staticTokenHandle: 23n,
+    entry: {
+      namespaceId: TestNamespace.Family,
+      path: [new Uint8Array([7, 3])],
+      payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+      payloadLength: 500n,
+      subspaceId: TestSubspace.Betty,
+      timestamp: 1000n,
+    },
+    offset: 500n,
+  },
+
+  {
+    kind: MsgKind.DataSendPayload,
+    amount: 32n,
+    bytes: crypto.getRandomValues(new Uint8Array(32)),
+  },
+
+  {
+    kind: MsgKind.DataSetMetadata,
+    isEager: true,
+    receiverHandle: 3n,
+    senderHandle: 579n,
+  },
+
+  {
+    kind: MsgKind.DataSetMetadata,
+    isEager: false,
+    receiverHandle: 0n,
+    senderHandle: 21555n,
+  },
+
+  {
+    kind: MsgKind.DataBindPayloadRequest,
+    capability: 43n,
+    entry: {
+      namespaceId: TestNamespace.Family,
+      path: [new Uint8Array([7, 3])],
+      payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+      payloadLength: 500n,
+      subspaceId: TestSubspace.Betty,
+      timestamp: 1000n,
+    },
+    offset: 0n,
+  },
+
+  {
+    kind: MsgKind.DataBindPayloadRequest,
+    capability: 1000n,
+    entry: {
+      namespaceId: TestNamespace.Family,
+      path: [],
+      payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+      payloadLength: 500n,
+      subspaceId: TestSubspace.Betty,
+      timestamp: 1000n,
+    },
+    offset: 25500n,
+  },
+
+  {
+    kind: MsgKind.DataReplyPayload,
+    handle: 400n,
+  },
+];
+
+// Because ReconciliationSendEntry vectors are decoded using state (an ReconciliationAnnounceEntries must have come before)
+// We need to split them off into their own little section.
+const sendEntryVectors: (
+  | MsgReconciliationAnnounceEntries<TestSubspace>
+  | MsgReconciliationSendEntry<
+    Uint8Array,
+    TestNamespace,
+    TestSubspace,
+    ArrayBuffer
+  >
+)[] = [
+  {
+    kind: MsgKind.ReconciliationAnnounceEntries,
+    receiverHandle: 220n,
+    senderHandle: 250n,
+    wantResponse: true,
+    count: 1n,
+    willSort: true,
+    range: {
+      subspaceRange: {
+        start: TestSubspace.Alfie,
+        end: TestSubspace.Gemma,
+      },
+      pathRange: {
+        start: [new Uint8Array([1])],
+        end: [new Uint8Array([2])],
+      },
+      timeRange: {
+        start: 1000n,
+        end: 3500n,
+      },
+    },
+  },
+  {
+    kind: MsgKind.ReconciliationSendEntry,
+    dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
+    staticTokenHandle: 8n,
+    entry: {
+      available: 3000n,
+      entry: {
+        namespaceId: TestNamespace.Family,
+        path: [new Uint8Array([7])],
+        payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+        payloadLength: 500n,
+        subspaceId: TestSubspace.Betty,
+        timestamp: 2000n,
+      },
+    },
+  },
+  {
+    kind: MsgKind.ReconciliationAnnounceEntries,
+    receiverHandle: 0n,
+    senderHandle: 0n,
+    wantResponse: false,
+    count: 0n,
+    willSort: false,
+    range: {
+      subspaceRange: {
+        start: TestSubspace.Alfie,
+        end: TestSubspace.Gemma,
+      },
+      pathRange: {
+        start: [new Uint8Array([1])],
+        end: [new Uint8Array([2])],
+      },
+      timeRange: {
+        start: 1000n,
+        end: 3500n,
+      },
+    },
+  },
+  {
+    kind: MsgKind.ReconciliationAnnounceEntries,
+    receiverHandle: 0n,
+    senderHandle: 0n,
+    wantResponse: false,
+    count: 4n,
+    willSort: false,
+    range: {
+      subspaceRange: {
+        start: TestSubspace.Alfie,
+        end: TestSubspace.Gemma,
+      },
+      pathRange: {
+        start: [new Uint8Array([1])],
+        end: [new Uint8Array([2])],
+      },
+      timeRange: {
+        start: 1000n,
+        end: 3500n,
+      },
+    },
+  },
+
+  {
+    kind: MsgKind.ReconciliationSendEntry,
+    dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
+    staticTokenHandle: 80n,
+    entry: {
+      available: 3000n,
+      entry: {
+        namespaceId: TestNamespace.Family,
+        path: [new Uint8Array([7])],
+        payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+        payloadLength: 500n,
+        subspaceId: TestSubspace.Betty,
+        timestamp: 40000n,
+      },
+    },
+  },
+  {
+    kind: MsgKind.ReconciliationSendEntry,
+    dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
+    staticTokenHandle: 800n,
+    entry: {
+      available: 3000n,
+      entry: {
+        namespaceId: TestNamespace.Family,
+        path: [new Uint8Array([7])],
+        payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+        payloadLength: 500n,
+        subspaceId: TestSubspace.Betty,
+        timestamp: 40000n,
+      },
+    },
+  },
+  {
+    kind: MsgKind.ReconciliationSendEntry,
+    dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
+    staticTokenHandle: 8000000n,
+    entry: {
+      available: 3000n,
+      entry: {
+        namespaceId: TestNamespace.Family,
+        path: [new Uint8Array([7])],
+        payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+        payloadLength: 500n,
+        subspaceId: TestSubspace.Betty,
+        timestamp: 40000n,
+      },
+    },
+  },
+  {
+    kind: MsgKind.ReconciliationSendEntry,
+    dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
+    staticTokenHandle: 8000000000n,
+    entry: {
+      available: 3000n,
+      entry: {
+        namespaceId: TestNamespace.Family,
+        path: [new Uint8Array([7])],
+        payloadDigest: crypto.getRandomValues(new Uint8Array(32)),
+        payloadLength: 500n,
+        subspaceId: TestSubspace.Betty,
+        timestamp: 40000n,
+      },
+    },
   },
 ];
 
 Deno.test("Encoding roundtrip test", async () => {
   const [alfie, betty] = transportPairInMemory();
-
-  const encodings: SyncEncodings<
-    TestReadCap,
-    Uint8Array,
-    Uint8Array,
-    TestSubspaceReadCap,
-    Uint8Array,
-    TestSubspace,
-    TestNamespace,
-    TestSubspace
-  > = {
-    subspaceCapability: testSchemeSubspaceCap.encodings.subspaceCapability,
-    syncSubspaceSignature:
-      testSchemeSubspaceCap.encodings.syncSubspaceSignature,
-    groupMember: testSchemePai.groupMemberEncoding,
-    readCapability: testSchemeAccessControl.encodings.readCapability,
-    subspace: testSchemeSubspace,
-    syncSignature: testSchemeAccessControl.encodings.syncSignature,
-    staticToken: testSchemeAuthorisationToken.encodings.staticToken,
-  };
 
   const schemes: SyncSchemes<
     TestReadCap,
@@ -366,8 +653,14 @@ Deno.test("Encoding roundtrip test", async () => {
     TestSubspace,
     Uint8Array,
     TestSubspace,
+    Uint8Array,
+    Uint8Array,
+    Uint8Array,
     TestSubspace,
+    Uint8Array,
     TestNamespace,
+    TestSubspace,
+    ArrayBuffer,
     TestSubspace
   > = {
     accessControl: testSchemeAccessControl,
@@ -377,9 +670,12 @@ Deno.test("Encoding roundtrip test", async () => {
     subspace: testSchemeSubspace,
     subspaceCap: testSchemeSubspaceCap,
     authorisationToken: testSchemeAuthorisationToken,
+    payload: testSchemePayload,
+    fingerprint: testSchemeFingerprint,
+    authorisation: testSchemeAuthorisation,
   };
 
-  const msgEncoder = new MessageEncoder(encodings, schemes, {
+  const msgEncoder = new MessageEncoder(schemes, {
     getIntersectionPrivy: (handle) => {
       if (handle === BigInt(64)) {
         return {
@@ -432,6 +728,19 @@ Deno.test("Encoding roundtrip test", async () => {
         },
       };
     },
+    defaultNamespaceId: TestNamespace.Family,
+    defaultSubspaceId: TestSubspace.Alfie,
+    defaultPayloadDigest: new Uint8Array(32),
+    handleToNamespaceId: () => TestNamespace.Family,
+    aoiHandlesToRange3d: () => {
+      return Promise.resolve(defaultRange3d(TestSubspace.Alfie));
+    },
+    getCurrentlySentEntry: () =>
+      defaultEntry(
+        TestNamespace.Family,
+        TestSubspace.Alfie,
+        new Uint8Array(32),
+      ),
   });
 
   const messages: SyncMessage<
@@ -440,20 +749,34 @@ Deno.test("Encoding roundtrip test", async () => {
     Uint8Array,
     TestSubspaceReadCap,
     Uint8Array,
+    Uint8Array,
     TestSubspace,
-    TestSubspace
+    Uint8Array,
+    TestNamespace,
+    TestSubspace,
+    ArrayBuffer
   >[] = [];
 
   onAsyncIterate(msgEncoder, ({ message }) => {
     alfie.send(message);
   });
 
+  // Announcements and SendEntry are conditionally decoded depending on whether entries are expected or not.
+  // Here we just decode announcements first and SendEntry later in a separate batch.
+
   onAsyncIterate(
     decodeMessages({
       transport: betty,
       challengeLength: 4,
-      encodings,
       schemes: schemes,
+      getCurrentlyReceivedEntry: () =>
+        defaultEntry(
+          TestNamespace.Family,
+          TestSubspace.Alfie,
+          new Uint8Array(32),
+        ),
+      aoiHandlesToArea: () => fullArea<TestSubspace>(),
+      aoiHandlesToNamespace: () => TestNamespace.Family,
       getIntersectionPrivy: (handle) => {
         if (handle === BigInt(64)) {
           return {
@@ -468,7 +791,6 @@ Deno.test("Encoding roundtrip test", async () => {
             },
           };
         }
-
         return {
           namespace: TestNamespace.Project,
           outer: {
@@ -480,6 +802,13 @@ Deno.test("Encoding roundtrip test", async () => {
             },
           },
         };
+      },
+      defaultNamespaceId: TestNamespace.Family,
+      defaultSubspaceId: TestSubspace.Alfie,
+      defaultPayloadDigest: new Uint8Array(32),
+      handleToNamespaceId: () => TestNamespace.Family,
+      aoiHandlesToRange3d: () => {
+        return Promise.resolve(defaultRange3d(TestSubspace.Alfie));
       },
       getCap: (handle) => {
         if (handle === BigInt(23)) {
@@ -520,5 +849,11 @@ Deno.test("Encoding roundtrip test", async () => {
 
   await delay(15);
 
-  assertEquals(messages, vectors);
+  for (const message of sendEntryVectors) {
+    msgEncoder.encode(message);
+  }
+
+  await delay(15);
+
+  assertEquals(messages, [...vectors, ...sendEntryVectors]);
 });

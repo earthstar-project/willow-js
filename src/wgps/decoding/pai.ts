@@ -4,10 +4,7 @@ import {
   StreamDecoder,
 } from "../../../deps.ts";
 import {
-  MSG_PAI_BIND_FRAGMENT,
-  MSG_PAI_REPLY_FRAGMENT,
-  MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
-  MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+  MsgKind,
   MsgPaiBindFragment,
   MsgPaiReplyFragment,
   MsgPaiReplySubspaceCapability,
@@ -28,7 +25,7 @@ export async function decodePaiBindFragment<PsiGroup>(
   const groupMember = await groupDecoder(bytes);
 
   return {
-    kind: MSG_PAI_BIND_FRAGMENT,
+    kind: MsgKind.PaiBindFragment,
     isSecondary,
     groupMember,
   };
@@ -49,7 +46,7 @@ export async function decodePaiReplyFragment<PsiGroup>(
   const groupMember = await groupDecoder(bytes);
 
   return {
-    kind: MSG_PAI_REPLY_FRAGMENT,
+    kind: MsgKind.PaiReplyFragment,
     groupMember,
     handle: BigInt(handle),
   };
@@ -67,7 +64,7 @@ export async function decodePaiRequestSubspaceCapability(
   bytes.prune(1 + compactWidth);
 
   return {
-    kind: MSG_PAI_REQUEST_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiRequestSubspaceCapability,
     handle: BigInt(handle),
   };
 }
@@ -97,7 +94,7 @@ export async function decodePaiReplySubspaceCapability<
   const signature = await decodeSig(bytes);
 
   return {
-    kind: MSG_PAI_REPLY_SUBSPACE_CAPABILITY,
+    kind: MsgKind.PaiReplySubspaceCapability,
     handle: BigInt(handle),
     capability,
     signature,

@@ -22,10 +22,15 @@ export function isSubspaceReadAuthorisation<
 export function onAsyncIterate<ValueType>(
   iterator: AsyncIterable<ValueType>,
   callback: (value: ValueType) => void | Promise<void>,
+  onEnd?: () => void,
 ) {
   (async () => {
     for await (const value of iterator) {
       await callback(value);
+    }
+
+    if (onEnd) {
+      onEnd();
     }
   })();
 }

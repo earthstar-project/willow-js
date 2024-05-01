@@ -5,9 +5,9 @@ import {
   IngestEvent,
   IngestPayloadEvent,
   Payload,
-  ProtocolParameters,
   QueryOrder,
   StoreOpts,
+  StoreSchemes,
 } from "./types.ts";
 import { PayloadDriverMemory } from "./storage/payload_drivers/memory.ts";
 import {
@@ -15,18 +15,24 @@ import {
   EntryPayloadSetEvent,
   EntryRemoveEvent,
   PayloadIngestEvent,
+  PayloadRemoveEvent,
 } from "./events.ts";
 import {
   AreaOfInterest,
+  areaTo3dRange,
   bigintToBytes,
   deferred,
   Entry,
   OPEN_END,
   orderPath,
   Path,
+  Range3d,
+  successorPath,
+  successorPrefix,
 } from "../../deps.ts";
 import { Storage3d } from "./storage/storage_3d/types.ts";
 import { WillowError } from "../errors.ts";
+import Mutex from "./mutex.ts";
 
 /** A local set of a particular namespace's entries to be written to, read from, and synced with other `Store`s.
  *
@@ -35,64 +41,69 @@ import { WillowError } from "../errors.ts";
  * https://willowprotocol.org/specs/data-model/index.html#store
  */
 export class Store<
-  NamespacePublicKey,
-  SubspacePublicKey,
+  NamespaceId,
+  SubspaceId,
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
+  Prefingerprint,
   Fingerprint,
 > extends EventTarget {
-  namespace: NamespacePublicKey;
+  namespace: NamespaceId;
 
-  private protocolParams: ProtocolParameters<
-    NamespacePublicKey,
-    SubspacePublicKey,
+  private schemes: StoreSchemes<
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
     AuthorisationOpts,
     AuthorisationToken,
+    Prefingerprint,
     Fingerprint
   >;
 
   private entryDriver: EntryDriver<
-    NamespacePublicKey,
-    SubspacePublicKey,
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
-    Fingerprint
+    Prefingerprint
   >;
   private payloadDriver: PayloadDriver<PayloadDigest>;
 
   private storage: Storage3d<
-    NamespacePublicKey,
-    SubspacePublicKey,
+    NamespaceId,
+    SubspaceId,
     PayloadDigest,
-    Fingerprint
+    Prefingerprint
   >;
 
   private checkedWriteAheadFlag = deferred();
 
+  private ingestionMutex = new Mutex();
+
   constructor(
     opts: StoreOpts<
-      NamespacePublicKey,
-      SubspacePublicKey,
+      NamespaceId,
+      SubspaceId,
       PayloadDigest,
       AuthorisationOpts,
       AuthorisationToken,
+      Prefingerprint,
       Fingerprint
     >,
   ) {
     super();
 
     this.namespace = opts.namespace;
-    this.protocolParams = opts.protocolParameters;
+    this.schemes = opts.schemes;
 
     const payloadDriver = opts.payloadDriver ||
-      new PayloadDriverMemory(opts.protocolParameters.payloadScheme);
+      new PayloadDriverMemory(opts.schemes.payload);
 
     const entryDriver = opts.entryDriver || new EntryDriverMemory({
-      pathScheme: opts.protocolParameters.pathScheme,
-      payloadScheme: opts.protocolParameters.payloadScheme,
-      subspaceScheme: opts.protocolParameters.subspaceScheme,
-      fingerprintScheme: opts.protocolParameters.fingerprintScheme,
+      pathScheme: opts.schemes.path,
+      payloadScheme: opts.schemes.payload,
+      subspaceScheme: opts.schemes.subspace,
+      fingerprintScheme: opts.schemes.fingerprint,
       getPayloadLength: (digest) => {
         return this.payloadDriver.length(digest);
       },
@@ -112,13 +123,12 @@ export class Store<
     const existingRemove = await this.entryDriver.writeAheadFlag.wasRemoving();
 
     if (existingInsert) {
-      // TODO(AUTH): Get the encoded authtoken out of payload driver.
       const encodedAuthToken = await this.payloadDriver.get(
         existingInsert.authTokenHash,
       );
 
       if (encodedAuthToken) {
-        const decodedToken = this.protocolParams.authorisationScheme
+        const decodedToken = this.schemes.authorisation
           .tokenEncoding.decode(await encodedAuthToken?.bytes());
 
         await this.insertEntry({
@@ -147,7 +157,7 @@ export class Store<
   /** Create a new authorised entry for a payload, and store both in the store. */
   async set(
     //
-    input: EntryInput<SubspacePublicKey>,
+    input: EntryInput<SubspaceId>,
     authorisation: AuthorisationOpts,
   ) {
     const timestamp = input.timestamp !== undefined
@@ -159,7 +169,7 @@ export class Store<
       input.payload,
     );
 
-    const entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest> = {
+    const entry: Entry<NamespaceId, SubspaceId, PayloadDigest> = {
       namespaceId: this.namespace,
       subspaceId: input.subspace,
       path: input.path,
@@ -168,7 +178,7 @@ export class Store<
       payloadDigest: digest,
     };
 
-    const authToken = await this.protocolParams.authorisationScheme.authorise(
+    const authToken = await this.schemes.authorisation.authorise(
       entry,
       authorisation,
     );
@@ -199,29 +209,30 @@ export class Store<
    * Additionally, if the entry's path is a prefix of already-held older entries, those entries will be removed from the `Store`.
    */
   async ingestEntry(
-    entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
     authorisation: AuthorisationToken,
     externalSourceId?: string,
   ): Promise<
     IngestEvent<
-      NamespacePublicKey,
-      SubspacePublicKey,
+      NamespaceId,
+      SubspaceId,
       PayloadDigest,
       AuthorisationToken
     >
   > {
     await this.checkedWriteAheadFlag;
 
-    // TODO: Add prefix lock.
-    // The idea: a lock for items with a common prefix.
+    const acquisitionId = await this.ingestionMutex.acquire();
 
     // Check if the entry belongs to this namespace.
     if (
-      !this.protocolParams.namespaceScheme.isEqual(
+      !this.schemes.namespace.isEqual(
         this.namespace,
         entry.namespaceId,
       )
     ) {
+      this.ingestionMutex.release(acquisitionId);
+
       return {
         kind: "failure",
         reason: "invalid_entry",
@@ -231,11 +242,13 @@ export class Store<
     }
 
     if (
-      await this.protocolParams.authorisationScheme.isAuthorisedWrite(
+      await this.schemes.authorisation.isAuthorisedWrite(
         entry,
         authorisation,
       ) === false
     ) {
+      this.ingestionMutex.release(acquisitionId);
+
       return {
         kind: "failure",
         reason: "invalid_entry",
@@ -245,7 +258,7 @@ export class Store<
     }
 
     const subspacePath = [
-      this.protocolParams.subspaceScheme.encode(entry.subspaceId),
+      this.schemes.subspace.encode(entry.subspaceId),
       ...entry.path,
     ];
 
@@ -258,6 +271,8 @@ export class Store<
       const prefixTimestamp = view.getBigUint64(0);
 
       if (prefixTimestamp >= entry.timestamp) {
+        this.ingestionMutex.release(acquisitionId);
+
         return {
           kind: "no_op",
           reason: "newer_prefix_found",
@@ -268,22 +283,31 @@ export class Store<
     // Check for collisions with stored entries
 
     for await (
-      const { entry: otherEntry } of this.storage.query(
-        {
-          area: {
-            pathPrefix: entry.path,
-
-            includedSubspaceId: entry.subspaceId,
-            timeRange: {
-              start: BigInt(0),
-              end: OPEN_END,
+      const { entry: otherEntry } of this
+        .storage.query(
+          {
+            range: {
+              pathRange: {
+                start: entry.path,
+                end: successorPrefix(entry.path) ||
+                  OPEN_END,
+              },
+              subspaceRange: {
+                start: entry.subspaceId,
+                end: this.schemes.subspace.successor(
+                  entry.subspaceId,
+                ) || OPEN_END,
+              },
+              timeRange: {
+                start: BigInt(0),
+                end: OPEN_END,
+              },
             },
+            maxCount: 1,
+            maxSize: BigInt(0),
           },
-          maxCount: 1,
-          maxSize: BigInt(0),
-        },
-        "subspace",
-      )
+          "subspace",
+        )
     ) {
       if (
         orderPath(
@@ -296,13 +320,15 @@ export class Store<
 
       //  If there is something existing and the timestamp is greater than ours, we have a no-op.
       if (otherEntry.timestamp > entry.timestamp) {
+        this.ingestionMutex.release(acquisitionId);
+
         return {
           kind: "no_op",
           reason: "obsolete_from_same_subspace",
         };
       }
 
-      const payloadDigestOrder = this.protocolParams.payloadScheme.order(
+      const payloadDigestOrder = this.schemes.payload.order(
         entry.payloadDigest,
         otherEntry.payloadDigest,
       );
@@ -312,6 +338,8 @@ export class Store<
         otherEntry.timestamp === entry.timestamp &&
         payloadDigestOrder === -1
       ) {
+        this.ingestionMutex.release(acquisitionId);
+
         return {
           kind: "no_op",
           reason: "obsolete_from_same_subspace",
@@ -326,6 +354,8 @@ export class Store<
         otherEntry.timestamp === entry.timestamp &&
         payloadDigestOrder === 0 && otherPayloadLengthIsGreater
       ) {
+        this.ingestionMutex.release(acquisitionId);
+
         return {
           kind: "no_op",
           reason: "obsolete_from_same_subspace",
@@ -335,7 +365,7 @@ export class Store<
       await this.storage.remove(otherEntry);
 
       const toRemovePrefixPath = [
-        this.protocolParams.subspaceScheme.encode(
+        this.schemes.subspace.encode(
           otherEntry.subspaceId,
         ),
         ...otherEntry.path,
@@ -346,11 +376,11 @@ export class Store<
       );
 
       this.dispatchEvent(
-        new EntryRemoveEvent(otherEntry),
+        new EntryRemoveEvent(otherEntry, { entry, authToken: authorisation }),
       );
     }
 
-    await this.insertEntry({
+    const pruned = await this.insertEntry({
       path: entry.path,
       subspace: entry.subspaceId,
       hash: entry.payloadDigest,
@@ -365,12 +395,72 @@ export class Store<
       this.dispatchEvent(new EntryIngestEvent(entry, authorisation));
     }
 
+    this.ingestionMutex.release(acquisitionId);
+
     return {
       kind: "success",
       entry: entry,
+      pruned,
       authToken: authorisation,
       externalSourceId: externalSourceId,
     };
+  }
+
+  async prunableEntries({
+    path,
+    subspace,
+    timestamp,
+  }: {
+    path: Path;
+    subspace: SubspaceId;
+    timestamp: bigint;
+  }): Promise<
+    {
+      entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+      authTokenHash: PayloadDigest;
+    }[]
+  > {
+    const prefixKey = [
+      this.schemes.subspace.encode(subspace),
+      ...path,
+    ];
+
+    const prefixedIterator = this.entryDriver
+      .prefixIterator
+      .prefixedBy(
+        prefixKey,
+      );
+
+    const prunableEntries = [];
+
+    for await (
+      const [subspacePathOfPrefixed, u64TimestampOfPrefixed] of prefixedIterator
+    ) {
+      const view = new DataView(u64TimestampOfPrefixed.buffer);
+      const prefixTimestamp = view.getBigUint64(
+        u64TimestampOfPrefixed.byteOffset,
+      );
+
+      const [subspacePrefixed, ...pathPrefixed] = subspacePathOfPrefixed;
+
+      if (prefixTimestamp < timestamp) {
+        const subspace = this.schemes.subspace.decode(
+          subspacePrefixed,
+        );
+
+        const toDeleteResult = await this.storage.get(subspace, pathPrefixed);
+
+        if (!toDeleteResult) {
+          throw new WillowError(
+            "Malformed storage: could not fetch entry stored in prefix index.",
+          );
+        }
+
+        prunableEntries.push(toDeleteResult);
+      }
+    }
+
+    return prunableEntries;
   }
 
   private async insertEntry(
@@ -383,14 +473,14 @@ export class Store<
       authToken,
     }: {
       path: Path;
-      subspace: SubspacePublicKey;
+      subspace: SubspaceId;
       timestamp: bigint;
       hash: PayloadDigest;
       length: bigint;
       authToken: AuthorisationToken;
     },
-  ) {
-    const encodedToken = this.protocolParams.authorisationScheme
+  ): Promise<Entry<NamespaceId, SubspaceId, PayloadDigest>[]> {
+    const encodedToken = this.schemes.authorisation
       .tokenEncoding.encode(authToken);
 
     const { digest } = await this.payloadDriver.set(encodedToken);
@@ -405,7 +495,7 @@ export class Store<
     }, digest);
 
     const prefixKey = [
-      this.protocolParams.subspaceScheme.encode(subspace),
+      this.schemes.subspace.encode(subspace),
       ...path,
     ];
 
@@ -426,56 +516,65 @@ export class Store<
     ]);
 
     // And remove all prefixes with smaller timestamps.
-    for await (
-      const [prefixedBySubspacePath, prefixedByTimestamp] of this.entryDriver
-        .prefixIterator
-        .prefixedBy(
-          prefixKey,
-        )
-    ) {
-      const view = new DataView(prefixedByTimestamp.buffer);
-      const prefixTimestamp = view.getBigUint64(prefixedByTimestamp.byteOffset);
+    const prunableEntries = await this.prunableEntries({
+      path,
+      subspace,
+      timestamp,
+    });
 
-      const [prefixedBySubspace, ...prefixedByPath] = prefixedBySubspacePath;
+    const prunedEntries = [];
 
-      if (prefixTimestamp < timestamp) {
-        const subspace = this.protocolParams.subspaceScheme.decode(
-          prefixedBySubspace,
-        );
+    for (const { entry, authTokenHash } of prunableEntries) {
+      await this.entryDriver.writeAheadFlag.flagRemoval(
+        entry,
+      );
 
-        const toDeleteResult = await this.storage.get(subspace, prefixedByPath);
+      await Promise.all([
+        this.storage.remove(entry),
+        async () => {
+          const count = await this.entryDriver.payloadReferenceCounter
+            .decrement(entry.payloadDigest);
 
-        if (toDeleteResult) {
-          await this.entryDriver.writeAheadFlag.flagRemoval(
-            toDeleteResult.entry,
-          );
+          if (count === 0) {
+            await this.payloadDriver.erase(
+              entry.payloadDigest,
+            );
+          }
+        },
+        ,
+        this.entryDriver.prefixIterator.remove(
+          [this.schemes.subspace.encode(entry.subspaceId), ...entry.path],
+        ),
+      ]);
 
-          await Promise.all([
-            this.storage.remove(toDeleteResult.entry),
-            async () => {
-              const count = await this.entryDriver.payloadReferenceCounter
-                .decrement(toDeleteResult.entry.payloadDigest);
+      this.dispatchEvent(
+        new PayloadRemoveEvent({ entry, authToken }),
+      );
 
-              if (count === 0) {
-                await this.payloadDriver.erase(
-                  toDeleteResult.entry.payloadDigest,
-                );
-              }
-            },
+      await this.payloadDriver.erase(authTokenHash);
 
-            this.entryDriver.prefixIterator.remove(prefixedBySubspacePath),
-          ]);
+      await this.entryDriver.writeAheadFlag.unflagRemoval();
 
-          await this.entryDriver.writeAheadFlag.unflagRemoval();
+      this.dispatchEvent(
+        new EntryRemoveEvent(entry, {
+          entry: {
+            namespaceId: this.namespace,
+            subspaceId: subspace,
+            path,
+            payloadDigest: hash,
+            payloadLength: length,
+            timestamp,
+          },
+          authToken,
+        }),
+      );
 
-          this.dispatchEvent(
-            new EntryRemoveEvent(toDeleteResult.entry),
-          );
-        }
-      }
+      prunedEntries.push(entry);
     }
 
     await this.entryDriver.writeAheadFlag.unflagInsertion();
+
+    return prunedEntries;
   }
 
   /** Attempt to store the corresponding payload for one of the store's entries.
@@ -486,7 +585,7 @@ export class Store<
     entryDetails: {
       path: Path;
       timestamp: bigint;
-      subspace: SubspacePublicKey;
+      subspace: SubspaceId;
     },
     payload: AsyncIterable<Uint8Array>,
     offset = 0,
@@ -503,7 +602,7 @@ export class Store<
       };
     }
 
-    const { entry } = getResult;
+    const { entry, authTokenHash } = getResult;
 
     const existingPayload = await this.payloadDriver.get(entry.payloadDigest);
 
@@ -522,9 +621,9 @@ export class Store<
     });
 
     if (
-      result.length > entry.payloadLength ||
+      result.length !== entry.payloadLength ||
       (result.length === entry.payloadLength &&
-        this.protocolParams.payloadScheme.order(
+        this.schemes.payload.order(
             result.digest,
             entry.payloadDigest,
           ) !== 0)
@@ -537,7 +636,7 @@ export class Store<
 
     if (
       result.length === entry.payloadLength &&
-      this.protocolParams.payloadScheme.order(
+      this.schemes.payload.order(
           result.digest,
           entry.payloadDigest,
         ) === 0
@@ -550,13 +649,24 @@ export class Store<
         );
       }
 
+      const authToken = await this.payloadDriver.get(authTokenHash);
+
+      if (!authToken) {
+        throw new WillowError(
+          "Could not get authorisation token for a stored entry.",
+        );
+      }
+
       this.dispatchEvent(
-        new PayloadIngestEvent(entry, complete),
+        new PayloadIngestEvent(entry, authToken, complete),
       );
     }
 
+    const acquisitionId = await this.ingestionMutex.acquire();
+
     await this.storage.updateAvailablePayload(entry.subspaceId, entry.path);
 
+    this.ingestionMutex.release(acquisitionId);
     return {
       kind: "success",
     };
@@ -564,19 +674,29 @@ export class Store<
 
   /** Retrieve an asynchronous iterator of entry-payload-authorisation triples from the store for a given `Area`. */
   async *query(
-    areaOfInterest: AreaOfInterest<SubspacePublicKey>,
+    areaOfInterest: AreaOfInterest<SubspaceId>,
     order: QueryOrder,
     reverse = false,
   ): AsyncIterable<
     [
-      Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
+      Entry<NamespaceId, SubspaceId, PayloadDigest>,
       Payload | undefined,
       AuthorisationToken,
     ]
   > {
     for await (
       const { entry, authTokenHash } of this.storage.query(
-        areaOfInterest,
+        {
+          range: areaTo3dRange({
+            maxComponentCount: this.schemes.path.maxComponentCount,
+            maxPathComponentLength: this.schemes.path.maxComponentLength,
+            maxPathLength: this.schemes.path.maxPathLength,
+            minimalSubspace: this.schemes.subspace.minimalSubspaceId,
+            successorSubspace: this.schemes.subspace.successor,
+          }, areaOfInterest.area),
+          maxCount: areaOfInterest.maxCount,
+          maxSize: areaOfInterest.maxSize,
+        },
         order,
         reverse,
       )
@@ -589,10 +709,100 @@ export class Store<
         continue;
       }
       const authTokenEncoded = await authTokenPayload.bytes();
-      const authToken = this.protocolParams.authorisationScheme.tokenEncoding
+      const authToken = this.schemes.authorisation.tokenEncoding
         .decode(authTokenEncoded);
 
       yield [entry, payload, authToken];
     }
+  }
+
+  summarise(
+    range: Range3d<SubspaceId>,
+  ): Promise<{ fingerprint: Prefingerprint; size: number }> {
+    return this.storage.summarise(range);
+  }
+
+  splitRange(
+    range: Range3d<SubspaceId>,
+    knownSize: number,
+  ): Promise<
+    [Range3d<SubspaceId>, Range3d<SubspaceId>]
+  > {
+    return this.storage.splitRange(range, knownSize);
+  }
+
+  areaOfInterestToRange(
+    areaOfInterest: AreaOfInterest<SubspaceId>,
+  ): Promise<Range3d<SubspaceId>> {
+    return this.storage.removeInterest(areaOfInterest);
+  }
+
+  async *queryRange(
+    range: Range3d<SubspaceId>,
+    order: "newest" | "oldest",
+  ): AsyncIterable<
+    [
+      Entry<NamespaceId, SubspaceId, PayloadDigest>,
+      Payload | undefined,
+      AuthorisationToken,
+    ]
+  > {
+    for await (
+      const { entry, authTokenHash } of this.storage.query(
+        {
+          range: range,
+          maxCount: 0,
+          maxSize: BigInt(0),
+        },
+        "timestamp",
+        order === "newest" ? true : false,
+      )
+    ) {
+      const payload = await this.payloadDriver.get(entry.payloadDigest);
+
+      const authTokenPayload = await this.payloadDriver.get(authTokenHash);
+
+      if (!authTokenPayload) {
+        continue;
+      }
+      const authTokenEncoded = await authTokenPayload.bytes();
+      const authToken = this.schemes.authorisation.tokenEncoding
+        .decode(authTokenEncoded);
+
+      yield [entry, payload, authToken];
+    }
+  }
+
+  getPayload(
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
+  ): Promise<Payload | undefined> {
+    return this.payloadDriver.get(entry.payloadDigest);
+  }
+
+  async getAuthToken(
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
+  ): Promise<AuthorisationToken | undefined> {
+    let authToken: AuthorisationToken | undefined;
+
+    for await (
+      const [, , token] of this.queryRange({
+        subspaceRange: {
+          start: entry.subspaceId,
+          end: this.schemes.subspace.successor(entry.subspaceId) || OPEN_END,
+        },
+        pathRange: {
+          start: entry.path,
+          end: successorPath(entry.path, this.schemes.path) || OPEN_END,
+        },
+        timeRange: {
+          start: entry.timestamp,
+          end: entry.timestamp + 1n,
+        },
+      }, "newest")
+    ) {
+      authToken = token;
+    }
+
+    return authToken;
   }
 }

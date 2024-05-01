@@ -44,6 +44,7 @@ export type PaiFinderOpts<
 const DO_NOTHING = Symbol("do_nothing");
 const BIND_READ_CAP = Symbol("bind_read_cap");
 const REQUEST_SUBSPACE_CAP = Symbol("req_subspace_cap");
+const REPLY_READ_CAP = Symbol("reply_read_cap");
 
 /** Some locally stored information about a given fragment group */
 type LocalFragmentInfo<
@@ -77,6 +78,14 @@ type LocalFragmentInfo<
   path: Path;
   namespace: NamespaceId;
   subspace: typeof ANY_SUBSPACE;
+} | {
+  onIntersection: typeof REPLY_READ_CAP;
+  authorisation: {
+    capability: ReadCapability;
+  };
+  path: Path;
+  namespace: NamespaceId;
+  subspace: SubspaceId | typeof ANY_SUBSPACE;
 };
 
 /** Given `ReadAuthorisation`s, emits intersected  */
@@ -94,6 +103,7 @@ export class PaiFinder<
   /** Queue of: a read capability to bind, and a handle of our own intersection this is related to, and the outer area to encode against.  */
   private intersectionQueue = new FIFO<
     [
+      NamespaceId,
       ReadAuthorisation<
         ReadCapability,
         SubspaceReadCapability
@@ -200,7 +210,7 @@ export class PaiFinder<
           });
         } else {
           this.fragmentsInfo.set(groupHandle, {
-            onIntersection: DO_NOTHING,
+            onIntersection: REPLY_READ_CAP,
             authorisation: authorisation,
             namespace,
             path,
@@ -226,7 +236,7 @@ export class PaiFinder<
           });
         } else {
           this.fragmentsInfo.set(groupHandle, {
-            onIntersection: DO_NOTHING,
+            onIntersection: REPLY_READ_CAP,
             authorisation: authorisation,
             namespace,
             path,
@@ -375,6 +385,7 @@ export class PaiFinder<
     }
 
     this.intersectionQueue.push([
+      namespace,
       fragmentInfo.authorisation,
       handle,
     ]);
@@ -434,6 +445,7 @@ export class PaiFinder<
 
       if (fragmentInfo.onIntersection === BIND_READ_CAP) {
         this.intersectionQueue.push([
+          fragmentInfo.namespace,
           fragmentInfo.authorisation,
           ourHandle,
         ]);
@@ -463,13 +475,13 @@ export class PaiFinder<
     };
   }
 
-  getIntersectionPrivy(
-    handle: bigint,
-  ): ReadCapPrivy<NamespaceId, SubspaceId> {
+  receivedReadCapForIntersection(theirIntersectionHandle: bigint) {
     // This handle is theirs.
     // Find which one of ours it intersects.
     // Return the namespace and outer area.
-    const theirIntersection = this.intersectionHandlesTheirs.get(handle);
+    const theirIntersection = this.intersectionHandlesTheirs.get(
+      theirIntersectionHandle,
+    );
 
     if (theirIntersection === undefined) {
       throw new WgpsMessageValidationError(
@@ -496,6 +508,67 @@ export class PaiFinder<
       ) {
         continue;
       }
+
+      const fragmentInfo = this.fragmentsInfo.get(ourHandle);
+
+      if (!fragmentInfo) {
+        throw new WillowError("Had no fragment info!");
+      }
+
+      if (fragmentInfo.onIntersection === REPLY_READ_CAP) {
+        this.intersectionQueue.push([
+          fragmentInfo.namespace,
+          fragmentInfo.authorisation,
+          ourHandle,
+        ]);
+      }
+    }
+  }
+
+  getIntersectionPrivy(
+    handle: bigint,
+    ours: boolean,
+  ): ReadCapPrivy<NamespaceId, SubspaceId> {
+    const storeToGetHandleFrom = ours
+      ? this.intersectionHandlesOurs
+      : this.intersectionHandlesTheirs;
+    const storeToCheckAgainst = ours
+      ? this.intersectionHandlesTheirs
+      : this.intersectionHandlesOurs;
+
+    const intersection = storeToGetHandleFrom.get(handle);
+
+    if (!intersection) {
+      throw new WillowError("Tried to get a handle we don't have");
+    }
+
+    // Here we are looping through the whole contents of the handle store because...
+    // otherwise we need to build a special handle store just for intersections.
+    // Which we might do one day, but I'm not convinced it's worth it yet.
+    for (
+      const [otherHandle, otherIntersection] of storeToCheckAgainst
+    ) {
+      if (!otherIntersection.isComplete) {
+        continue;
+      }
+
+      // Continue here to avoid the false positive of same namespace + path but different subspaces.
+      if (intersection.isSecondary && otherIntersection.isSecondary) {
+        continue;
+      }
+
+      // Check for equality.
+      if (
+        !this.paiScheme.isGroupEqual(
+          intersection.group,
+          otherIntersection.group,
+        )
+      ) {
+        continue;
+      }
+
+      // If there is an intersection, check what we have to do!
+      const ourHandle = ours ? handle : otherHandle;
 
       const fragmentInfo = this.fragmentsInfo.get(ourHandle);
 
@@ -536,10 +609,11 @@ export class PaiFinder<
 
   async *intersections() {
     for await (
-      const [authorisation, handle] of this
+      const [namespace, authorisation, handle] of this
         .intersectionQueue
     ) {
       yield {
+        namespace,
         authorisation,
         handle,
       };

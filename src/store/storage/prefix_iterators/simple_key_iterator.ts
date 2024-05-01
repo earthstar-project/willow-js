@@ -1,4 +1,4 @@
-import { isPathPrefixed, orderPath, Path } from "../../../../deps.ts";
+import { orderPath, Path, prefixesOf } from "../../../../deps.ts";
 import { KvDriver } from "../kv/types.ts";
 import { PrefixIterator } from "./types.ts";
 
@@ -10,58 +10,42 @@ export class SimpleKeyIterator<ValueType> implements PrefixIterator<ValueType> {
   }
 
   insert(path: Path, value: ValueType) {
-    return this.kv.set([0, ...path], value);
+    return this.kv.set(path, value);
   }
 
   async remove(path: Path) {
-    await this.kv.delete([0, ...path]);
+    await this.kv.delete(path);
 
     return true;
   }
 
   async *prefixesOf(
     path: Path,
-    atLeast: Path = [],
   ): AsyncIterable<[Path, ValueType]> {
-    for await (
-      const entry of this.kv.list<ValueType>({
-        start: [0, ...atLeast],
-        end: [0, ...path],
-      }, {
-        batchSize: path.length === 0 ? 1 : undefined,
-        limit: path.length === 0 ? 1 : undefined,
-      })
-    ) {
-      const candidate = entry.key.slice(1) as Path;
-      // If the candidate is greater than or equal to the current path, we've reached the end of the line.
-      if (orderPath(candidate, path) >= 0) {
+    const prefixes = prefixesOf(path);
+
+    for (const prefix of prefixes) {
+      if (orderPath(prefix, path) >= 0) {
         break;
       }
 
-      if (isPathPrefixed(candidate, path)) {
-        yield [candidate, entry.value];
+      const value = await this.kv.get<ValueType>(prefix);
 
-        for await (
-          const result of this.prefixesOf(
-            path,
-            path.slice(0, candidate.length + 1),
-          )
-        ) {
-          yield result;
-        }
-
-        break;
+      if (!value) {
+        continue;
       }
+
+      yield [prefix, value];
     }
   }
 
   async *prefixedBy(path: Path): AsyncIterable<[Path, ValueType]> {
     for await (
       const entry of this.kv.list<ValueType>({
-        prefix: [0, ...path],
+        prefix: path,
       })
     ) {
-      yield [entry.key.slice(1) as Path, entry.value];
+      yield [entry.key as Path, entry.value];
     }
   }
 }

@@ -1,4 +1,5 @@
 {
+  "co.gwil.deno.config.documentPreloadLimit" : 2000,
   "co.gwil.deno.config.enabledPaths" : [
     "\/Users\/gwil\/Projects\/willow-js\/src",
     "\/Users\/gwil\/Projects\/willow-js\/scripts",

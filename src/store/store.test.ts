@@ -22,18 +22,19 @@ class TestStore extends Store<
   ArrayBuffer,
   TestSubspace,
   Uint8Array,
+  Uint8Array,
   Uint8Array
 > {
   constructor(namespace = 0) {
     super({
       namespace,
-      protocolParameters: {
-        namespaceScheme: testSchemeNamespace,
-        subspaceScheme: testSchemeSubspace,
-        pathScheme: testSchemePath,
-        payloadScheme: testSchemePayload,
-        authorisationScheme: testSchemeAuthorisation,
-        fingerprintScheme: testSchemeFingerprint,
+      schemes: {
+        namespace: testSchemeNamespace,
+        subspace: testSchemeSubspace,
+        path: testSchemePath,
+        payload: testSchemePayload,
+        authorisation: testSchemeAuthorisation,
+        fingerprint: testSchemeFingerprint,
       },
     });
   }
@@ -509,9 +510,52 @@ Deno.test("Store.ingestEntry", async (test) => {
     assertEquals(await entries[0][1].bytes(), new Uint8Array([0, 2]));
 
     assert(entries[1]);
-    assertEquals(entries[1][0].path, [new Uint8Array([0]), new Uint8Array([2])]);
+    assertEquals(entries[1][0].path, [
+      new Uint8Array([0]),
+      new Uint8Array([2]),
+    ]);
     assert(entries[1][1]);
     assertEquals(await entries[1][1].bytes(), new Uint8Array([0, 2, 2]));
+  });
+
+  await test.step("does not use partial matching for prefix pruning", async () => {
+    const store = new TestStore();
+
+    await store.set(
+      {
+        path: [new Uint8Array([100, 200, 300])],
+        payload: new Uint8Array([0, 1, 2, 1]),
+
+        timestamp: BigInt(0),
+        subspace: alfie,
+      },
+      alfie,
+    );
+
+    await store.set(
+      {
+        path: [new Uint8Array([100])],
+        payload: new Uint8Array([0, 1, 2, 3]),
+
+        timestamp: BigInt(1),
+        subspace: alfie,
+      },
+      alfie,
+    );
+
+    const entries = [];
+
+    for await (
+      const entry of store.query({
+        area: fullArea(),
+        maxCount: 0,
+        maxSize: BigInt(0),
+      }, "path")
+    ) {
+      entries.push(entry);
+    }
+
+    assertEquals(entries.length, 2);
   });
 });
 
@@ -559,7 +603,7 @@ Deno.test("Store.ingestPayload", async (test) => {
       path: res.entry.path,
       subspace: res.entry.subspaceId,
       timestamp: res.entry.timestamp,
-    }, new Blob([new Uint8Array()]).stream());
+    }, new Blob([payload]).stream());
 
     assert(res3.kind === "success");
 

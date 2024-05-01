@@ -10,6 +10,7 @@ import { EntryDriver, PayloadDriver } from "./storage/types.ts";
 
 export type NamespaceScheme<NamespaceId> = EncodingScheme<NamespaceId> & {
   isEqual: EqualityFn<NamespaceId>;
+  defaultNamespaceId: NamespaceId;
 };
 
 export type SubspaceScheme<SubspaceId> = EncodingScheme<SubspaceId> & {
@@ -23,6 +24,7 @@ export type PayloadScheme<PayloadDigest> = EncodingScheme<PayloadDigest> & {
     bytes: Uint8Array | AsyncIterable<Uint8Array>,
   ) => Promise<PayloadDigest>;
   order: (a: PayloadDigest, b: PayloadDigest) => -1 | 0 | 1;
+  defaultDigest: PayloadDigest;
 };
 
 export type AuthorisationScheme<
@@ -49,37 +51,45 @@ export type FingerprintScheme<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
+  PreFingerprint,
   Fingerprint,
 > = {
   fingerprintSingleton(
     entry: LengthyEntry<NamespaceId, SubspaceId, PayloadDigest>,
-  ): Promise<Fingerprint>;
+  ): Promise<PreFingerprint>;
   fingerprintCombine(
-    a: Fingerprint,
-    b: Fingerprint,
-  ): Fingerprint;
-  neutral: Fingerprint;
+    a: PreFingerprint,
+    b: PreFingerprint,
+  ): PreFingerprint;
+  fingerprintFinalise(
+    prefingerprint: PreFingerprint,
+  ): Promise<Fingerprint>;
+  neutral: PreFingerprint;
+  neutralFinalised: Fingerprint;
+  isEqual: (a: Fingerprint, b: Fingerprint) => boolean;
+  encoding: EncodingScheme<Fingerprint>;
 };
 
 /** Concrete parameters peculiar to a specific usage of Willow. */
-export interface ProtocolParameters<
+export interface StoreSchemes<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
+  Prefingerprint,
   Fingerprint,
 > {
-  pathScheme: PathScheme;
+  path: PathScheme;
 
-  namespaceScheme: NamespaceScheme<NamespaceId>;
+  namespace: NamespaceScheme<NamespaceId>;
 
-  subspaceScheme: SubspaceScheme<SubspaceId>;
+  subspace: SubspaceScheme<SubspaceId>;
 
   // Learn about payloads and producing them from bytes
-  payloadScheme: PayloadScheme<PayloadDigest>;
+  payload: PayloadScheme<PayloadDigest>;
 
-  authorisationScheme: AuthorisationScheme<
+  authorisation: AuthorisationScheme<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
@@ -87,10 +97,11 @@ export interface ProtocolParameters<
     AuthorisationToken
   >;
 
-  fingerprintScheme: FingerprintScheme<
+  fingerprint: FingerprintScheme<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
+    Prefingerprint,
     Fingerprint
   >;
 }
@@ -101,17 +112,19 @@ export type StoreOpts<
   PayloadDigest,
   AuthorisationOpts,
   AuthorisationToken,
+  Prefingerprint,
   Fingerprint,
 > = {
   /** The public key of the namespace this store holds entries for. */
   namespace: NamespaceId;
-  /** The protocol parameters this store should use. */
-  protocolParameters: ProtocolParameters<
+  /** The protocol schemes this store should use. */
+  schemes: StoreSchemes<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
     AuthorisationOpts,
     AuthorisationToken,
+    Prefingerprint,
     Fingerprint
   >;
   /** An optional driver used to store and retrieve a store's entries. */
@@ -119,9 +132,9 @@ export type StoreOpts<
     NamespaceId,
     SubspaceId,
     PayloadDigest,
-    Fingerprint
+    Prefingerprint
   >;
-  /** An option driver used to store and retrieve a store's payloads.  */
+  /** An optional driver used to store and retrieve a store's payloads.  */
   payloadDriver?: PayloadDriver<PayloadDigest>;
 };
 
@@ -150,8 +163,10 @@ export type IngestEventSuccess<
   kind: "success";
   /** The successfully ingested signed entry. */
   entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>;
+  /** Entries which were pruned by this ingestion. */
+  pruned: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>[];
+  /** The authorisation token generated for this entry. */
   authToken: AuthorisationToken;
-
   /** An ID representing the source of this ingested entry. */
   externalSourceId?: string;
 };
@@ -192,7 +207,7 @@ export type Payload = {
 export type EntryInput<SubspacePublicKey> = {
   path: Path;
   subspace: SubspacePublicKey;
-  payload: Uint8Array | ReadableStream<Uint8Array>;
+  payload: Uint8Array | AsyncIterable<Uint8Array>;
   /** The desired timestamp for the new entry. If left undefined, uses the current time, OR if another entry exists at the same path will be that entry's timestamp + 1. */
   timestamp?: bigint;
 };
