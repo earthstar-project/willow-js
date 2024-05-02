@@ -1,10 +1,11 @@
-import { Entry, FIFO } from "../../../deps.ts";
+import { concat, Entry, FIFO } from "../../../deps.ts";
 import { WgpsMessageValidationError } from "../../errors.ts";
 import { onAsyncIterate } from "../util.ts";
 import { GetStoreFn } from "../wgps_messenger.ts";
 
 const CANCELLATION = Symbol("cancellation");
 
+// This class can handle both the payload sending procedures for payloads sent via reconciliation AND data channels. It would probably be better to split them up.
 export class PayloadIngester<
   Prefingerprint,
   Fingerprint,
@@ -18,6 +19,8 @@ export class PayloadIngester<
   private currentEntry:
     | Entry<NamespaceId, SubspaceId, PayloadDigest>
     | undefined;
+  private currentlyReceivedLength = 0n;
+
   private events = new FIFO<
     Uint8Array | {
       entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
@@ -27,6 +30,9 @@ export class PayloadIngester<
     bytes: Uint8Array,
     entryLength: bigint,
   ) => Uint8Array;
+  private entryToRequestPayloadFor:
+    | Entry<NamespaceId, SubspaceId, PayloadDigest>
+    | null = null;
 
   constructor(opts: {
     getStore: GetStoreFn<
@@ -55,6 +61,7 @@ export class PayloadIngester<
         const store = await opts.getStore(event.entry.namespaceId);
 
         this.currentEntry = event.entry;
+        this.currentlyReceivedLength = 0n;
 
         store.ingestPayload({
           path: event.entry.path,
@@ -62,7 +69,10 @@ export class PayloadIngester<
           timestamp: event.entry.timestamp,
         }, new CancellableIngestion(this.currentIngestion)).then(
           (ingestEvent) => {
-            if (ingestEvent.kind === "failure") {
+            if (
+              ingestEvent.kind === "failure" &&
+              this.currentlyReceivedLength === event.entry.payloadLength
+            ) {
               throw new WgpsMessageValidationError(
                 "Ingestion failed: " + ingestEvent.reason,
               );
@@ -75,13 +85,22 @@ export class PayloadIngester<
           this.currentEntry!.payloadLength,
         );
 
+        this.currentlyReceivedLength += BigInt(transformed.byteLength);
+
         this.currentIngestion.push(transformed);
       }
     });
   }
 
-  target(entry: Entry<NamespaceId, SubspaceId, PayloadDigest>) {
+  target(
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
+    requestIfImmediatelyTerminated?: boolean,
+  ) {
     this.events.push({ entry });
+
+    if (requestIfImmediatelyTerminated) {
+      this.entryToRequestPayloadFor = entry;
+    }
   }
 
   push(bytes: Uint8Array, end: boolean) {
@@ -90,6 +109,15 @@ export class PayloadIngester<
     if (end) {
       this.events.push(CANCELLATION);
     }
+
+    this.entryToRequestPayloadFor = null;
+  }
+
+  // Returns the entry to request a payload for or null
+  terminate(): Entry<NamespaceId, SubspaceId, PayloadDigest> | null {
+    this.events.push(CANCELLATION);
+
+    return this.entryToRequestPayloadFor;
   }
 }
 
@@ -100,9 +128,13 @@ class CancellableIngestion {
 
   async *[Symbol.asyncIterator]() {
     for await (const event of this.iterable) {
+      let bytes = new Uint8Array();
+
       if (event === CANCELLATION) {
         break;
       } else {
+        bytes = concat(bytes, event);
+
         yield event;
       }
     }

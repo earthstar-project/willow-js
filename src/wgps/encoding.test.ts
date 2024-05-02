@@ -8,6 +8,7 @@ import {
   MsgKind,
   MsgReconciliationAnnounceEntries,
   MsgReconciliationSendEntry,
+  MsgReconciliationTerminatePayload,
   SyncMessage,
   SyncSchemes,
 } from "./types.ts";
@@ -489,6 +490,7 @@ const sendEntryVectors: (
     TestSubspace,
     ArrayBuffer
   >
+  | MsgReconciliationTerminatePayload
 )[] = [
   {
     kind: MsgKind.ReconciliationAnnounceEntries,
@@ -527,6 +529,9 @@ const sendEntryVectors: (
         timestamp: 2000n,
       },
     },
+  },
+  {
+    kind: MsgKind.ReconciliationTerminatePayload,
   },
   {
     kind: MsgKind.ReconciliationAnnounceEntries,
@@ -590,6 +595,9 @@ const sendEntryVectors: (
     },
   },
   {
+    kind: MsgKind.ReconciliationTerminatePayload,
+  },
+  {
     kind: MsgKind.ReconciliationSendEntry,
     dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
     staticTokenHandle: 800n,
@@ -604,6 +612,9 @@ const sendEntryVectors: (
         timestamp: 40000n,
       },
     },
+  },
+  {
+    kind: MsgKind.ReconciliationTerminatePayload,
   },
   {
     kind: MsgKind.ReconciliationSendEntry,
@@ -622,6 +633,9 @@ const sendEntryVectors: (
     },
   },
   {
+    kind: MsgKind.ReconciliationTerminatePayload,
+  },
+  {
     kind: MsgKind.ReconciliationSendEntry,
     dynamicToken: crypto.getRandomValues(new Uint8Array(32)),
     staticTokenHandle: 8000000000n,
@@ -636,6 +650,9 @@ const sendEntryVectors: (
         timestamp: 40000n,
       },
     },
+  },
+  {
+    kind: MsgKind.ReconciliationTerminatePayload,
   },
 ];
 

@@ -147,9 +147,6 @@ export class DataSender<
           bytes: transformed,
         };
       }
-
-      console.groupEnd();
-      console.groupEnd();
     }
   }
 }

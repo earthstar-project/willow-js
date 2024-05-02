@@ -13,8 +13,10 @@ import {
   MsgReconciliationAnnounceEntries,
   MsgReconciliationSendEntry,
   MsgReconciliationSendFingerprint,
+  MsgReconciliationSendPayload,
   ReconciliationPrivy,
 } from "../types.ts";
+import { compactWidthFromEndOfByte } from "./util.ts";
 
 export async function decodeReconciliationSendFingerprint<
   Fingerprint,
@@ -376,3 +378,35 @@ export async function decodeReconciliationSendEntry<
     staticTokenHandle,
   };
 }
+
+export async function decodeReconciliationSendPayload(
+  bytes: GrowingBytes,
+): Promise<MsgReconciliationSendPayload> {
+  await bytes.nextAbsolute(1);
+
+  const amountCompactWidth = compactWidthFromEndOfByte(bytes.array[0]);
+
+  await bytes.nextAbsolute(1 + amountCompactWidth);
+
+  const amount = decodeCompactWidth(
+    bytes.array.subarray(1, 1 + amountCompactWidth),
+  );
+
+  bytes.prune(1 + amountCompactWidth);
+
+  await bytes.nextAbsolute(Number(amount));
+
+  const messageBytes = bytes.array.slice(0, Number(amount));
+
+  bytes.prune(Number(amount));
+
+  return {
+    kind: MsgKind.ReconciliationSendPayload,
+    amount: BigInt(amount),
+    bytes: messageBytes,
+  };
+}
+
+// Don't need to decode ReconciliationTerminatePayload
+// as there's nothing in the message and we decode the message type
+// in decode_messages.

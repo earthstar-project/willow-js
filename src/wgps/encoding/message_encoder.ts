@@ -31,6 +31,8 @@ import {
   encodeReconciliationAnnounceEntries,
   encodeReconciliationSendEntry,
   encodeReconciliationSendFingerprint,
+  encodeReconciliationSendPayload,
+  encodeReconciliationTerminatePayload,
 } from "./reconciliation.ts";
 import {
   ReconcileMsgTracker,
@@ -292,6 +294,16 @@ export class MessageEncoder<
           },
         );
         this.reconcileMsgTracker.onSendEntry(message);
+        break;
+      }
+
+      case MsgKind.ReconciliationSendPayload: {
+        bytes = encodeReconciliationSendPayload(message);
+        break;
+      }
+
+      case MsgKind.ReconciliationTerminatePayload: {
+        bytes = encodeReconciliationTerminatePayload();
         break;
       }
 

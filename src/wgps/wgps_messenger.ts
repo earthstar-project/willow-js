@@ -30,6 +30,7 @@ import {
   IntersectionChannelMsg,
   IS_ALFIE,
   LogicalChannel,
+  messageNames,
   MsgKind,
   NoChannelMsg,
   PayloadRequestChannelMsg,
@@ -147,7 +148,10 @@ export type WgpsMessengerOpts<
   /** A (not necessarily deterministic) algorithm that converts a chunk of a payload into another bytestring. */
   transformPayload: (chunk: Uint8Array) => Uint8Array;
   /** Process transformed payload chunks. */
-  processReceivedPayload: (chunk: Uint8Array) => Uint8Array;
+  processReceivedPayload: (
+    chunk: Uint8Array,
+    entryLength: bigint,
+  ) => Uint8Array;
 };
 
 /** Coordinates a complete WGPS synchronisation session. */
@@ -337,6 +341,16 @@ export class WgpsMessenger<
     remaining: bigint;
   } | undefined;
 
+  private reconciliationPayloadIngester: PayloadIngester<
+    Prefingerprint,
+    Fingerprint,
+    AuthorisationToken,
+    NamespaceId,
+    SubspaceId,
+    PayloadDigest,
+    AuthorisationOpts
+  >;
+
   // Data
 
   private capFinder: CapFinder<
@@ -373,7 +387,7 @@ export class WgpsMessenger<
     AuthorisationOpts
   >;
 
-  private payloadIngester: PayloadIngester<
+  private dataPayloadIngester: PayloadIngester<
     Prefingerprint,
     Fingerprint,
     AuthorisationToken,
@@ -438,6 +452,8 @@ export class WgpsMessenger<
       }
     }
 
+    this.getStore = opts.getStore;
+
     this.interests = opts.interests;
 
     this.schemes = opts.schemes;
@@ -474,9 +490,12 @@ export class WgpsMessenger<
       staticTokenHandleStoreOurs: this.handlesStaticTokensOurs,
     });
 
-    // Data
+    this.reconciliationPayloadIngester = new PayloadIngester({
+      getStore: this.getStore,
+      processReceivedPayload: opts.processReceivedPayload,
+    });
 
-    this.getStore = opts.getStore;
+    // Data
 
     this.currentlyReceivedEntry = defaultEntry(
       this.schemes.namespace.defaultNamespaceId,
@@ -504,7 +523,7 @@ export class WgpsMessenger<
       transformPayload: opts.transformPayload,
     });
 
-    this.payloadIngester = new PayloadIngester({
+    this.dataPayloadIngester = new PayloadIngester({
       getStore: this.getStore,
       processReceivedPayload: opts.processReceivedPayload,
     });
@@ -702,14 +721,12 @@ export class WgpsMessenger<
 
     // Begin handling decoded messages
     onAsyncIterate(decodedMessages, (msg) => {
-      /*
       console.log(
         `%c${this.transport.role === IS_ALFIE ? "Alfie" : "Betty"} got: ${
           messageNames[msg.kind]
         }`,
         `color: ${this.transport.role === IS_ALFIE ? "red" : "blue"}`,
       );
-      */
 
       if (msg.kind === MsgKind.DataSendEntry) {
         this.currentlyReceivedEntry = msg.entry;
@@ -743,6 +760,8 @@ export class WgpsMessenger<
         case MsgKind.ReconciliationSendFingerprint:
         case MsgKind.ReconciliationAnnounceEntries:
         case MsgKind.ReconciliationSendEntry:
+        case MsgKind.ReconciliationSendPayload:
+        case MsgKind.ReconciliationTerminatePayload:
           this.inChannelReconciliation.push(msg);
           break;
         case MsgKind.DataSendEntry:
@@ -1006,6 +1025,12 @@ export class WgpsMessenger<
           dynamicToken: entry.dynamicToken,
           staticTokenHandle: entry.staticTokenHandle,
         });
+
+        // We should check if the entry's payload length is less than our partner's maximum_payload_size and send the payload, but at the time of writing time is short and that requires something of a refactor to the announcer.
+
+        this.encoder.encode({
+          kind: MsgKind.ReconciliationTerminatePayload,
+        });
       }
     });
 
@@ -1047,6 +1072,7 @@ export class WgpsMessenger<
         // Whenever the reconciler emits a fingerprint...
         onAsyncIterate(reconciler.fingerprints(), ({ fingerprint, range }) => {
           // Send a ReconciliationSendFingerprint message
+
           this.encoder.encode({
             kind: MsgKind.ReconciliationSendFingerprint,
             fingerprint,
@@ -1369,13 +1395,29 @@ export class WgpsMessenger<
 
         this.currentlyReceivingEntries.remaining -= 1n;
 
-        if (
-          result.kind === "success" &&
-          message.entry.available === message.entry.entry.payloadLength
-        ) {
+        this.reconciliationPayloadIngester.target(
+          message.entry.entry,
+          message.entry.available === message.entry.entry.payloadLength,
+        );
+
+        break;
+      }
+      case MsgKind.ReconciliationSendPayload: {
+        // Ingest for the currently targeted entry.
+        this.reconciliationPayloadIngester.push(message.bytes, false);
+
+        break;
+      }
+      case MsgKind.ReconciliationTerminatePayload: {
+        const entryToRequestPayloadFor = this.reconciliationPayloadIngester
+          .terminate();
+
+        if (entryToRequestPayloadFor) {
           // Request the payload.
 
-          const capHandle = this.capFinder.findCapHandle(message.entry.entry);
+          const capHandle = this.capFinder.findCapHandle(
+            entryToRequestPayloadFor,
+          );
 
           if (capHandle === undefined) {
             throw new WillowError(
@@ -1384,19 +1426,17 @@ export class WgpsMessenger<
           }
 
           this.handlesPayloadRequestsOurs.bind({
-            entry: message.entry.entry,
+            entry: entryToRequestPayloadFor,
             offset: 0n,
           });
 
           this.encoder.encode({
             kind: MsgKind.DataBindPayloadRequest,
-            entry: message.entry.entry,
+            entry: entryToRequestPayloadFor,
             offset: 0n,
             capability: capHandle,
           });
         }
-
-        break;
       }
     }
   }
@@ -1428,7 +1468,7 @@ export class WgpsMessenger<
           throw new WgpsMessageValidationError(result.message);
         }
 
-        this.payloadIngester.target(message.entry);
+        this.dataPayloadIngester.target(message.entry);
 
         break;
       }
@@ -1445,7 +1485,7 @@ export class WgpsMessenger<
         const endHere = this.currentlyReceivedOffset ===
           this.currentlyReceivedEntry.payloadLength;
 
-        this.payloadIngester.push(message.bytes, endHere);
+        this.dataPayloadIngester.push(message.bytes, endHere);
 
         break;
       }
@@ -1458,7 +1498,7 @@ export class WgpsMessenger<
           );
         }
 
-        this.payloadIngester.target(result.entry);
+        this.dataPayloadIngester.target(result.entry);
 
         break;
       }
@@ -1496,7 +1536,7 @@ export class WgpsMessenger<
       );
     }
 
-    const newHandle = this.handlesCapsTheirs.bind(message.capability);
+    this.handlesCapsTheirs.bind(message.capability);
 
     this.paiFinder.receivedReadCapForIntersection(message.handle);
   }

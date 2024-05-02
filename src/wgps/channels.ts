@@ -9,6 +9,9 @@ export const msgLogicalChannels: Record<MsgKind, LogicalChannel | null> = {
   [MsgKind.ReconciliationSendFingerprint]: LogicalChannel.ReconciliationChannel,
   [MsgKind.ReconciliationAnnounceEntries]: LogicalChannel.ReconciliationChannel,
   [MsgKind.ReconciliationSendEntry]: LogicalChannel.ReconciliationChannel,
+  [MsgKind.ReconciliationSendPayload]: LogicalChannel.ReconciliationChannel,
+  [MsgKind.ReconciliationTerminatePayload]:
+    LogicalChannel.ReconciliationChannel,
   [MsgKind.DataSendEntry]: LogicalChannel.DataChannel,
   [MsgKind.DataSendPayload]: LogicalChannel.DataChannel,
   [MsgKind.DataReplyPayload]: LogicalChannel.DataChannel,

@@ -100,6 +100,8 @@ export enum MsgKind {
   ReconciliationSendFingerprint,
   ReconciliationAnnounceEntries,
   ReconciliationSendEntry,
+  ReconciliationSendPayload,
+  ReconciliationTerminatePayload,
   DataSendEntry,
   DataSendPayload,
   DataSetMetadata,
@@ -115,28 +117,30 @@ export enum MsgKind {
 
 // This is to help with logging and debugging.
 export const messageNames: Record<MsgKind, string> = {
-  0: "CommitmentReveal",
-  1: "PaiBindFragment",
-  2: "PaiReplyFragment",
-  3: "PaiRequestSubspaceCapability",
-  4: "PaiReplySubspaceCapability",
-  5: "SetupBindReadCapability",
-  6: "SetupBindAreaOfInterest",
-  7: "SetupBindStaticToken",
-  8: "ReconciliationSendFingerprint",
-  9: "ReconciliationAnnounceEntries",
-  10: "ReconciliationSendEntry",
-  11: "DataSendEntry",
-  12: "DataSendPayload",
-  13: "DataSetMetadata",
-  14: "DataBindPayloadRequest",
-  15: "DataReplyPayload",
-  16: "ControlIssueGuarantee",
-  17: "ControlAbsolve",
-  18: "ControlPlead",
-  19: "ControlAnnounceDropping",
-  20: "ControlApologise",
-  21: "ControlFree",
+  [MsgKind.CommitmentReveal]: "CommitmentReveal",
+  [MsgKind.PaiBindFragment]: "PaiBindFragment",
+  [MsgKind.PaiReplyFragment]: "PaiReplyFragment",
+  [MsgKind.PaiRequestSubspaceCapability]: "PaiRequestSubspaceCapability",
+  [MsgKind.PaiReplySubspaceCapability]: "PaiReplySubspaceCapability",
+  [MsgKind.SetupBindReadCapability]: "SetupBindReadCapability",
+  [MsgKind.SetupBindAreaOfInterest]: "SetupBindAreaOfInterest",
+  [MsgKind.SetupBindStaticToken]: "SetupBindStaticToken",
+  [MsgKind.ReconciliationSendFingerprint]: "ReconciliationSendFingerprint",
+  [MsgKind.ReconciliationAnnounceEntries]: "ReconciliationAnnounceEntries",
+  [MsgKind.ReconciliationSendEntry]: "ReconciliationSendEntry",
+  [MsgKind.ReconciliationSendPayload]: "ReconciliationSendPayload",
+  [MsgKind.ReconciliationTerminatePayload]: "ReconciliationTerminatePayload",
+  [MsgKind.DataSendEntry]: "DataSendEntry",
+  [MsgKind.DataSendPayload]: "DataSendPayload",
+  [MsgKind.DataSetMetadata]: "DataSetMetadata",
+  [MsgKind.DataBindPayloadRequest]: "DataBindPayloadRequest",
+  [MsgKind.DataReplyPayload]: "DataReplyPayload",
+  [MsgKind.ControlIssueGuarantee]: "ControlIssueGuarantee",
+  [MsgKind.ControlAbsolve]: "ControlAbsolve",
+  [MsgKind.ControlPlead]: "ControlPlead",
+  [MsgKind.ControlAnnounceDropping]: "ControlAnnounceDropping",
+  [MsgKind.ControlApologise]: "ControlApologise",
+  [MsgKind.ControlFree]: "ControlFree",
 };
 
 export type Msg<
@@ -304,6 +308,7 @@ export type MsgReconciliationAnnounceEntries<SubspaceId> = Msg<
   }
 >;
 
+/** Transmit a LengthyEntry as part of 3d range-based set reconciliation. */
 export type MsgReconciliationSendEntry<
   DynamicToken,
   NamespaceId,
@@ -317,6 +322,21 @@ export type MsgReconciliationSendEntry<
   /** The dynamic part of the entry’s AuthorisationToken. */
   dynamicToken: DynamicToken;
 }>;
+
+export type MsgReconciliationSendPayload = Msg<
+  MsgKind.ReconciliationSendPayload,
+  {
+    /** The number of transmitted bytes. */
+    amount: bigint;
+    /** amount many bytes, a substring of the bytes obtained by applying transform_payload to the Payload to be transmitted. */
+    bytes: Uint8Array;
+  }
+>;
+
+/** Indicate that no more bytes will be transmitted for the currently transmitted Payload as part of set reconciliation. */
+export type MsgReconciliationTerminatePayload = {
+  kind: MsgKind.ReconciliationTerminatePayload;
+};
 
 /** Transmit an AuthorisedEntry to the other peer, and optionally prepare transmission of its Payload. */
 export type MsgDataSendEntry<
@@ -341,7 +361,7 @@ export type MsgDataSendPayload = Msg<
   {
     /** The number of transmitted bytes. */
     amount: bigint;
-    /** amount many bytes, to be added to the Payload of the receiver’s currently_received_entry at offset currently_received_offset. */
+    /** amount many bytes, a substring of the bytes obtained by applying transform_payload to the Payload to be transmitted. */
     bytes: Uint8Array;
   }
 >;
@@ -408,6 +428,8 @@ export type SyncMessage<
     SubspaceId,
     PayloadDigest
   >
+  | MsgReconciliationSendPayload
+  | MsgReconciliationTerminatePayload
   | MsgDataSendEntry<
     DynamicToken,
     NamespaceId,
@@ -435,7 +457,9 @@ export type ReconciliationChannelMsg<
     NamespaceId,
     SubspaceId,
     PayloadDigest
-  >;
+  >
+  | MsgReconciliationSendPayload
+  | MsgReconciliationTerminatePayload;
 
 export type DataChannelMsg<
   DynamicToken,
