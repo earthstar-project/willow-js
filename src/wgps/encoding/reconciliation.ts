@@ -11,6 +11,8 @@ import {
   MsgReconciliationAnnounceEntries,
   MsgReconciliationSendEntry,
   MsgReconciliationSendFingerprint,
+  MsgReconciliationSendPayload,
+  MsgReconciliationTerminatePayload,
   ReconciliationPrivy,
 } from "../types.ts";
 import { compactWidthOr } from "./util.ts";
@@ -290,4 +292,17 @@ export function encodeReconciliationSendEntry<
     encodedDynamicToken,
     encodedRelativeEntry,
   );
+}
+
+export function encodeReconciliationSendPayload(
+  msg: MsgReconciliationSendPayload,
+): Uint8Array {
+  const header = compactWidthOr(0x50, compactWidth(msg.amount));
+  const amountEncoded = encodeCompactWidth(msg.amount);
+
+  return concat(new Uint8Array([header]), amountEncoded, msg.bytes);
+}
+
+export function encodeReconciliationTerminatePayload(): Uint8Array {
+  return new Uint8Array([0x58]);
 }

@@ -1,5 +1,12 @@
 import { Area, Entry, GrowingBytes } from "../../../deps.ts";
-import { ReadCapPrivy, SyncMessage, SyncSchemes, Transport } from "../types.ts";
+import {
+  MsgKind,
+  MsgReconciliationTerminatePayload,
+  ReadCapPrivy,
+  SyncMessage,
+  SyncSchemes,
+  Transport,
+} from "../types.ts";
 import { decodeCommitmentReveal } from "./commitment_reveal.ts";
 import {
   decodeControlAbsolve,
@@ -24,6 +31,7 @@ import {
   decodeReconciliationAnnounceEntries,
   decodeReconciliationSendEntry,
   decodeReconciliationSendFingerprint,
+  decodeReconciliationSendPayload,
 } from "./reconciliation.ts";
 import {
   ReconcileMsgTracker,
@@ -36,6 +44,7 @@ import {
   decodeDataSendPayload,
   decodeDataSetEagerness,
 } from "./data.ts";
+import { WgpsMessageValidationError } from "../../errors.ts";
 
 export type DecodeMessagesOpts<
   ReadCapability,
@@ -167,7 +176,7 @@ export async function* decodeMessages<
     // Find out the type of decoder to use by bitmasking the first byte of the message.
     const [firstByte] = bytes.array;
 
-    if (firstByte === 0) {
+    if (firstByte === 0x0) {
       yield await decodeCommitmentReveal(
         bytes,
         opts.challengeLength,
@@ -224,10 +233,27 @@ export async function* decodeMessages<
         aoiHandlesToArea: opts.aoiHandlesToArea,
       });
     } else if ((firstByte & 0x50) === 0x50) {
-      // Reconciliation Announce Entries
-      // OR a send entry. It all depends on what we are expecting...
+      // ReconciliationAnnounceEntries
+      // OR ReconciliationSendEntry
 
-      if (reconcileMsgTracker.isExpectingReconciliationSendEntry()) {
+      // OR ReconciliationSendPayload
+      // OR ReconciliationTerminatePayload.
+
+      // All depends on what we're expecting.
+
+      if (reconcileMsgTracker.isExpectingPayloadOrTermination()) {
+        if ((firstByte & 0x58) === 0x58) {
+          reconcileMsgTracker.onTerminatePayload();
+          // It's a terminate message.
+
+          bytes.prune(1);
+          yield {
+            kind: MsgKind.ReconciliationTerminatePayload,
+          };
+        } else {
+          yield await decodeReconciliationSendPayload(bytes);
+        }
+      } else if (reconcileMsgTracker.isExpectingReconciliationSendEntry()) {
         const message = await decodeReconciliationSendEntry(
           bytes,
           {
@@ -333,8 +359,7 @@ export async function* decodeMessages<
       );
     } else {
       // Couldn't decode.
-      console.warn("Could not decode!");
-      break;
+      throw new WgpsMessageValidationError("Could not decode!");
     }
   }
 }

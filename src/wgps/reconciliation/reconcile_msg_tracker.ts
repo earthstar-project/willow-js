@@ -36,6 +36,8 @@ export class ReconcileMsgTracker<
 
   private handleToNamespaceId: (aoiHandle: bigint) => NamespaceId;
 
+  private isAwaitingTermination = false;
+
   constructor(
     opts: ReconcileMsgTrackerOpts<NamespaceId, SubspaceId, PayloadDigest>,
   ) {
@@ -84,6 +86,16 @@ export class ReconcileMsgTracker<
     this.prevToken = msg.staticTokenHandle;
 
     this.announcedEntriesRemaining -= 1n;
+
+    this.isAwaitingTermination = true;
+  }
+
+  onTerminatePayload() {
+    this.isAwaitingTermination = false;
+  }
+
+  isExpectingPayloadOrTermination() {
+    return this.isAwaitingTermination;
   }
 
   isExpectingReconciliationSendEntry() {
