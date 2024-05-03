@@ -301,6 +301,8 @@ export class WgpsMessenger<
 
   // Reconciliation
 
+  private yourRangeCounter = 0;
+
   private getStore: GetStoreFn<
     Prefingerprint,
     Fingerprint,
@@ -924,6 +926,7 @@ export class WgpsMessenger<
       }
 
       const signature = await this.schemes.subspaceCap.signatures.sign(
+        receiver,
         secretKey,
         await this.ourChallenge,
       );
@@ -949,6 +952,7 @@ export class WgpsMessenger<
         );
 
         const signature = await this.schemes.accessControl.signatures.sign(
+          receiver,
           receiverSecretKey,
           await this.ourChallenge,
         );
@@ -1015,6 +1019,7 @@ export class WgpsMessenger<
         willSort: true,
         receiverHandle: pack.announcement.receiverHandle,
         senderHandle: pack.announcement.senderHandle,
+        covers: pack.announcement.covers,
       });
 
       // Then send the entries.
@@ -1070,17 +1075,21 @@ export class WgpsMessenger<
         );
 
         // Whenever the reconciler emits a fingerprint...
-        onAsyncIterate(reconciler.fingerprints(), ({ fingerprint, range }) => {
-          // Send a ReconciliationSendFingerprint message
+        onAsyncIterate(
+          reconciler.fingerprints(),
+          ({ fingerprint, range, covers }) => {
+            // Send a ReconciliationSendFingerprint message
 
-          this.encoder.encode({
-            kind: MsgKind.ReconciliationSendFingerprint,
-            fingerprint,
-            range,
-            senderHandle: intersection.ours,
-            receiverHandle: intersection.theirs,
-          });
-        });
+            this.encoder.encode({
+              kind: MsgKind.ReconciliationSendFingerprint,
+              fingerprint,
+              range,
+              senderHandle: intersection.ours,
+              receiverHandle: intersection.theirs,
+              covers,
+            });
+          },
+        );
 
         // Whenever the reconciler emits an announcement...
         onAsyncIterate(reconciler.entryAnnouncements(), (announcement) => {
@@ -1092,6 +1101,7 @@ export class WgpsMessenger<
             wantResponse: announcement.wantResponse,
             receiverHandle: intersection.theirs,
             senderHandle: intersection.ours,
+            covers: announcement.covers,
           });
         });
       },
@@ -1302,7 +1312,13 @@ export class WgpsMessenger<
           message.senderHandle,
         );
 
-        await reconciler.respond(message.range, message.fingerprint);
+        await reconciler.respond(
+          message.range,
+          message.fingerprint,
+          this.yourRangeCounter,
+        );
+
+        this.yourRangeCounter += 1;
 
         break;
       }
@@ -1336,6 +1352,7 @@ export class WgpsMessenger<
             wantResponse: false,
             receiverHandle: message.senderHandle,
             senderHandle: message.receiverHandle,
+            covers: message.covers,
           });
         }
 
