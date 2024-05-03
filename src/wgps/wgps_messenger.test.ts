@@ -2100,8 +2100,8 @@ function testWgpsMessenger(scenario: WgpsScenario) {
     },
   );
 
-  Deno.test(
-    `Reconciliation of many namespace (${scenario.name})`,
+  Deno.test.only(
+    `Reconciliation of many namespaces (${scenario.name})`,
     async (test) => {
       await test.step("sync", async () => {
         const [alfie, betty] = transportPairInMemory();

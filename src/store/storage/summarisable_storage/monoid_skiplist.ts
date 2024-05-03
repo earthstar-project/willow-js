@@ -164,8 +164,6 @@ export class Skiplist<
       });
     }
 
-    // console.log(map);
-
     for (let i = await this.maxHeight(); i >= 0; i--) {
       const line = [`${i}`];
 

@@ -8,7 +8,7 @@ import {
 import { WillowError } from "../../errors.ts";
 import { Store } from "../../store/store.ts";
 import { FingerprintScheme, SubspaceScheme } from "../../store/types.ts";
-import { IS_ALFIE, SyncRole } from "../types.ts";
+import { COVERS_NONE, IS_ALFIE, SyncRole } from "../types.ts";
 
 export type ReconcilerOpts<
   Prefingerprint,
@@ -73,13 +73,18 @@ export class Reconciler<
   >;
 
   private fingerprintQueue = new FIFO<
-    { range: Range3d<SubspaceId>; fingerprint: Fingerprint }
+    {
+      range: Range3d<SubspaceId>;
+      fingerprint: Fingerprint;
+      covers: bigint | typeof COVERS_NONE;
+    }
   >();
 
   private announceQueue = new FIFO<{
     range: Range3d<SubspaceId>;
     count: number;
     wantResponse: boolean;
+    covers: bigint | typeof COVERS_NONE;
   }>();
 
   range = deferred<Range3d<SubspaceId>>();
@@ -140,12 +145,17 @@ export class Reconciler<
       fingerprint,
     );
 
-    this.fingerprintQueue.push({ range: intersection, fingerprint: finalised });
+    this.fingerprintQueue.push({
+      range: intersection,
+      fingerprint: finalised,
+      covers: COVERS_NONE,
+    });
   }
 
   async respond(
     range: Range3d<SubspaceId>,
     fingerprint: Fingerprint,
+    yourRangeCounter: number,
   ) {
     const { fingerprint: fingerprintOurs, size } = await this.store.summarise(
       range,
@@ -159,12 +169,14 @@ export class Reconciler<
         range,
         count: 0,
         wantResponse: false,
+        covers: BigInt(yourRangeCounter),
       });
     } else if (size <= SEND_ENTRIES_THRESHOLD) {
       this.announceQueue.push({
         range,
         count: size,
         wantResponse: true,
+        covers: BigInt(yourRangeCounter),
       });
 
       return;
@@ -181,6 +193,7 @@ export class Reconciler<
       this.fingerprintQueue.push({
         fingerprint: leftFinal,
         range: left,
+        covers: COVERS_NONE,
       });
 
       const { fingerprint: fingerprintRight } = await this.store
@@ -193,6 +206,7 @@ export class Reconciler<
       this.fingerprintQueue.push({
         fingerprint: rightFinal,
         range: right,
+        covers: BigInt(yourRangeCounter),
       });
     }
   }

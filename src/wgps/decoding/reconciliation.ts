@@ -9,6 +9,7 @@ import {
   Range3d,
 } from "../../../deps.ts";
 import {
+  COVERS_NONE,
   MsgKind,
   MsgReconciliationAnnounceEntries,
   MsgReconciliationSendEntry,
@@ -41,9 +42,9 @@ export async function decodeReconciliationSendFingerprint<
 > {
   const privy = opts.getPrivy();
 
-  await bytes.nextAbsolute(1);
+  await bytes.nextAbsolute(2);
 
-  const [firstByte] = bytes.array;
+  const [firstByte, secondByte] = bytes.array;
 
   const isFingeprintNeutral = (firstByte & 0x8) === 0x8;
 
@@ -52,69 +53,52 @@ export async function decodeReconciliationSendFingerprint<
   const isSenderPrevSender = (firstByte & 0x2) === 0x2;
   const isReceiverPrevReceiver = (firstByte & 0x1) === 0x1;
 
+  const senderCompactWidth = 2 ** (secondByte >> 6);
+  const receiverCompactWidth = 2 ** ((secondByte >> 4) & 0x3);
+
+  const coversNotNone = (secondByte & 0x8) === 0x8;
+  const coversCompactWidth = 2 ** (secondByte & 0x3);
+
+  let covers: bigint | typeof COVERS_NONE;
   let senderHandle: bigint;
   let receiverHandle: bigint;
 
-  if (!isSenderPrevSender && !isReceiverPrevReceiver) {
-    await bytes.nextAbsolute(2);
-    const [, second] = bytes.array;
+  bytes.prune(2);
 
-    const senderCompactWidth = 2 ** (second >> 6);
-    const receiverCompactWidth = 2 ** ((second >> 4) & 0x3);
+  if (coversNotNone) {
+    await bytes.nextAbsolute(coversCompactWidth);
 
-    await bytes.nextAbsolute(2 + senderCompactWidth + receiverCompactWidth);
+    covers = BigInt(
+      decodeCompactWidth(bytes.array.subarray(0, coversCompactWidth)),
+    );
+
+    bytes.prune(coversCompactWidth);
+  } else {
+    covers = COVERS_NONE;
+  }
+
+  if (!isSenderPrevSender) {
+    await bytes.nextAbsolute(senderCompactWidth);
 
     senderHandle = BigInt(
-      decodeCompactWidth(bytes.array.subarray(2, 2 + senderCompactWidth)),
-    );
-    receiverHandle = BigInt(
-      decodeCompactWidth(
-        bytes.array.subarray(
-          2 + senderCompactWidth,
-          2 + senderCompactWidth + receiverCompactWidth,
-        ),
-      ),
+      decodeCompactWidth(bytes.array.subarray(0, senderCompactWidth)),
     );
 
-    bytes.prune(2 + senderCompactWidth + receiverCompactWidth);
-  } else if (!isSenderPrevSender && isReceiverPrevReceiver) {
-    await bytes.nextAbsolute(2);
-    const [, second] = bytes.array;
-
-    const senderCompactWidth = 2 ** (second >> 6);
-
-    await bytes.nextAbsolute(2 + senderCompactWidth);
-
-    senderHandle = BigInt(
-      decodeCompactWidth(bytes.array.subarray(2, 2 + senderCompactWidth)),
-    );
-    receiverHandle = privy.prevReceiverHandle;
-
-    bytes.prune(2 + senderCompactWidth);
-  } else if (isSenderPrevSender && !isReceiverPrevReceiver) {
-    await bytes.nextAbsolute(2);
-    const [, second] = bytes.array;
-
-    const receiverCompactWidth = 2 ** ((second >> 4) & 0x3);
-
-    await bytes.nextAbsolute(2 + receiverCompactWidth);
-
-    senderHandle = privy.prevSenderHandle;
-    receiverHandle = BigInt(
-      decodeCompactWidth(
-        bytes.array.subarray(
-          2,
-          2 + receiverCompactWidth,
-        ),
-      ),
-    );
-
-    bytes.prune(2 + receiverCompactWidth);
+    bytes.prune(senderCompactWidth);
   } else {
     senderHandle = privy.prevSenderHandle;
-    receiverHandle = privy.prevReceiverHandle;
+  }
 
-    bytes.prune(1);
+  if (!isReceiverPrevReceiver) {
+    await bytes.nextAbsolute(receiverCompactWidth);
+
+    receiverHandle = BigInt(
+      decodeCompactWidth(bytes.array.subarray(0, receiverCompactWidth)),
+    );
+
+    bytes.prune(receiverCompactWidth);
+  } else {
+    receiverHandle = privy.prevReceiverHandle;
   }
 
   let fingerprint: Fingerprint;
@@ -144,6 +128,7 @@ export async function decodeReconciliationSendFingerprint<
     range,
     receiverHandle,
     senderHandle,
+    covers,
   };
 }
 
@@ -180,60 +165,62 @@ export async function decodeReconciliationAnnounceEntries<
 
   const willSort = (secondByte & 0x2) === 0x2;
 
+  const coversNotNone = (secondByte & 0x1) === 0x1;
+
+  let covers: bigint | typeof COVERS_NONE;
+
+  bytes.prune(2);
+
+  if (coversNotNone) {
+    await bytes.nextAbsolute(1);
+
+    const [coversLength] = bytes.array;
+
+    if ((coversLength & 0xfc) == 0xfc) {
+      const coversCompactWidth = 2 ** (coversLength & 0x3);
+
+      await bytes.nextAbsolute(coversCompactWidth);
+
+      covers = BigInt(
+        decodeCompactWidth(bytes.array.slice(1, 1 + coversCompactWidth)),
+      );
+
+      bytes.prune(1 + coversCompactWidth);
+    } else {
+      covers = BigInt(coversLength);
+      bytes.prune(1);
+    }
+  } else {
+    covers = COVERS_NONE;
+  }
+
   let senderHandle: bigint;
   let receiverHandle: bigint;
 
-  if (!isSenderPrevSender && !isReceiverPrevReceiver) {
+  if (!isSenderPrevSender) {
     const senderCompactWidth = 2 ** (secondByte >> 6);
-    const receiverCompactWidth = 2 ** ((secondByte >> 4) & 0x3);
-
-    await bytes.nextAbsolute(2 + senderCompactWidth + receiverCompactWidth);
+    await bytes.nextAbsolute(senderCompactWidth);
 
     senderHandle = BigInt(
-      decodeCompactWidth(bytes.array.subarray(2, 2 + senderCompactWidth)),
-    );
-    receiverHandle = BigInt(
-      decodeCompactWidth(
-        bytes.array.subarray(
-          2 + senderCompactWidth,
-          2 + senderCompactWidth + receiverCompactWidth,
-        ),
-      ),
+      decodeCompactWidth(bytes.array.subarray(0, senderCompactWidth)),
     );
 
-    bytes.prune(2 + senderCompactWidth + receiverCompactWidth);
-  } else if (!isSenderPrevSender && isReceiverPrevReceiver) {
-    const senderCompactWidth = 2 ** (secondByte >> 6);
-
-    await bytes.nextAbsolute(2 + senderCompactWidth);
-
-    senderHandle = BigInt(
-      decodeCompactWidth(bytes.array.subarray(2, 2 + senderCompactWidth)),
-    );
-    receiverHandle = privy.prevReceiverHandle;
-
-    bytes.prune(2 + senderCompactWidth);
-  } else if (isSenderPrevSender && !isReceiverPrevReceiver) {
-    const receiverCompactWidth = 2 ** ((secondByte >> 4) & 0x3);
-
-    await bytes.nextAbsolute(2 + receiverCompactWidth);
-
-    senderHandle = privy.prevSenderHandle;
-    receiverHandle = BigInt(
-      decodeCompactWidth(
-        bytes.array.subarray(
-          2,
-          2 + receiverCompactWidth,
-        ),
-      ),
-    );
-
-    bytes.prune(2 + receiverCompactWidth);
+    bytes.prune(senderCompactWidth);
   } else {
     senderHandle = privy.prevSenderHandle;
-    receiverHandle = privy.prevReceiverHandle;
+  }
 
-    bytes.prune(2);
+  if (!isReceiverPrevReceiver) {
+    const receiverCompactWidth = 2 ** ((secondByte >> 4) & 0x3);
+    await bytes.nextAbsolute(receiverCompactWidth);
+
+    receiverHandle = BigInt(
+      decodeCompactWidth(bytes.array.subarray(0, receiverCompactWidth)),
+    );
+
+    bytes.prune(receiverCompactWidth);
+  } else {
+    receiverHandle = privy.prevReceiverHandle;
   }
 
   await bytes.nextAbsolute(countWidth);
@@ -263,6 +250,7 @@ export async function decodeReconciliationAnnounceEntries<
     senderHandle,
     wantResponse,
     willSort,
+    covers,
   };
 }
 

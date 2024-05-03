@@ -3,7 +3,7 @@ import { WillowError } from "../../errors.ts";
 import { Store } from "../../store/store.ts";
 import { LengthyEntry, PayloadScheme } from "../../store/types.ts";
 import { HandleStore } from "../handle_store.ts";
-import { AuthorisationTokenScheme } from "../types.ts";
+import { AuthorisationTokenScheme, COVERS_NONE } from "../types.ts";
 
 export type AnnouncerOpts<
   AuthorisationToken,
@@ -36,6 +36,7 @@ type AnnouncementPack<
     wantResponse: boolean;
     senderHandle: bigint;
     receiverHandle: bigint;
+    covers: bigint | typeof COVERS_NONE;
   };
   // Then send many ReconciliationSendEntry
   entries: {
@@ -130,6 +131,7 @@ export class Announcer<
     namespace: NamespaceId;
     range: Range3d<SubspaceId>;
     wantResponse: boolean;
+    covers: bigint | typeof COVERS_NONE;
   }) {
     // Queue announcement message.
 
@@ -177,6 +179,7 @@ export class Announcer<
         receiverHandle: announcement.receiverHandle,
         senderHandle: announcement.senderHandle,
         wantResponse: announcement.wantResponse,
+        covers: announcement.covers,
       },
       entries,
     });
