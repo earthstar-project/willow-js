@@ -8,11 +8,11 @@ import {
   TotalOrder,
 } from "../../../deps.ts";
 import {
+  COVERS_NONE,
   MsgReconciliationAnnounceEntries,
   MsgReconciliationSendEntry,
   MsgReconciliationSendFingerprint,
   MsgReconciliationSendPayload,
-  MsgReconciliationTerminatePayload,
   ReconciliationPrivy,
 } from "../types.ts";
 import { compactWidthOr } from "./util.ts";
@@ -52,31 +52,36 @@ export function encodeReconciliationSendFingerprint<
     encodedRelativeToPrevRange | usingPrevSenderHandleMask |
     usingPrevReceiverHandleMask;
 
-  let handleLengthByte;
+  let handleLengthNumber = 0x0;
 
   const compactWidthSender = compactWidth(msg.senderHandle);
   const compactWidthReceiver = compactWidth(msg.receiverHandle);
 
-  if (!senderHandleIsSame && !receiverHandleIsSame) {
+  if (!senderHandleIsSame) {
     const unshifted = compactWidthOr(0x0, compactWidthSender);
-    const shifted2 = unshifted << 2;
-    const unshifted2 = compactWidthOr(shifted2, compactWidthReceiver);
-    const lengths = unshifted2 << 4;
-
-    handleLengthByte = new Uint8Array([lengths]);
-  } else if (!senderHandleIsSame && receiverHandleIsSame) {
-    const unshifted = compactWidthOr(0x0, compactWidthSender);
-    const lengths = unshifted << 6;
-
-    handleLengthByte = new Uint8Array([lengths]);
-  } else if (senderHandleIsSame && !receiverHandleIsSame) {
-    const unshifted = compactWidthOr(0x0, compactWidthReceiver);
-    const lengths = unshifted << 4;
-
-    handleLengthByte = new Uint8Array([lengths]);
-  } else {
-    handleLengthByte = new Uint8Array();
+    const shifted = unshifted << 6;
+    handleLengthNumber = handleLengthNumber | shifted;
   }
+
+  if (!receiverHandleIsSame) {
+    const unshifted = compactWidthOr(0x0, compactWidthReceiver);
+    const shifted = unshifted << 4;
+    handleLengthNumber = handleLengthNumber | shifted;
+  }
+
+  if (msg.covers !== COVERS_NONE) {
+    handleLengthNumber = handleLengthNumber | 0x8;
+    handleLengthNumber = compactWidthOr(
+      handleLengthNumber,
+      compactWidth(msg.covers),
+    );
+  }
+
+  const handleLengthByte = new Uint8Array([handleLengthNumber]);
+
+  const encodedCovers = msg.covers === COVERS_NONE
+    ? new Uint8Array()
+    : encodeCompactWidth(msg.covers);
 
   const encodedSenderHandle = senderHandleIsSame
     ? new Uint8Array()
@@ -102,6 +107,7 @@ export function encodeReconciliationSendFingerprint<
   return concat(
     new Uint8Array([messageTypeMask | headerByte]),
     handleLengthByte,
+    encodedCovers,
     encodedSenderHandle,
     encodedReceiverHandle,
     encodedFingerprint,

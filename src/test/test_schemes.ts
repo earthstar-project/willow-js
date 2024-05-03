@@ -214,7 +214,7 @@ export const testSchemeSubspaceCap: SubspaceCapScheme<
   getSecretKey: (receiver) => receiver,
   isValidCap: () => Promise.resolve(true),
   signatures: {
-    sign: async (secret, msg) => {
+    sign: async (_pubkey, secret, msg) => {
       const hash = await crypto.subtle.digest("SHA-256", msg);
 
       return concat(new Uint8Array([secret]), new Uint8Array(hash));
@@ -718,7 +718,7 @@ export const testSchemeAccessControl: AccessControlScheme<
     },
   },
   signatures: {
-    sign: async (key, bytestring) => {
+    sign: async (_pubkey, key, bytestring) => {
       const hash = await crypto.subtle.digest("SHA-256", bytestring);
 
       return concat(new Uint8Array([key]), new Uint8Array(hash));

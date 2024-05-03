@@ -33,6 +33,8 @@ import {
 import { Storage3d } from "./storage/storage_3d/types.ts";
 import { WillowError } from "../errors.ts";
 import Mutex from "./mutex.ts";
+import { EntryDriverKvStore } from "./storage/entry_drivers/kv_store.ts";
+import { KvDriverInMemory } from "./storage/kv/kv_driver_in_memory.ts";
 
 /** A local set of a particular namespace's entries to be written to, read from, and synced with other `Store`s.
  *
@@ -99,7 +101,8 @@ export class Store<
     const payloadDriver = opts.payloadDriver ||
       new PayloadDriverMemory(opts.schemes.payload);
 
-    const entryDriver = opts.entryDriver || new EntryDriverMemory({
+    const entryDriver = opts.entryDriver || new EntryDriverKvStore({
+      namespaceScheme: opts.schemes.namespace,
       pathScheme: opts.schemes.path,
       payloadScheme: opts.schemes.payload,
       subspaceScheme: opts.schemes.subspace,
@@ -107,6 +110,7 @@ export class Store<
       getPayloadLength: (digest) => {
         return this.payloadDriver.length(digest);
       },
+      kvDriver: new KvDriverInMemory(),
     });
 
     this.entryDriver = entryDriver;
@@ -763,7 +767,9 @@ export class Store<
       const authTokenPayload = await this.payloadDriver.get(authTokenHash);
 
       if (!authTokenPayload) {
-        continue;
+        throw new WillowError(
+          "Malformed storage. No authorisation token for stored entry.",
+        );
       }
       const authTokenEncoded = await authTokenPayload.bytes();
       const authToken = this.schemes.authorisation.tokenEncoding

@@ -3,6 +3,7 @@ import { decodeMessages } from "./decoding/decode_messages.ts";
 import { MessageEncoder } from "./encoding/message_encoder.ts";
 import { transportPairInMemory } from "./transports/in_memory.ts";
 import {
+  COVERS_NONE,
   HandleType,
   LogicalChannel,
   MsgKind,
@@ -354,6 +355,7 @@ const vectors: SyncMessage<
         end: 3500n,
       },
     },
+    covers: COVERS_NONE,
   },
 
   {
@@ -375,6 +377,7 @@ const vectors: SyncMessage<
         end: 3500n,
       },
     },
+    covers: 31234n,
   },
 
   // (announce entries are a special case - see below)

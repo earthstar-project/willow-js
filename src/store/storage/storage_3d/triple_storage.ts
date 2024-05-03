@@ -754,7 +754,7 @@ export class TripleStorage<
       timestamp: range.timeRange.start,
     });
 
-    let upperBound = this.encodeEntryKeys({
+    const upperBound = this.encodeEntryKeys({
       subspace: range.subspaceRange.end !== OPEN_END
         ? range.subspaceRange.end
         : undefined,
