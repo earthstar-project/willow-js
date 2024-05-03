@@ -175,8 +175,26 @@ export function encodeReconciliationAnnounceEntries<
 
   const willSortFlag = msg.willSort ? 0x2 : 0x0;
 
+  const coversNotNone = msg.covers !== COVERS_NONE ? 0x1 : 0x0;
+
   const secondByte = senderReceiverWidthFlags | countCompactWidthFlags |
-    willSortFlag;
+    willSortFlag | coversNotNone;
+
+  let coversCompactWidth: Uint8Array;
+  let coversEncoded: Uint8Array;
+
+  if (msg.covers === COVERS_NONE) {
+    coversCompactWidth = new Uint8Array();
+    coversEncoded = new Uint8Array();
+  } else if (msg.covers >= 252) {
+    coversCompactWidth = new Uint8Array([
+      compactWidthOr(0xfc, compactWidth(msg.covers)),
+    ]);
+    coversEncoded = encodeCompactWidth(msg.covers);
+  } else {
+    coversCompactWidth = new Uint8Array([Number(msg.covers)]);
+    coversEncoded = new Uint8Array();
+  }
 
   const encodedSenderHandle = !senderHandleIsSame
     ? encodeCompactWidth(msg.senderHandle)
@@ -200,6 +218,8 @@ export function encodeReconciliationAnnounceEntries<
 
   return concat(
     new Uint8Array([firstByte, secondByte]),
+    coversCompactWidth,
+    coversEncoded,
     encodedSenderHandle,
     encodedReceiverHandle,
     encodedCount,

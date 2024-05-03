@@ -309,6 +309,8 @@ export type MsgReconciliationAnnounceEntries<SubspaceId> = Msg<
     senderHandle: bigint;
     /** An AreaOfInterestHandle, bound by the receiver of this message, that fully contains the range. */
     receiverHandle: bigint;
+    /** If this message is the last of a set of messages that together cover the range of some prior ReconciliationSendFingerprint message, then this field contains the range_count of that ReconciliationSendFingerprint message. Otherwise, none. */
+    covers: bigint | typeof COVERS_NONE;
   }
 >;
 

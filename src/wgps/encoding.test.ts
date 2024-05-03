@@ -516,6 +516,7 @@ const sendEntryVectors: (
         end: 3500n,
       },
     },
+    covers: COVERS_NONE,
   },
   {
     kind: MsgKind.ReconciliationSendEntry,
@@ -557,6 +558,7 @@ const sendEntryVectors: (
         end: 3500n,
       },
     },
+    covers: 123456n,
   },
   {
     kind: MsgKind.ReconciliationAnnounceEntries,
@@ -579,6 +581,7 @@ const sendEntryVectors: (
         end: 3500n,
       },
     },
+    covers: 12n,
   },
 
   {
