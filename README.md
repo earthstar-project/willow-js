@@ -3,6 +3,13 @@
 This is a implementation of the [Willow protocol](https://willowprotocol.org)
 written in TypeScript.
 
+## API
+
+API documentation can be found here:
+
+- [Browser APIs](https://deno.land/x/willow@0.2.1/mod.browser.ts?doc=)
+- [Deno APIs](https://deno.land/x/willow@0.2.1/mod.deno.ts?doc=)
+
 ## Overview
 
 `willow-js` includes a `Store` compliant with the
