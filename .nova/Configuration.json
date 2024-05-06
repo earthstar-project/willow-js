@@ -10,7 +10,10 @@
     "dist"
   ],
   "deno.enablePaths" : [
-    "src"
+    "src",
+    "mod.universal.ts",
+    "mod.deno.ts",
+    "mod.browser.ts"
   ],
   "deno.unstable" : true
 }

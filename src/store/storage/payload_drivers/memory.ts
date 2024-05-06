@@ -4,7 +4,7 @@ import { Payload, PayloadScheme } from "../../types.ts";
 import { PayloadDriver } from "../types.ts";
 import { collectUint8Arrays } from "./util.ts";
 
-/** Store and retrieve payloads in memory. */
+/** Stores and retrieves payloads in memory. */
 export class PayloadDriverMemory<PayloadDigest>
   implements PayloadDriver<PayloadDigest> {
   private payloadMap = new Map<string, Uint8Array>();

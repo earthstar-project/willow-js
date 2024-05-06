@@ -36,9 +36,9 @@ import Mutex from "./mutex.ts";
 import { EntryDriverKvStore } from "./storage/entry_drivers/kv_store.ts";
 import { KvDriverInMemory } from "./storage/kv/kv_driver_in_memory.ts";
 
-/** A local set of a particular namespace's entries to be written to, read from, and synced with other `Store`s.
+/** A local set of a particular namespace's authorised entries to be written to, read from, and synced with other `Store`s. Applies the concepts of the [Willow Data Model](https://willowprotocol.org/specs/data-model/index.html#data_model) to the set of entries stored inside.
  *
- * Keeps data in memory unless persisted entry / payload drivers are specified.
+ * Keeps all data in memory unless persisted entry / payload drivers are specified.
  *
  * https://willowprotocol.org/specs/data-model/index.html#store
  */
@@ -158,10 +158,15 @@ export class Store<
     this.checkedWriteAheadFlag.resolve();
   }
 
-  /** Create a new authorised entry for a payload, and store both in the store. */
+  /** Create a new authorised entry for a given payload, and store both in the store.
+   * An entry will not be ingested if it is unauthorised; if a newer entry with the same path and subspace are present; or if a newer entry with a path that is a prefix of the given entry exists. See the Willow Data Model's [Concepts](https://willowprotocol.org/specs/data-model/index.html#data_model_concepts) for more information.
+   *
+   * Additionally, if the new entry's path is a prefix of already-held older entries, those entries will be removed from the `Store`. See [prefix pruning](https://willowprotocol.org/specs/data-model/index.html#prefix_pruning) for more information.
+   */
   async set(
-    //
+    /** Parameters for the new entry being set. */
     input: EntryInput<SubspaceId>,
+    /** The `AuthorisationOpts` configured by `AuthorisationScheme` to produce a valid `AuthorisationToken`, e.g. a keypair for signing.  */
     authorisation: AuthorisationOpts,
   ) {
     const timestamp = input.timestamp !== undefined
@@ -208,9 +213,9 @@ export class Store<
 
   /** Attempt to store an authorised entry in the `Store`.
    *
-   * An entry will not be ingested if it is unauthorised; if a newer entry with the same path and subspace are present; or if a newer entry with a path that is a prefix of the given entry exists.
+   * An entry will not be ingested if it is unauthorised; if a newer entry with the same path and subspace are present; or if a newer entry with a path that is a prefix of the given entry exists. See the Willow Data Model's [Concepts](https://willowprotocol.org/specs/data-model/index.html#data_model_concepts) for more information.
    *
-   * Additionally, if the entry's path is a prefix of already-held older entries, those entries will be removed from the `Store`.
+   * Additionally, if the entry's path is a prefix of already-held older entries, those entries will be removed from the `Store`. See [prefix pruning](https://willowprotocol.org/specs/data-model/index.html#prefix_pruning) for more information.
    */
   async ingestEntry(
     entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
@@ -410,6 +415,7 @@ export class Store<
     };
   }
 
+  /** Return an array of `Entry` which _would_ be pruned by a given `Entry` were it to be ingested. Can be used to prevent potentially undesirable destructive operations. */
   async prunableEntries({
     path,
     subspace,
@@ -467,6 +473,7 @@ export class Store<
     return prunableEntries;
   }
 
+  // Put a new entry into storage. Used by several methods in this class.
   private async insertEntry(
     {
       path,
@@ -676,10 +683,11 @@ export class Store<
     };
   }
 
-  /** Retrieve an asynchronous iterator of entry-payload-authorisation triples from the store for a given `Area`. */
+  /** Retrieve an asynchronous iterator of entry-payload-authorisation triples from the store for a given [`AreaOfInterest`](https://willowprotocol.org/specs/grouping-entries/index.html#aois). */
   async *query(
     areaOfInterest: AreaOfInterest<SubspaceId>,
     order: QueryOrder,
+    /** Whether to return entries in reverse (descending) order or not. */
     reverse = false,
   ): AsyncIterable<
     [
@@ -720,6 +728,10 @@ export class Store<
     }
   }
 
+  /** Summarise a given [`Range`](https://willowprotocol.org/specs/grouping-entries/index.html#ranges) into a `PreFingerprint` mapping to the set of entries included by that range.
+   *
+   * This is mostly used during sync for [3d range-based set reconciliation](https://willowprotocol.org/specs/3d-range-based-set-reconciliation/index.html#d3_range_based_set_reconciliation).
+   */
   summarise(
     range: Range3d<SubspaceId>,
   ): Promise<{ fingerprint: Prefingerprint; size: number }> {
@@ -741,8 +753,13 @@ export class Store<
     return this.storage.removeInterest(areaOfInterest);
   }
 
+  /** Retrieve an asynchronous iterator of entry-payload-authorisation triples from the store for a given [`Range`](https://willowprotocol.org/specs/grouping-entries/index.html#ranges).
+   *
+   * Always returns entries in chronological order.
+   */
   async *queryRange(
     range: Range3d<SubspaceId>,
+    /** Whether to return entries newest or oldest first. */
     order: "newest" | "oldest",
   ): AsyncIterable<
     [
@@ -779,12 +796,14 @@ export class Store<
     }
   }
 
+  /** Retrieve a `Payload` for a given entry, if held in storage. */
   getPayload(
     entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
   ): Promise<Payload | undefined> {
     return this.payloadDriver.get(entry.payloadDigest);
   }
 
+  /** Retrieve a `AuthorisationToken` for a given entry, if held in storage. */
   async getAuthToken(
     entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
   ): Promise<AuthorisationToken | undefined> {

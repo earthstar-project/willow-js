@@ -4,17 +4,11 @@ import {
   SubspaceScheme,
 } from "../../types.ts";
 import { LiftingMonoid } from "../summarisable_storage/lifting_monoid.ts";
-import { Skiplist } from "../summarisable_storage/monoid_skiplist.ts";
 import { KvDriverInMemory } from "../kv/kv_driver_in_memory.ts";
 import { EntryDriver } from "../types.ts";
 import { Storage3d } from "../storage_3d/types.ts";
 import { TripleStorage } from "../storage_3d/triple_storage.ts";
-import {
-  encodeBase64,
-  Entry,
-  equalsBytes,
-  PathScheme,
-} from "../../../../deps.ts";
+import { encodeBase64, Entry, PathScheme } from "../../../../deps.ts";
 import { RadixTree } from "../prefix_iterators/radix_tree.ts";
 import { KvKey } from "../kv/types.ts";
 import { LinearStorage } from "../summarisable_storage/linear_summarisable_storage.ts";

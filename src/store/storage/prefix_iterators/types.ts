@@ -1,5 +1,6 @@
 import { Path } from "../../../../deps.ts";
 
+/** A data structure which stores Path-value pairs, and can efficiently track which paths are prefixes of others. */
 export interface PrefixIterator<ValueType> {
   insert(path: Path, value: ValueType): Promise<void>;
   remove(path: Path): Promise<boolean>;

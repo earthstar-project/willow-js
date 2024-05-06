@@ -1,19 +1,21 @@
 import { AreaOfInterest, Entry, Path, Range3d } from "../../../../deps.ts";
 import { QueryOrder } from "../../types.ts";
 
+/** A type exclusive to this implementation, used to make our lives easier. */
 export type RangeOfInterest<SubspaceId> = {
   range: Range3d<SubspaceId>;
   maxCount: number;
   maxSize: bigint;
 };
 
+/** Low-level driver for writing and reading Entries in a three dimensional space. */
 export interface Storage3d<
   NamespaceId,
   SubspaceId,
   PayloadDigest,
-  Prefingerprint,
+  PreFingerprint,
 > {
-  /** Retrieve a value */
+  /** Retrieve an entry at a subspace and path. */
   get(
     subspace: SubspaceId,
     path: Path,
@@ -24,6 +26,7 @@ export interface Storage3d<
     } | undefined
   >;
 
+  /** Insert a new entry. */
   insert(opts: {
     path: Path;
     subspace: SubspaceId;
@@ -33,31 +36,36 @@ export interface Storage3d<
     authTokenDigest: PayloadDigest;
   }): Promise<void>;
 
+  /** Update the available payload bytes for a given entry. */
   updateAvailablePayload(
     subspace: SubspaceId,
     path: Path,
   ): Promise<boolean>;
 
+  /** Remove an entry. */
   remove(
     entry: Entry<NamespaceId, SubspaceId, PayloadDigest>,
   ): Promise<boolean>;
 
-  // Used during sync
+  // Used during sync.
+
+  /** Summarise a given `Range3d` by mapping the included set of `Entry` to ` PreFingerprint`.  */
   summarise(
     range: Range3d<SubspaceId>,
-  ): Promise<{ fingerprint: Prefingerprint; size: number }>;
+  ): Promise<{ fingerprint: PreFingerprint; size: number }>;
 
+  /** Split a range into two smaller ranges. */
   splitRange(
     range: Range3d<SubspaceId>,
     knownSize: number,
   ): Promise<[Range3d<SubspaceId>, Range3d<SubspaceId>]>;
 
+  /** Return the smallest `Range3d` which includes all entries included by a given `AreaOfInterest`. */
   removeInterest(
     areaOfInterest: AreaOfInterest<SubspaceId>,
   ): Promise<Range3d<SubspaceId>>;
 
-  // Used to fetch entries for transfer during sync.
-  // All three dimensions are defined
+  /** Return an async iterator of entries included by a `RangeOfInterest`. */
   query(
     rangeOfInterest: RangeOfInterest<SubspaceId>,
     order: QueryOrder,

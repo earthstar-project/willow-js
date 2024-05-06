@@ -39,6 +39,7 @@ export type FragmentKit<NamespaceId, SubspaceId> =
   | FragmentKitComplete<NamespaceId>
   | FragmentKitSelective<NamespaceId, SubspaceId>;
 
+/** Configures the types [`PsiGroup`](https://willowprotocol.org/specs/sync/index.html#PsiGroup) and [`PsiScalar`](https://willowprotocol.org/specs/sync/index.html#PsiScalar) and the variables [`psi_scalar_multiplication`](https://willowprotocol.org/specs/sync/index.html#psi_scalar_multiplication) and [`hash_into_group`](https://willowprotocol.org/specs/sync/index.html#hash_into_group) for the [Willow General Purpose Sync Protocol](https://willowprotocol.org/specs/sync/index.html#sync). */
 export type PaiScheme<
   ReadCapability,
   PsiGroup,

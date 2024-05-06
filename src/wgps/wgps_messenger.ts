@@ -53,6 +53,7 @@ import { DataSender } from "./data/data_sender.ts";
 import { PayloadIngester } from "./data/payload_ingester.ts";
 import { Store } from "../store/store.ts";
 
+/** Return a {@link Store} for a given `NamespaceId`. */
 export type GetStoreFn<
   Prefingerprint,
   Fingerprint,
@@ -96,18 +97,23 @@ export type WgpsMessengerOpts<
   PayloadDigest,
   AuthorisationOpts,
 > = {
+  /** Specifies the {@link Transport} to be used to communicate with the other peer. */
   transport: Transport;
 
-  /** Sets the maximum payload size for this peer, which is 2 to the power of the given number.
+  /** Sets the [`maximum payload size`](https://willowprotocol.org/specs/sync/index.html#peer_max_payload_size) for this peer, which is 2 to the power of the given number.
    *
    * The given power must be a natural number lesser than or equal to 64. */
   maxPayloadSizePower: number;
 
+  /** Sets the [`challeng_length`](https://willowprotocol.org/specs/sync/index.html#challenge_length) for the [Willow General Purpose Sync Protocol](https://willowprotocol.org/specs/sync/index.html#sync).*/
   challengeLength: number;
+  /** Sets the [`challeng_hash_length`](https://willowprotocol.org/specs/sync/index.html#challenge_hash_length) for the [Willow General Purpose Sync Protocol](https://willowprotocol.org/specs/sync/index.html#sync).*/
   challengeHashLength: number;
 
+  /** Sets the [`challeng_hash`](https://willowprotocol.org/specs/sync/index.html#challenge_hash) for the [Willow General Purpose Sync Protocol](https://willowprotocol.org/specs/sync/index.html#sync).*/
   challengeHash: (bytes: Uint8Array) => Promise<Uint8Array>;
 
+  /** The parameter schemes used to configure the `WgpsMessenger` for sync. */
   schemes: SyncSchemes<
     ReadCapability,
     Receiver,
@@ -130,6 +136,7 @@ export type WgpsMessengerOpts<
     AuthorisationOpts
   >;
 
+  /** A map of {@link ReadAuthorisation} to [`AreaOfInterest`](https://willowprotocol.org/specs/grouping-entries/index.html#aois), which it proves read access to. */
   interests: Map<
     ReadAuthorisation<ReadCapability, SubspaceCapability>,
     AreaOfInterest<SubspaceId>[]
@@ -154,7 +161,8 @@ export type WgpsMessengerOpts<
   ) => Uint8Array;
 };
 
-/** Coordinates a complete WGPS synchronisation session. */
+/** Coordinates an open-ended synchronisation session between two peers using the [Willow General Purpose Sync Protocol](https://willowprotocol.org/specs/sync/index.html#sync).
+ */
 export class WgpsMessenger<
   ReadCapability,
   Receiver,

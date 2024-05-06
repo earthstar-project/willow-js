@@ -5,6 +5,7 @@ import { Payload } from "../types.ts";
 import { PrefixIterator } from "./prefix_iterators/types.ts";
 import { Storage3d } from "./storage_3d/types.ts";
 
+/** Writes and reads flags indicating write operations to the store, in order to recover from errors mid-write. */
 export interface WriteAheadFlag<
   NamespaceId,
   SubspaceId,
@@ -37,6 +38,7 @@ export interface EntryDriver<
   PayloadDigest,
   Prefingerprint,
 > {
+  /** Produce a new {@link Storage3d} to be directly used by the {@link Store}. */
   makeStorage: (namespace: NamespaceId) => Storage3d<
     NamespaceId,
     SubspaceId,
@@ -55,13 +57,14 @@ export interface EntryDriver<
   payloadReferenceCounter: PayloadReferenceCounter<PayloadDigest>;
 }
 
+/** Keeps count of how many entries refer to a given payload, and is ablo to modify that count. */
 export interface PayloadReferenceCounter<PayloadDigest> {
   increment(digest: PayloadDigest): Promise<number>;
   decrement(digest: PayloadDigest): Promise<number>;
   count(digest: PayloadDigest): Promise<number>;
 }
 
-/**  */
+/** Provides methods for storing and retrieving {@link Payload}s. */
 export interface PayloadDriver<PayloadDigest> {
   /** Returns a payload for a given format and hash.*/
   get(

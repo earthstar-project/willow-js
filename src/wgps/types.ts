@@ -399,6 +399,7 @@ export type MsgDataReplyPayload = Msg<MsgKind.DataReplyPayload, {
   handle: bigint;
 }>;
 
+/** A message sent or received during a synchronisation session. */
 export type SyncMessage<
   ReadCapability,
   SyncSignature,
@@ -498,6 +499,7 @@ export type StaticTokenChannelMsg<StaticToken> = MsgSetupBindStaticToken<
   StaticToken
 >;
 
+/** Messagest which belong to no logical channel. */
 export type NoChannelMsg<PsiGroup, SubspaceCapability, SyncSubspaceSignature> =
   | MsgControlIssueGuarantee
   | MsgControlAbsolve
@@ -536,6 +538,7 @@ export type ReconciliationPrivy<NamespaceId, SubspaceId, PayloadDigest> = {
   };
 };
 
+/** The parameter schemes required to instantiate a `WgpsMessenger`. */
 export type SyncSchemes<
   ReadCapability,
   Receiver,
@@ -604,6 +607,7 @@ export type SyncSchemes<
   >;
 };
 
+/** Configures the types of [`ReadCapability`](https://willowprotocol.org/specs/sync/index.html#ReadCapability), [`Receiver`](https://willowprotocol.org/specs/sync/index.html#sync_receiver), and [`SyncSignature`](https://willowprotocol.org/specs/sync/index.html#sync_signature) for the [Willow General Purpose Sync Protocol](https://willowprotocol.org/specs/sync/index.html#sync). */
 export type AccessControlScheme<
   ReadCapability,
   Receiver,
@@ -628,6 +632,7 @@ export type AccessControlScheme<
   };
 };
 
+/** Configures the types of [`SubspaceCapability`](https://willowprotocol.org/specs/sync/index.html#SubspaceCapability), [`SubspaceReceiver`](https://willowprotocol.org/specs/sync/index.html#sync_subspace_receiver), and [`SubspaceSignature`](https://willowprotocol.org/specs/sync/index.html#sync_subspace_signature) for the [Willow General Purpose Sync Protocol](https://willowprotocol.org/specs/sync/index.html#sync). */
 export type SubspaceCapScheme<
   SubspaceCapability,
   SubspaceReceiver,
@@ -650,6 +655,7 @@ export type SubspaceCapScheme<
   };
 };
 
+/** Configures the types of [`StaticToken`](https://willowprotocol.org/specs/sync/index.html#StaticToken) and [`DynamicToken`](https://willowprotocol.org/specs/sync/index.html#DynamicToken) for the [Willow General Purpose Sync Protocol](https://willowprotocol.org/specs/sync/index.html#sync). */
 export type AuthorisationTokenScheme<
   AuthorisationToken,
   StaticToken,
@@ -667,33 +673,3 @@ export type AuthorisationTokenScheme<
     dynamicToken: EncodingScheme<DynamicToken>;
   };
 };
-
-export type MsgOfKind<
-  Kind extends MsgKind,
-  ReadCapability,
-  SyncSignature,
-  PsiGroup,
-  SubspaceCapability,
-  SyncSubspaceSignature,
-  Fingerprint,
-  StaticToken,
-  DynamicToken,
-  NamespaceId,
-  SubspaceId,
-  PayloadDigest,
-> = Extract<
-  SyncMessage<
-    ReadCapability,
-    SyncSignature,
-    PsiGroup,
-    SubspaceCapability,
-    SyncSubspaceSignature,
-    Fingerprint,
-    StaticToken,
-    DynamicToken,
-    NamespaceId,
-    SubspaceId,
-    PayloadDigest
-  >,
-  { _kind: Kind }
->;

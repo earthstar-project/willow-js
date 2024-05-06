@@ -25,19 +25,19 @@ accompanying documentation.
 
 Using `Store` requires these schemes:
 
-- NamespaceScheme
-- SubspaceScheme
-- PayloadScheme
-- PathScheme
-- AuthorisationScheme
-- FingerprintScheme
+- `NamespaceScheme`
+- `SubspaceScheme`
+- `PayloadScheme`
+- `PathScheme`
+- `AuthorisationScheme`
+- `FingerprintScheme`
 
 Using `WgpsMessenger` requires all prior schemes, as well as the following:
 
-- AccessControlScheme
-- SubspaceCapScheme
-- PaiScheme
-- AuthorisationTokenScheme
+- `AccessControlScheme`
+- `SubspaceCapScheme`
+- `PaiScheme`
+- `AuthorisationTokenScheme`
 
 ### Interfaces
 

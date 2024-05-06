@@ -54,6 +54,7 @@ export type TripleStorageOpts<
   getPayloadLength: (digest: PayloadDigest) => Promise<bigint>;
 };
 
+/** A `Storage3d` made up of three `SummarisableStorage` holding the same data in three different orders: subspace, path, and timestamp. */
 export class TripleStorage<
   NamespaceId,
   SubspaceId,

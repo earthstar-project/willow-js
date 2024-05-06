@@ -7,6 +7,7 @@ import { collectUint8Arrays } from "./util.ts";
 
 const PAYLOAD_STORE = "payload";
 
+/** Stores and retrieves payloads from IndexedDB. */
 export class PayloadDriverIndexedDb<PayloadDigest>
   implements PayloadDriver<PayloadDigest> {
   private db = deferred<IDBDatabase>();
