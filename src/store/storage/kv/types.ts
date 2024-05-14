@@ -8,7 +8,7 @@ export type KvKey = KeyPart[];
 
 /**
  * The ordering on KeyParts. Uint8Arrays are less than strings are less than numbers are less than booleans. Amongst themselves, Uint8Arrays are compared lexicographically, strings use the js `<` and `>` operators, numbers use the js `<` and `>` operators, and booleans use the js `<` and `>` operators.
- * 
+ *
  * @returns A negative number if a is less than b, zero if a equals b, a positive number if a is greater than b.
  */
 export function compareTwoKeyParts(a: KeyPart, b: KeyPart): number {
@@ -64,7 +64,7 @@ export function compareTwoKeyParts(a: KeyPart, b: KeyPart): number {
 
 /**
  * The ordering on keys. Lexicographically compares the KeyParts according to {@linkcode compareTwoKeyParts}.
- * 
+ *
  * @returns A negative number if a is less than b, zero if a equals b, a positive number if a is greater than b.
  */
 export function compareKeys(a: KvKey, b: KvKey): number {
@@ -118,7 +118,7 @@ export interface KvDriver {
   /**
    * Matches an entry whose key is exactly `prefix` (unlike Deno.Kv).
    * `limit` must not be zero (like Deno.Kv).
-   * 
+   *
    * Entries must match both the prefix *and* be included in the start-end range.
    */
   list<Value>(

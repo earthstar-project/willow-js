@@ -211,7 +211,7 @@ export const testSchemeSubspaceCap: SubspaceCapScheme<
 > = {
   getNamespace: (cap) => cap.namespace,
   getReceiver: (cap) => cap.receiver,
-  getSecretKey: (receiver) => receiver,
+  getSecretKey: (receiver) => Promise.resolve(receiver),
   isValidCap: () => Promise.resolve(true),
   signatures: {
     sign: async (_pubkey, secret, msg) => {
@@ -611,7 +611,7 @@ export const testSchemeAccessControl: AccessControlScheme<
     };
   },
   getReceiver: (cap) => cap.receiver,
-  getSecretKey: (receiver) => receiver,
+  getSecretKey: (receiver) => Promise.resolve(receiver),
   isValidCap: () => Promise.resolve(true),
   encodings: {
     readCapability: {

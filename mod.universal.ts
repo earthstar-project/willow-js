@@ -10,6 +10,7 @@ export * from "./src/store/storage/entry_drivers/kv_store.ts";
 
 export * from "./src/store/storage/kv/types.ts";
 export * from "./src/store/storage/kv/prefixed_driver.ts";
+export * from "./src/store/storage/kv/kv_driver_in_memory.ts";
 
 export * from "./src/store/storage/payload_drivers/memory.ts";
 

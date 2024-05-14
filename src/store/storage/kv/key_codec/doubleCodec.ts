@@ -84,13 +84,17 @@ function ieeeWrite(
   }
 
   for (
-    ; mLen >= 8; buffer[offset + i] = m & 0xff, i += d, m /= 256, mLen -= 8
+    ;
+    mLen >= 8;
+    buffer[offset + i] = m & 0xff, i += d, m /= 256, mLen -= 8
   ) { /* empty */ }
 
   e = (e << mLen) | m;
   eLen += mLen;
   for (
-    ; eLen > 0; buffer[offset + i] = e & 0xff, i += d, e /= 256, eLen -= 8
+    ;
+    eLen > 0;
+    buffer[offset + i] = e & 0xff, i += d, e /= 256, eLen -= 8
   ) { /* empty */ }
 
   buffer[offset + i - d] |= s * 128;
@@ -121,14 +125,18 @@ function ieeeRead(
   s >>= -nBits;
   nBits += eLen;
   for (
-    ; nBits > 0; e = (e * 256) + buffer[offset + i], i += d, nBits -= 8
+    ;
+    nBits > 0;
+    e = (e * 256) + buffer[offset + i], i += d, nBits -= 8
   ) { /* empty */ }
 
   m = e & ((1 << (-nBits)) - 1);
   e >>= -nBits;
   nBits += mLen;
   for (
-    ; nBits > 0; m = (m * 256) + buffer[offset + i], i += d, nBits -= 8
+    ;
+    nBits > 0;
+    m = (m * 256) + buffer[offset + i], i += d, nBits -= 8
   ) { /* empty */ }
 
   if (e === 0) {

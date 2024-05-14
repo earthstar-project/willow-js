@@ -617,7 +617,7 @@ export type AccessControlScheme<
   SubspaceId,
 > = {
   getReceiver: (cap: ReadCapability) => Receiver;
-  getSecretKey: (receiver: Receiver) => ReceiverSecretKey;
+  getSecretKey: (receiver: Receiver) => Promise<ReceiverSecretKey>;
   getGrantedArea: (cap: ReadCapability) => Area<SubspaceId>;
   getGrantedNamespace: (cap: ReadCapability) => NamespaceId;
   signatures: SignatureScheme<Receiver, ReceiverSecretKey, SyncSignature>;
@@ -640,7 +640,9 @@ export type SubspaceCapScheme<
   SubspaceSecretKey,
   NamespaceId,
 > = {
-  getSecretKey: (receiver: SubspaceReceiver) => SubspaceSecretKey | undefined;
+  getSecretKey: (
+    receiver: SubspaceReceiver,
+  ) => Promise<SubspaceSecretKey | undefined>;
   getNamespace: (cap: SubspaceCapability) => NamespaceId;
   getReceiver: (cap: SubspaceCapability) => SubspaceReceiver;
   isValidCap: (cap: SubspaceCapability) => Promise<boolean>;

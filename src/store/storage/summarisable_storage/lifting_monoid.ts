@@ -1,6 +1,6 @@
 /**
  * This interface combines two bits of functionality:
- * 
+ *
  * 1. Lifting values of some type `BaseType` into the universe of a monoid (`LiftedType`).
  * 2. Information about the moniod of universe `LiftedType` (the neutral element and the combine function).
  */

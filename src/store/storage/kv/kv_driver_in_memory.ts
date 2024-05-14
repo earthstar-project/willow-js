@@ -239,7 +239,7 @@ export class KvDriverInMemory implements KvDriver {
       let node = this.tree.findLeastMatching(predicate);
       while (
         node !== null &&
-        isFirstKeyPrefixOfSecondKey(prefix, node.value.key) && 
+        isFirstKeyPrefixOfSecondKey(prefix, node.value.key) &&
         (opts.end ? compareKeys(node.value.key, opts.end) < 0 : true)
       ) {
         this.tree.remove(node.value);

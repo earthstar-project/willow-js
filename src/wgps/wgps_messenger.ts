@@ -925,7 +925,7 @@ export class WgpsMessenger<
 
     onAsyncIterate(this.paiFinder.subspaceCapReplies(), async (reply) => {
       const receiver = this.schemes.subspaceCap.getReceiver(reply.subspaceCap);
-      const secretKey = this.schemes.subspaceCap.getSecretKey(receiver);
+      const secretKey = await this.schemes.subspaceCap.getSecretKey(receiver);
 
       if (!secretKey) {
         throw new WillowError(
@@ -955,7 +955,7 @@ export class WgpsMessenger<
           authorisation.capability,
         );
 
-        const receiverSecretKey = this.schemes.accessControl.getSecretKey(
+        const receiverSecretKey = await this.schemes.accessControl.getSecretKey(
           receiver,
         );
 

@@ -1,9 +1,9 @@
 // deno-lint-ignore-file
 
-/**  
+/**
    The following borrows code from:
    https://github.com/josephg/fdb-tuple
-    
+
    This file implements the tuple layer. More details are here:
    https://apple.github.io/foundationdb/data-modeling.html#tuples
 
@@ -15,11 +15,11 @@
    - String (including unicode)
    - BigInt
    - Number (double)
-   - True, 
+   - True,
    - False
 
    Note: javascript number types don't neatly match the number types used in
-   FDB-Tuple encoding. 
+   FDB-Tuple encoding.
 
    For DenoKv, I'm follow the DenoKv KeyCodec semantics.
    Note: When encoding bigints, the tuple encoding does not differentiate between
@@ -28,7 +28,7 @@
 */
 
 /** exports pack - a DenoKv Key encoder */
-export * from './encoder.ts'
+export * from "./encoder.ts";
 
 /** exports unpack - a DenoKv Key decoder */
-export * from './decoder.ts'
+export * from "./decoder.ts";

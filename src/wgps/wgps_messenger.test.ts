@@ -2100,7 +2100,7 @@ function testWgpsMessenger(scenario: WgpsScenario) {
     },
   );
 
-  Deno.test.only(
+  Deno.test(
     `Reconciliation of many namespaces (${scenario.name})`,
     async (test) => {
       await test.step("sync", async () => {

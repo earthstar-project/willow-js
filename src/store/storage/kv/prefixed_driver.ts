@@ -75,7 +75,7 @@ export class PrefixedDriver implements KvDriver {
       });
     }
 
-    return this.parentDriver.clear({prefix: this.prefix});
+    return this.parentDriver.clear({ prefix: this.prefix });
   }
 
   batch(): KvBatch {
