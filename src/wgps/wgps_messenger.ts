@@ -731,12 +731,14 @@ export class WgpsMessenger<
 
     // Begin handling decoded messages
     onAsyncIterate(decodedMessages, (msg) => {
+      /*
       console.log(
         `%c${this.transport.role === IS_ALFIE ? "Alfie" : "Betty"} got: ${
           messageNames[msg.kind]
         }`,
         `color: ${this.transport.role === IS_ALFIE ? "red" : "blue"}`,
       );
+      */
 
       if (msg.kind === MsgKind.DataSendEntry) {
         this.currentlyReceivedEntry = msg.entry;
@@ -1315,7 +1317,8 @@ export class WgpsMessenger<
   ) {
     switch (message.kind) {
       case MsgKind.ReconciliationSendFingerprint: {
-        const reconciler = this.reconcilerMap.getReconciler(
+        // Alfie may have initiated reconciliation before we realised there was even an intersection, so we need to wait until we've realised that intersection exists as well.
+        const reconciler = await this.reconcilerMap.getReconcilerEventually(
           message.receiverHandle,
           message.senderHandle,
         );
