@@ -41,7 +41,6 @@ export type PaiFinderOpts<
   intersectionHandlesTheirs: HandleStore<Intersection<PsiGroup>>;
 };
 
-const DO_NOTHING = Symbol("do_nothing");
 const BIND_READ_CAP = Symbol("bind_read_cap");
 const REQUEST_SUBSPACE_CAP = Symbol("req_subspace_cap");
 const REPLY_READ_CAP = Symbol("reply_read_cap");
@@ -53,15 +52,6 @@ type LocalFragmentInfo<
   NamespaceId,
   SubspaceId,
 > = {
-  onIntersection: typeof DO_NOTHING;
-  authorisation: ReadAuthorisation<
-    ReadCapability,
-    SubspaceReadCapability
-  >;
-  path: Path;
-  namespace: NamespaceId;
-  subspace: SubspaceId | typeof ANY_SUBSPACE;
-} | {
   onIntersection: typeof BIND_READ_CAP;
   authorisation: {
     capability: ReadCapability;
@@ -262,7 +252,7 @@ export class PaiFinder<
           });
         } else {
           this.fragmentsInfo.set(groupHandle, {
-            onIntersection: DO_NOTHING,
+            onIntersection: REPLY_READ_CAP,
             authorisation: authorisation,
             namespace,
             path,

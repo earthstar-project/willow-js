@@ -2100,7 +2100,7 @@ function testWgpsMessenger(scenario: WgpsScenario) {
     },
   );
 
-  Deno.test.only(
+  Deno.test(
     `Full Reconciliation of joint equivalent capabilities (and big payloads) (${scenario.name})`,
     async (test) => {
       await test.step("sync", async () => {
