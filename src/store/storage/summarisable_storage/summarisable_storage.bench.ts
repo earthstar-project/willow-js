@@ -1,7 +1,7 @@
 // deno bench -A --unstable-kv ./src/store/storage/summarisable_storage/summarisable_storage.bench.ts
 
 import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
-import { LiftingMonoid } from "./lifting_monoid.ts";
+import type { LiftingMonoid } from "./lifting_monoid.ts";
 import { Skiplist } from "./monoid_skiplist.ts";
 
 const xormonoid: LiftingMonoid<[[number], Uint8Array], number> = {

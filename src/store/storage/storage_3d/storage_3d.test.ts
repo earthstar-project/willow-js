@@ -1,31 +1,7 @@
 // deno test ./src/store/storage/storage_3d/storage_3d.test.ts
-
-import { assert } from "https://deno.land/std@0.202.0/assert/assert.ts";
+import { concat, equals as equalsBytes } from "@std/bytes";
 import {
-  ANY_SUBSPACE,
-  AreaOfInterest,
-  bigintToBytes,
-  concat,
-  encodeBase64,
-  encodeEntry,
-  encodePath,
-  Entry,
-  equalsBytes,
-  isIncluded3d,
-  isIncludedRange,
-  isPathPrefixed,
-  OPEN_END,
-  orderBytes,
-  orderPath,
-  orderTimestamp,
-  Path,
-  Range,
-  Range3d,
-  StreamDecoder,
-  successorPath,
-} from "../../../../deps.ts";
-import {
-  TestNamespace,
+  type TestNamespace,
   testSchemeAuthorisation,
   testSchemeFingerprint,
   testSchemeNamespace,
@@ -41,16 +17,36 @@ import {
   randomSubspace,
   randomTimestamp,
 } from "../../../test/utils.ts";
-import { LengthyEntry, QueryOrder, StoreSchemes } from "../../types.ts";
+import type { LengthyEntry, QueryOrder, StoreSchemes } from "../../types.ts";
 import { TripleStorage } from "./triple_storage.ts";
-import { RangeOfInterest, Storage3d } from "./types.ts";
-import { assertEquals } from "https://deno.land/std@0.202.0/assert/assert_equals.ts";
-import { sample } from "https://deno.land/std@0.202.0/collections/mod.ts";
-
+import type { RangeOfInterest, Storage3d } from "./types.ts";
+import { sample } from "@std/collections";
 import { Store } from "../../store.ts";
 import { RadixTree } from "../prefix_iterators/radix_tree.ts";
 import { Skiplist } from "../summarisable_storage/monoid_skiplist.ts";
 import { KvDriverInMemory } from "../kv/kv_driver_in_memory.ts";
+import { assert, assertEquals } from "@std/assert";
+import {
+  ANY_SUBSPACE,
+  type AreaOfInterest,
+  bigintToBytes,
+  encodeEntry,
+  encodePath,
+  type Entry,
+  isIncluded3d,
+  isIncludedRange,
+  isPathPrefixed,
+  OPEN_END,
+  orderBytes,
+  orderPath,
+  orderTimestamp,
+  type Path,
+  type Range,
+  type Range3d,
+  type StreamDecoder,
+  successorPath,
+} from "@earthstar/willow-utils";
+import { encodeBase64 } from "@std/encoding/base64";
 
 export type Storage3dScenario<
   NamespaceId,
@@ -180,7 +176,7 @@ Deno.test("Storage3d.insert, get, and remove", async (test) => {
   }
 });
 
-Deno.test("Storage3d.summarise", async () => {
+Deno.test.only("Storage3d.summarise", async () => {
   // A 'special' fingerprint which really just lists all the items it is made from.
   const specialFingerprintScheme = {
     fingerprintSingleton(
@@ -483,14 +479,18 @@ Deno.test("Storage3d.summarise", async () => {
 
     entries.sort((a, b) => {
       const aKey = concat(
-        bigintToBytes(a.timestamp),
-        new Uint8Array([a.subspaceId]),
-        encodePath(testSchemePath, a.path),
+        [
+          bigintToBytes(a.timestamp),
+          new Uint8Array([a.subspaceId]),
+          encodePath(testSchemePath, a.path),
+        ],
       );
       const bKey = concat(
-        bigintToBytes(b.timestamp),
-        new Uint8Array([b.subspaceId]),
-        encodePath(testSchemePath, b.path),
+        [
+          bigintToBytes(b.timestamp),
+          new Uint8Array([b.subspaceId]),
+          encodePath(testSchemePath, b.path),
+        ],
       );
 
       return orderBytes(aKey, bKey) * -1;

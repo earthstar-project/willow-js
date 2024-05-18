@@ -1,13 +1,14 @@
-import { compactWidth, concat, encodeCompactWidth } from "../../../deps.ts";
+import { concat } from "@std/bytes";
+import { compactWidth, encodeCompactWidth } from "@earthstar/willow-utils";
 import {
   HandleType,
   LogicalChannel,
-  MsgControlAbsolve,
-  MsgControlAnnounceDropping,
-  MsgControlApologise,
-  MsgControlFree,
-  MsgControlIssueGuarantee,
-  MsgControlPlead,
+  type MsgControlAbsolve,
+  type MsgControlAnnounceDropping,
+  type MsgControlApologise,
+  type MsgControlFree,
+  type MsgControlIssueGuarantee,
+  type MsgControlPlead,
 } from "../types.ts";
 
 export function channelMaskStart(
@@ -80,8 +81,10 @@ export function encodeControlIssueGuarantee(
     : 0x83;
 
   return concat(
-    new Uint8Array([header, channelMaskStart(0, msg.channel)]),
-    encodeCompactWidth(msg.amount),
+    [
+      new Uint8Array([header, channelMaskStart(0, msg.channel)]),
+      encodeCompactWidth(msg.amount),
+    ],
   );
 }
 
@@ -99,8 +102,10 @@ export function encodeControlAbsolve(
     : 0x87;
 
   return concat(
-    new Uint8Array([header, channelMaskStart(0, msg.channel)]),
-    encodeCompactWidth(msg.amount),
+    [
+      new Uint8Array([header, channelMaskStart(0, msg.channel)]),
+      encodeCompactWidth(msg.amount),
+    ],
   );
 }
 
@@ -118,8 +123,10 @@ export function encodeControlPlead(
     : 0x8b;
 
   return concat(
-    new Uint8Array([header, channelMaskStart(0, msg.channel)]),
-    encodeCompactWidth(msg.target),
+    [
+      new Uint8Array([header, channelMaskStart(0, msg.channel)]),
+      encodeCompactWidth(msg.target),
+    ],
   );
 }
 
@@ -151,7 +158,6 @@ export function encodeControlFree(
   const handleTypeByte = handleMask(0, msg.handleType) | (msg.mine ? 0x10 : 0);
 
   return concat(
-    new Uint8Array([header, handleTypeByte]),
-    encodeCompactWidth(msg.handle),
+    [new Uint8Array([header, handleTypeByte]), encodeCompactWidth(msg.handle)],
   );
 }

@@ -1,32 +1,32 @@
+import type {
+  FingerprintScheme,
+  PayloadScheme,
+  QueryOrder,
+  SubspaceScheme,
+} from "../../types.ts";
+import type { LiftingMonoid } from "../summarisable_storage/lifting_monoid.ts";
+import type { SummarisableStorage } from "../summarisable_storage/types.ts";
+import type { RangeOfInterest, Storage3d } from "./types.ts";
+import { WillowError } from "../../../errors.ts";
+import type { KvKey } from "../kv/types.ts";
 import {
-  AreaOfInterest,
+  type AreaOfInterest,
   areaTo3dRange,
   bigintToBytes,
-  concat,
-  EncodingScheme,
-  Entry,
+  type EncodingScheme,
+  type Entry,
   isIncluded3d,
   isIncludedRange,
   isPathPrefixed,
   OPEN_END,
   orderPath,
   orderTimestamp,
-  Path,
-  PathScheme,
-  Range3d,
+  type Path,
+  type PathScheme,
+  type Range3d,
   successorPath,
-} from "../../../../deps.ts";
-import {
-  FingerprintScheme,
-  PayloadScheme,
-  QueryOrder,
-  SubspaceScheme,
-} from "../../types.ts";
-import { LiftingMonoid } from "../summarisable_storage/lifting_monoid.ts";
-import { SummarisableStorage } from "../summarisable_storage/types.ts";
-import { RangeOfInterest, Storage3d } from "./types.ts";
-import { WillowError } from "../../../errors.ts";
-import { KvKey } from "../kv/types.ts";
+} from "@earthstar/willow-utils";
+import { concat } from "@std/bytes";
 
 export type TripleStorageOpts<
   NamespaceId,
@@ -886,9 +886,11 @@ export function encodeKvValue<PayloadDigest>(
   },
 ): Uint8Array {
   return concat(
-    bigintToBytes(payloadLength),
-    payloadScheme.encode(payloadDigest),
-    payloadScheme.encode(authTokenDigest),
+    [
+      bigintToBytes(payloadLength),
+      payloadScheme.encode(payloadDigest),
+      payloadScheme.encode(authTokenDigest),
+    ],
   );
 }
 
@@ -963,7 +965,7 @@ export function encodePathWithSeparators(path: Path): Uint8Array {
     encodedComponents.push(encodedComponent);
   }
 
-  return concat(...encodedComponents);
+  return concat(encodedComponents);
 }
 
 /** Decodes an escaped encoded path. */

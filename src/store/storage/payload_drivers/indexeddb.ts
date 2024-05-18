@@ -1,9 +1,10 @@
-import { delay } from "https://deno.land/std@0.202.0/async/delay.ts";
-import { concat, deferred } from "../../../../deps.ts";
+import type { delay } from "https://deno.land/std@0.202.0/async/delay.ts";
+import { deferred } from "../../../../deps.ts";
 import { ValidationError, WillowError } from "../../../errors.ts";
-import { Payload, PayloadScheme } from "../../types.ts";
-import { PayloadDriver } from "../types.ts";
+import type { Payload, PayloadScheme } from "../../types.ts";
+import type { PayloadDriver } from "../types.ts";
 import { collectUint8Arrays } from "./util.ts";
+import { concat } from "@std/bytes";
 
 const PAYLOAD_STORE = "payload";
 
@@ -261,7 +262,7 @@ export class PayloadDriverIndexedDb<PayloadDigest>
       ? opts.payload
       : await collectUint8Arrays(opts.payload);
 
-    const finalBytes = concat(existingBytes, receivedBytes);
+    const finalBytes = concat([existingBytes, receivedBytes]);
 
     const digest = await this.payloadScheme.fromBytes(
       new Uint8Array(finalBytes),

@@ -1,21 +1,21 @@
+import { concat } from "@std/bytes";
+import {
+  COVERS_NONE,
+  type MsgReconciliationAnnounceEntries,
+  type MsgReconciliationSendEntry,
+  type MsgReconciliationSendFingerprint,
+  type MsgReconciliationSendPayload,
+  type ReconciliationPrivy,
+} from "../types.ts";
+import { compactWidthOr } from "./util.ts";
 import {
   compactWidth,
-  concat,
   encodeCompactWidth,
   encodeEntryRelativeEntry,
   encodeRange3dRelative,
-  PathScheme,
-  TotalOrder,
-} from "../../../deps.ts";
-import {
-  COVERS_NONE,
-  MsgReconciliationAnnounceEntries,
-  MsgReconciliationSendEntry,
-  MsgReconciliationSendFingerprint,
-  MsgReconciliationSendPayload,
-  ReconciliationPrivy,
-} from "../types.ts";
-import { compactWidthOr } from "./util.ts";
+  type PathScheme,
+  type TotalOrder,
+} from "@earthstar/willow-utils";
 
 export function encodeReconciliationSendFingerprint<
   Fingerprint,
@@ -105,13 +105,15 @@ export function encodeReconciliationSendFingerprint<
   );
 
   return concat(
-    new Uint8Array([messageTypeMask | headerByte]),
-    handleLengthByte,
-    encodedCovers,
-    encodedSenderHandle,
-    encodedReceiverHandle,
-    encodedFingerprint,
-    encodedRelativeRange,
+    [
+      new Uint8Array([messageTypeMask | headerByte]),
+      handleLengthByte,
+      encodedCovers,
+      encodedSenderHandle,
+      encodedReceiverHandle,
+      encodedFingerprint,
+      encodedRelativeRange,
+    ],
   );
 }
 
@@ -217,13 +219,15 @@ export function encodeReconciliationAnnounceEntries<
   );
 
   return concat(
-    new Uint8Array([firstByte, secondByte]),
-    coversCompactWidth,
-    coversEncoded,
-    encodedSenderHandle,
-    encodedReceiverHandle,
-    encodedCount,
-    encodedRelativeRange,
+    [
+      new Uint8Array([firstByte, secondByte]),
+      coversCompactWidth,
+      coversEncoded,
+      encodedSenderHandle,
+      encodedReceiverHandle,
+      encodedCount,
+      encodedRelativeRange,
+    ],
   );
 }
 
@@ -311,12 +315,14 @@ export function encodeReconciliationSendEntry<
   );
 
   return concat(
-    new Uint8Array([header]),
-    encodedStaticTokenWidth,
-    encodedStaticToken,
-    encodedAvailable,
-    encodedDynamicToken,
-    encodedRelativeEntry,
+    [
+      new Uint8Array([header]),
+      encodedStaticTokenWidth,
+      encodedStaticToken,
+      encodedAvailable,
+      encodedDynamicToken,
+      encodedRelativeEntry,
+    ],
   );
 }
 
@@ -326,7 +332,7 @@ export function encodeReconciliationSendPayload(
   const header = compactWidthOr(0x50, compactWidth(msg.amount));
   const amountEncoded = encodeCompactWidth(msg.amount);
 
-  return concat(new Uint8Array([header]), amountEncoded, msg.bytes);
+  return concat([new Uint8Array([header]), amountEncoded, msg.bytes]);
 }
 
 export function encodeReconciliationTerminatePayload(): Uint8Array {

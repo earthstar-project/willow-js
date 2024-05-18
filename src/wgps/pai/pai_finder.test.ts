@@ -1,19 +1,19 @@
-import { ANY_SUBSPACE, OPEN_END } from "../../../deps.ts";
-import { Intersection } from "./types.ts";
+import type { Intersection } from "./types.ts";
 import { PaiFinder } from "./pai_finder.ts";
 import { HandleStore } from "../handle_store.ts";
 import { delay } from "https://deno.land/std@0.202.0/async/delay.ts";
-import { assertEquals } from "https://deno.land/std@0.202.0/assert/mod.ts";
 import {
   TestNamespace,
-  TestReadAuth,
-  TestReadCap,
+  type TestReadAuth,
+  type TestReadCap,
   testSchemeNamespace,
   testSchemePai,
   TestSubspace,
-  TestSubspaceReadCap,
+  type TestSubspaceReadCap,
 } from "../../test/test_schemes.ts";
-import { ReadAuthorisation } from "../types.ts";
+import type { ReadAuthorisation } from "../types.ts";
+import { assertEquals } from "@std/assert";
+import { ANY_SUBSPACE, OPEN_END } from "@earthstar/willow-utils";
 
 function setupFinders(): {
   alfie: PaiFinder<

@@ -1,5 +1,5 @@
-import { GrowingBytes } from "../../../deps.ts";
-import { MsgCommitmentReveal, MsgKind } from "../types.ts";
+import type { GrowingBytes } from "@earthstar/willow-utils";
+import { type MsgCommitmentReveal, MsgKind } from "../types.ts";
 
 export async function decodeCommitmentReveal(
   bytes: GrowingBytes,

@@ -1,5 +1,5 @@
-import { AreaOfInterest, Entry, Path, Range3d } from "../../../../deps.ts";
-import { QueryOrder } from "../../types.ts";
+import type { AreaOfInterest, Entry, Path, Range3d } from "@earthstar/willow-utils";
+import type { QueryOrder } from "../../types.ts";
 
 /** A type exclusive to this implementation, used to make our lives easier. */
 export type RangeOfInterest<SubspaceId> = {

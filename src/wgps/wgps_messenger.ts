@@ -1,17 +1,4 @@
-import {
-  areaIsIncluded,
-  AreaOfInterest,
-  defaultEntry,
-  deferred,
-  Entry,
-  entryPosition,
-  FIFO,
-  intersectArea,
-  isIncluded3d,
-  isIncludedArea,
-  orderBytes,
-  Range3d,
-} from "../../deps.ts";
+import { deferred, FIFO } from "../../deps.ts";
 import {
   ValidationError,
   WgpsMessageValidationError,
@@ -23,24 +10,24 @@ import { ReadyTransport } from "./ready_transport.ts";
 import { HandleStore } from "./handle_store.ts";
 import { PaiFinder } from "./pai/pai_finder.ts";
 import {
-  AreaOfInterestChannelMsg,
-  CapabilityChannelMsg,
-  DataChannelMsg,
+  type AreaOfInterestChannelMsg,
+  type CapabilityChannelMsg,
+  type DataChannelMsg,
   HandleType,
-  IntersectionChannelMsg,
+  type IntersectionChannelMsg,
   IS_ALFIE,
   LogicalChannel,
   messageNames,
   MsgKind,
-  NoChannelMsg,
-  PayloadRequestChannelMsg,
-  ReadAuthorisation,
-  ReconciliationChannelMsg,
-  StaticTokenChannelMsg,
-  SyncSchemes,
-  Transport,
+  type NoChannelMsg,
+  type PayloadRequestChannelMsg,
+  type ReadAuthorisation,
+  type ReconciliationChannelMsg,
+  type StaticTokenChannelMsg,
+  type SyncSchemes,
+  type Transport,
 } from "./types.ts";
-import { Intersection } from "./pai/types.ts";
+import type { Intersection } from "./pai/types.ts";
 import { onAsyncIterate } from "./util.ts";
 
 import { GuaranteedQueue } from "./guaranteed_queue.ts";
@@ -51,7 +38,19 @@ import { Announcer } from "./reconciliation/announcer.ts";
 import { CapFinder } from "./cap_finder.ts";
 import { DataSender } from "./data/data_sender.ts";
 import { PayloadIngester } from "./data/payload_ingester.ts";
-import { Store } from "../store/store.ts";
+import type { Store } from "../store/store.ts";
+import {
+  areaIsIncluded,
+  type AreaOfInterest,
+  defaultEntry,
+  type Entry,
+  entryPosition,
+  intersectArea,
+  isIncluded3d,
+  isIncludedArea,
+  orderBytes,
+  type Range3d,
+} from "@earthstar/willow-utils";
 
 /** Return a {@link Store} for a given `NamespaceId`. */
 export type GetStoreFn<
@@ -731,14 +730,12 @@ export class WgpsMessenger<
 
     // Begin handling decoded messages
     onAsyncIterate(decodedMessages, (msg) => {
-      /*
       console.log(
         `%c${this.transport.role === IS_ALFIE ? "Alfie" : "Betty"} got: ${
           messageNames[msg.kind]
         }`,
         `color: ${this.transport.role === IS_ALFIE ? "red" : "blue"}`,
       );
-      */
 
       if (msg.kind === MsgKind.DataSendEntry) {
         this.currentlyReceivedEntry = msg.entry;

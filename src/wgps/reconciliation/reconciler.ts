@@ -1,14 +1,13 @@
 import {
-  AreaOfInterest,
-  deferred,
-  FIFO,
+  type AreaOfInterest,
   intersectRange3d,
-  Range3d,
-} from "../../../deps.ts";
+  type Range3d,
+} from "@earthstar/willow-utils";
+import { deferred, FIFO } from "../../../deps.ts";
 import { WillowError } from "../../errors.ts";
-import { Store } from "../../store/store.ts";
-import { FingerprintScheme, SubspaceScheme } from "../../store/types.ts";
-import { COVERS_NONE, IS_ALFIE, SyncRole } from "../types.ts";
+import type { Store } from "../../store/store.ts";
+import type { FingerprintScheme, SubspaceScheme } from "../../store/types.ts";
+import { COVERS_NONE, IS_ALFIE, type SyncRole } from "../types.ts";
 
 export type ReconcilerOpts<
   Prefingerprint,

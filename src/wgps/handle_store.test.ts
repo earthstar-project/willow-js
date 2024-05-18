@@ -1,4 +1,4 @@
-import { assertEquals } from "https://deno.land/std@0.202.0/assert/mod.ts";
+import { assertEquals } from "@std/assert";
 import { HandleStore } from "./handle_store.ts";
 
 Deno.test("HandleStore.bind", () => {

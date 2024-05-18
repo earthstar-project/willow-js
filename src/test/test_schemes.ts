@@ -1,7 +1,24 @@
+import type {
+  AccessControlScheme,
+  AuthorisationTokenScheme,
+  ReadAuthorisation,
+  SubspaceCapScheme,
+} from "../wgps/types.ts";
+import { crypto } from "@std/crypto";
+import type {
+  AuthorisationScheme,
+  FingerprintScheme,
+  NamespaceScheme,
+  PayloadScheme,
+  SubspaceScheme,
+} from "../store/types.ts";
+import type { PaiScheme } from "../wgps/pai/types.ts";
+import { x25519 } from "npm:@noble/curves/ed25519";
+import { isFragmentTriple } from "../wgps/pai/pai_finder.ts";
+import { concat } from "@std/bytes";
 import {
   ANY_SUBSPACE,
   bigintToBytes,
-  concat,
   decodeAreaInArea,
   decodePath,
   decodeStreamAreaInArea,
@@ -9,30 +26,13 @@ import {
   encodeAreaInArea,
   encodeEntry,
   encodePath,
-  equalsBytes,
   OPEN_END,
   orderBytes,
-  Path,
-  PathScheme,
-  Range,
-} from "../../deps.ts";
-import {
-  AccessControlScheme,
-  AuthorisationTokenScheme,
-  ReadAuthorisation,
-  SubspaceCapScheme,
-} from "../wgps/types.ts";
-import { crypto } from "https://deno.land/std@0.188.0/crypto/crypto.ts";
-import {
-  AuthorisationScheme,
-  FingerprintScheme,
-  NamespaceScheme,
-  PayloadScheme,
-  SubspaceScheme,
-} from "../store/types.ts";
-import { PaiScheme } from "../wgps/pai/types.ts";
-import { x25519 } from "npm:@noble/curves/ed25519";
-import { isFragmentTriple } from "../wgps/pai/pai_finder.ts";
+  type Path,
+  type PathScheme,
+  type Range,
+} from "@earthstar/willow-utils";
+import { equals as equalsBytes } from "@std/bytes";
 
 // Namespace
 
@@ -217,12 +217,12 @@ export const testSchemeSubspaceCap: SubspaceCapScheme<
     sign: async (_pubkey, secret, msg) => {
       const hash = await crypto.subtle.digest("SHA-256", msg);
 
-      return concat(new Uint8Array([secret]), new Uint8Array(hash));
+      return concat([new Uint8Array([secret]), new Uint8Array(hash)]);
     },
     verify: async (key, sig, bytestring) => {
       const hash = await crypto.subtle.digest("SHA-256", bytestring);
 
-      const expected = concat(new Uint8Array([key]), new Uint8Array(hash));
+      const expected = concat([new Uint8Array([key]), new Uint8Array(hash)]);
       return equalsBytes(sig, expected);
     },
   },
@@ -246,15 +246,19 @@ export const testSchemeSubspaceCap: SubspaceCapScheme<
     subspaceCapability: {
       encode: (cap) => {
         return concat(
-          new Uint8Array([cap.namespace, cap.receiver]),
-          cap.time.end === OPEN_END
-            ? concat(new Uint8Array([0]), bigintToBytes(cap.time.start))
-            : concat(
-              new Uint8Array([1]),
-              bigintToBytes(cap.time.start),
-              bigintToBytes(cap.time.end),
-            ),
-          encodePath(testSchemePath, cap.path),
+          [
+            new Uint8Array([cap.namespace, cap.receiver]),
+            cap.time.end === OPEN_END
+              ? concat([new Uint8Array([0]), bigintToBytes(cap.time.start)])
+              : concat(
+                [
+                  new Uint8Array([1]),
+                  bigintToBytes(cap.time.start),
+                  bigintToBytes(cap.time.end),
+                ],
+              ),
+            encodePath(testSchemePath, cap.path),
+          ],
         );
       },
       decode: (enc) => {
@@ -421,7 +425,7 @@ export const testSchemeFingerprint: FingerprintScheme<
     const lengthEnc = bigintToBytes(lengthy.available);
 
     return new Uint8Array(
-      await crypto.subtle.digest("SHA-256", concat(encodedEntry, lengthEnc)),
+      await crypto.subtle.digest("SHA-256", concat([encodedEntry, lengthEnc])),
     );
   },
   fingerprintCombine(a, b) {
@@ -469,7 +473,7 @@ export const testSchemeAuthorisation: AuthorisationScheme<
 
     const hash = await crypto.subtle.digest("SHA-256", encodedEntry);
 
-    return concat(new Uint8Array([secretKey]), new Uint8Array(hash));
+    return concat([new Uint8Array([secretKey]), new Uint8Array(hash)]);
   },
   async isAuthorisedWrite(entry, token) {
     const encodedEntry = encodeEntry({
@@ -481,8 +485,7 @@ export const testSchemeAuthorisation: AuthorisationScheme<
 
     const hash = await crypto.subtle.digest("SHA-256", encodedEntry);
     const expected = concat(
-      new Uint8Array([entry.subspaceId]),
-      new Uint8Array(hash),
+      [new Uint8Array([entry.subspaceId]), new Uint8Array(hash)],
     );
 
     return equalsBytes(token, expected);
@@ -543,9 +546,7 @@ export const testSchemePai: PaiScheme<
       const pathEncoded = encodePath(testSchemePath, path);
 
       const bytes = concat(
-        new Uint8Array([pairOrTripleByte]),
-        namespaceEnc,
-        pathEncoded,
+        [new Uint8Array([pairOrTripleByte]), namespaceEnc, pathEncoded],
       );
 
       const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -562,10 +563,12 @@ export const testSchemePai: PaiScheme<
     const pathEncoded = encodePath(testSchemePath, path);
 
     const bytes = concat(
-      new Uint8Array([pairOrTripleByte]),
-      namespaceEnc,
-      subspaceEnc,
-      pathEncoded,
+      [
+        new Uint8Array([pairOrTripleByte]),
+        namespaceEnc,
+        subspaceEnc,
+        pathEncoded,
+      ],
     );
 
     const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -633,9 +636,7 @@ export const testSchemeAccessControl: AccessControlScheme<
         );
 
         return concat(
-          new Uint8Array([cap.receiver]),
-          areaInAreaLength,
-          areaInAreaEnc,
+          [new Uint8Array([cap.receiver]), areaInAreaLength, areaInAreaEnc],
         );
       },
       encodedLength: (cap, privy) => {
@@ -721,15 +722,14 @@ export const testSchemeAccessControl: AccessControlScheme<
     sign: async (_pubkey, key, bytestring) => {
       const hash = await crypto.subtle.digest("SHA-256", bytestring);
 
-      return concat(new Uint8Array([key]), new Uint8Array(hash));
+      return concat([new Uint8Array([key]), new Uint8Array(hash)]);
     },
     verify: async (pubKey, sig, bytestring) => {
       const hash = await crypto.subtle.digest("SHA-256", bytestring);
 
       return equalsBytes(
         concat(
-          new Uint8Array([pubKey]),
-          new Uint8Array(hash),
+          [new Uint8Array([pubKey]), new Uint8Array(hash)],
         ),
         sig,
       );

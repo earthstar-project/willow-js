@@ -1,4 +1,4 @@
-import { assertEquals } from "https://deno.land/std@0.204.0/assert/mod.ts";
+import { assertEquals } from "@std/assert";
 import { pack } from "./encoder.ts";
 import { unpack } from "./decoder.ts";
 

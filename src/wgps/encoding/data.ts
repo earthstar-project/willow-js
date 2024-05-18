@@ -1,13 +1,13 @@
+import { concat } from "@std/bytes";
 import {
   compactWidth,
-  concat,
   encodeCompactWidth,
   encodeEntryRelativeEntry,
-  Entry,
-  PathScheme,
-  TotalOrder,
-} from "../../../deps.ts";
-import {
+  type Entry,
+  type PathScheme,
+  type TotalOrder,
+} from "@earthstar/willow-utils";
+import type {
   MsgDataBindPayloadRequest,
   MsgDataReplyPayload,
   MsgDataSendEntry,
@@ -92,11 +92,13 @@ export function encodeDataSendEntry<
   );
 
   return concat(
-    new Uint8Array([firstByte, secondByte]),
-    encodedStaticToken,
-    encodedDynamicToken,
-    encodedOffset,
-    encodedEntry,
+    [
+      new Uint8Array([firstByte, secondByte]),
+      encodedStaticToken,
+      encodedDynamicToken,
+      encodedOffset,
+      encodedEntry,
+    ],
   );
 }
 
@@ -107,9 +109,7 @@ export function encodeDataSendPayload(msg: MsgDataSendPayload): Uint8Array {
   const encodedAmount = encodeCompactWidth(msg.amount);
 
   return concat(
-    new Uint8Array([header]),
-    encodedAmount,
-    msg.bytes,
+    [new Uint8Array([header]), encodedAmount, msg.bytes],
   );
 }
 
@@ -126,9 +126,11 @@ export function encodeDataSetEagerness(msg: MsgDataSetMetadata): Uint8Array {
     4;
 
   return concat(
-    new Uint8Array([firstByte, secondByte]),
-    encodeCompactWidth(msg.senderHandle),
-    encodeCompactWidth(msg.receiverHandle),
+    [
+      new Uint8Array([firstByte, secondByte]),
+      encodeCompactWidth(msg.senderHandle),
+      encodeCompactWidth(msg.receiverHandle),
+    ],
   );
 }
 
@@ -186,10 +188,12 @@ export function encodeDataBindPayloadRequest<
   );
 
   return concat(
-    new Uint8Array([firstByte, secondByte]),
-    encodedCapability,
-    encodedOffset,
-    encodedEntry,
+    [
+      new Uint8Array([firstByte, secondByte]),
+      encodedCapability,
+      encodedOffset,
+      encodedEntry,
+    ],
   );
 }
 
@@ -200,7 +204,6 @@ export function encodeDataReplyPayload(msg: MsgDataReplyPayload) {
   const encodedHandle = encodeCompactWidth(msg.handle);
 
   return concat(
-    new Uint8Array([header]),
-    encodedHandle,
+    [new Uint8Array([header]), encodedHandle],
   );
 }

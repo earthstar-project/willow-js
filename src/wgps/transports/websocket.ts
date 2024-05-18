@@ -1,5 +1,5 @@
 import { deferred, FIFO } from "../../../deps.ts";
-import { SyncRole, Transport } from "../types.ts";
+import type { SyncRole, Transport } from "../types.ts";
 
 const SOCKET_CLOSED = Symbol("socket_close");
 

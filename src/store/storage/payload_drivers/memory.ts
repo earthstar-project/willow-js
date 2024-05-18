@@ -1,8 +1,9 @@
-import { concat, encodeBase64 } from "../../../../deps.ts";
+import { concat } from "@std/bytes";
 import { ValidationError } from "../../../errors.ts";
-import { Payload, PayloadScheme } from "../../types.ts";
-import { PayloadDriver } from "../types.ts";
+import type { Payload, PayloadScheme } from "../../types.ts";
+import type { PayloadDriver } from "../types.ts";
 import { collectUint8Arrays } from "./util.ts";
+import { encodeBase64 } from "@std/encoding/base64";
 
 /** Stores and retrieves payloads in memory. */
 export class PayloadDriverMemory<PayloadDigest>
@@ -126,8 +127,7 @@ export class PayloadDriverMemory<PayloadDigest>
       : await collectUint8Arrays(opts.payload);
 
     const assembled = concat(
-      existingBytes.slice(0, opts.offset),
-      collectedBytes,
+      [existingBytes.slice(0, opts.offset), collectedBytes],
     );
 
     this.payloadMap.set(key, assembled);

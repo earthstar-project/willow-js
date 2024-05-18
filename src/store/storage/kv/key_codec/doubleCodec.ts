@@ -1,4 +1,4 @@
-import { Accumulator } from "./accumulator.ts";
+import type { Accumulator } from "./accumulator.ts";
 import { DOUBLE } from "./types.ts";
 const ENCODING = true;
 const DECODING = false;

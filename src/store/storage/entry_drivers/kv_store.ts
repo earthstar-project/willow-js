@@ -1,24 +1,24 @@
 import {
   decodeEntry,
   encodeEntry,
-  Entry,
-  equalsBytes,
-  PathScheme,
-} from "../../../../deps.ts";
-import {
+  type Entry,
+  type PathScheme,
+} from "@earthstar/willow-utils";
+import { equals as equalsBytes } from "@std/bytes";
+import type {
   FingerprintScheme,
   NamespaceScheme,
   PayloadScheme,
   SubspaceScheme,
 } from "../../types.ts";
 import { PrefixedDriver } from "../kv/prefixed_driver.ts";
-import { KvDriver } from "../kv/types.ts";
+import type { KvDriver } from "../kv/types.ts";
 import { SimpleKeyIterator } from "../prefix_iterators/simple_key_iterator.ts";
-import { PrefixIterator } from "../prefix_iterators/types.ts";
+import type { PrefixIterator } from "../prefix_iterators/types.ts";
 import { TripleStorage } from "../storage_3d/triple_storage.ts";
-import { Storage3d } from "../storage_3d/types.ts";
+import type { Storage3d } from "../storage_3d/types.ts";
 import { Skiplist } from "../summarisable_storage/monoid_skiplist.ts";
-import { EntryDriver, PayloadReferenceCounter } from "../types.ts";
+import type { EntryDriver, PayloadReferenceCounter } from "../types.ts";
 
 type EntryDriverKvOpts<
   NamespaceId,

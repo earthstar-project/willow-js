@@ -1,14 +1,15 @@
 import {
   compareKeys,
   isFirstKeyPrefixOfSecondKey,
-  KvBatch,
-  KvDriver,
-  KvKey,
+  type KvBatch,
+  type KvDriver,
+  type KvKey,
 } from "./types.ts";
 import { pack, unpack } from "./key_codec/kv_key_codec.ts";
 
 import { WillowError } from "../../../errors.ts";
-import { deferred, FIFO, successorBytesFixedWidth } from "../../../../deps.ts";
+import { deferred, FIFO } from "../../../../deps.ts";
+import { successorBytesFixedWidth } from "@earthstar/willow-utils";
 
 const KV_STORE = "kv";
 const END_LIST = Symbol("end_list");

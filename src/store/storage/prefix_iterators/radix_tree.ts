@@ -1,5 +1,6 @@
-import { encodeBase64, orderBytes, Path } from "../../../../deps.ts";
-import { PrefixIterator } from "./types.ts";
+import { orderBytes, type Path } from "@earthstar/willow-utils";
+import type { PrefixIterator } from "./types.ts";
+import { encodeBase64 } from "@std/encoding/base64";
 
 type RootNode<ValueType> = {
   value: ValueType | null;

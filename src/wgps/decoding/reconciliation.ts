@@ -3,19 +3,19 @@ import {
   decodeStreamEntryRelativeEntry,
   decodeStreamEntryRelativeRange3d,
   decodeStreamRange3dRelative,
-  Entry,
-  GrowingBytes,
-  PathScheme,
-  Range3d,
-} from "../../../deps.ts";
+  type Entry,
+  type GrowingBytes,
+  type PathScheme,
+  type Range3d,
+} from "@earthstar/willow-utils";
 import {
   COVERS_NONE,
   MsgKind,
-  MsgReconciliationAnnounceEntries,
-  MsgReconciliationSendEntry,
-  MsgReconciliationSendFingerprint,
-  MsgReconciliationSendPayload,
-  ReconciliationPrivy,
+  type MsgReconciliationAnnounceEntries,
+  type MsgReconciliationSendEntry,
+  type MsgReconciliationSendFingerprint,
+  type MsgReconciliationSendPayload,
+  type ReconciliationPrivy,
 } from "../types.ts";
 import { compactWidthFromEndOfByte } from "./util.ts";
 

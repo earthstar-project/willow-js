@@ -1,11 +1,10 @@
-import { Entry, FIFO } from "../../../deps.ts";
 import { WillowError } from "../../errors.ts";
 import {
-  LogicalChannel,
+  type LogicalChannel,
   MsgKind,
-  ReadCapPrivy,
-  SyncMessage,
-  SyncSchemes,
+  type ReadCapPrivy,
+  type SyncMessage,
+  type SyncSchemes,
 } from "../types.ts";
 import {
   encodeControlAbsolve,
@@ -36,7 +35,7 @@ import {
 } from "./reconciliation.ts";
 import {
   ReconcileMsgTracker,
-  ReconcileMsgTrackerOpts,
+  type ReconcileMsgTrackerOpts,
 } from "../reconciliation/reconcile_msg_tracker.ts";
 import {
   encodeDataBindPayloadRequest,
@@ -46,6 +45,8 @@ import {
   encodeDataSetEagerness,
 } from "./data.ts";
 import { msgLogicalChannels } from "../channels.ts";
+import type { Entry } from "@earthstar/willow-utils";
+import { FIFO } from "../../../deps.ts";
 
 export type EncodedSyncMessage = {
   channel: LogicalChannel | null;

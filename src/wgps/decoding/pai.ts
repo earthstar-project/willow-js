@@ -1,14 +1,14 @@
 import {
   decodeCompactWidth,
-  GrowingBytes,
-  StreamDecoder,
-} from "../../../deps.ts";
+  type GrowingBytes,
+  type StreamDecoder,
+} from "@earthstar/willow-utils";
 import {
   MsgKind,
-  MsgPaiBindFragment,
-  MsgPaiReplyFragment,
-  MsgPaiReplySubspaceCapability,
-  MsgPaiRequestSubspaceCapability,
+  type MsgPaiBindFragment,
+  type MsgPaiReplyFragment,
+  type MsgPaiReplySubspaceCapability,
+  type MsgPaiRequestSubspaceCapability,
 } from "../types.ts";
 import { compactWidthFromEndOfByte } from "./util.ts";
 

@@ -1,18 +1,18 @@
 import {
-  Area,
+  type Area,
   decodeCompactWidth,
   decodeStreamEntryInNamespaceArea,
   decodeStreamEntryRelativeEntry,
-  Entry,
-  GrowingBytes,
-  PathScheme,
-} from "../../../deps.ts";
+  type Entry,
+  type GrowingBytes,
+  type PathScheme,
+} from "@earthstar/willow-utils";
 import {
-  MsgDataBindPayloadRequest,
-  MsgDataReplyPayload,
-  MsgDataSendEntry,
-  MsgDataSendPayload,
-  MsgDataSetMetadata,
+  type MsgDataBindPayloadRequest,
+  type MsgDataReplyPayload,
+  type MsgDataSendEntry,
+  type MsgDataSendPayload,
+  type MsgDataSetMetadata,
   MsgKind,
 } from "../types.ts";
 import { compactWidthFromEndOfByte } from "./util.ts";

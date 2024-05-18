@@ -1,11 +1,10 @@
 // deno test --unstable-kv ./src/store/storage/kv/prefixed_driver.test.ts
 
-import { assertEquals } from "https://deno.land/std@0.202.0/assert/mod.ts";
-
 import { KvDriverInMemory } from "./kv_driver_in_memory.ts";
 import { KvDriverDeno } from "./kv_driver_deno.ts";
 import { PrefixedDriver } from "./prefixed_driver.ts";
-import { KvDriver } from "./types.ts";
+import type { KvDriver } from "./types.ts";
+import { assertEquals } from "@std/assert";
 
 type Operation<Key, Value> =
   | Insert<Key, Value>

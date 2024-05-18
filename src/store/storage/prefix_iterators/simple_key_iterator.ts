@@ -1,6 +1,6 @@
-import { orderPath, Path, prefixesOf } from "../../../../deps.ts";
-import { KvDriver } from "../kv/types.ts";
-import { PrefixIterator } from "./types.ts";
+import { orderPath, type Path, prefixesOf } from "@earthstar/willow-utils";
+import type { KvDriver } from "../kv/types.ts";
+import type { PrefixIterator } from "./types.ts";
 
 export class SimpleKeyIterator<ValueType> implements PrefixIterator<ValueType> {
   private kv: KvDriver;

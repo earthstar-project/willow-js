@@ -1,9 +1,11 @@
-import { encodeBase64, FIFO, Range3d } from "../../../deps.ts";
+import type { Range3d } from "@earthstar/willow-utils";
+import { encodeBase64 } from "@std/encoding/base64";
+import { FIFO } from "../../../deps.ts";
 import { WillowError } from "../../errors.ts";
-import { Store } from "../../store/store.ts";
-import { LengthyEntry, PayloadScheme } from "../../store/types.ts";
-import { HandleStore } from "../handle_store.ts";
-import { AuthorisationTokenScheme, COVERS_NONE } from "../types.ts";
+import type { Store } from "../../store/store.ts";
+import type { LengthyEntry, PayloadScheme } from "../../store/types.ts";
+import type { HandleStore } from "../handle_store.ts";
+import type { AuthorisationTokenScheme, COVERS_NONE } from "../types.ts";
 
 export type AnnouncerOpts<
   AuthorisationToken,

@@ -1,13 +1,13 @@
 // deno test --unstable-kv ./src/store/storage/summarisable_storage/skiplist_storage.test.ts
 
-import { assertEquals } from "https://deno.land/std@0.202.0/assert/mod.ts";
 import { Skiplist } from "./monoid_skiplist.ts";
 
-import { LiftingMonoid } from "./lifting_monoid.ts";
+import type { LiftingMonoid } from "./lifting_monoid.ts";
 import { KvDriverInMemory } from "../kv/kv_driver_in_memory.ts";
 import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
-import { KvDriver } from "../kv/types.ts";
+import type { KvDriver } from "../kv/types.ts";
 import { LinearStorage } from "./linear_summarisable_storage.ts";
+import { assertEquals } from "@std/assert";
 
 type Operation<Key, Value> =
   | Insert<Key, Value>

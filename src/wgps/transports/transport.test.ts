@@ -1,12 +1,12 @@
-import { delay } from "https://deno.land/std@0.202.0/async/delay.ts";
-import { concat, deferred } from "../../../deps.ts";
-import { IS_ALFIE, IS_BETTY, Transport } from "../types.ts";
+import { delay } from "@std/async";
+import { deferred } from "../../../deps.ts";
+import { IS_ALFIE, IS_BETTY, type Transport } from "../types.ts";
 import { onAsyncIterate } from "../util.ts";
-import { assertEquals } from "https://deno.land/std@0.202.0/assert/assert_equals.ts";
 import { transportPairInMemory } from "./in_memory.ts";
 import { collectUint8Arrays } from "../../store/storage/payload_drivers/util.ts";
 import { TransportWebsocket } from "./websocket.ts";
-import { assert } from "https://deno.land/std@0.202.0/assert/assert.ts";
+import { concat } from "@std/bytes";
+import { assert, assertEquals } from "@std/assert";
 
 type TestScenarioTransport = {
   name: string;
@@ -60,13 +60,13 @@ function testTransport(scenario: TestScenarioTransport) {
     let receivedAlfie = new Uint8Array(0);
 
     onAsyncIterate(alfie, (chunk) => {
-      receivedAlfie = concat(receivedAlfie, chunk);
+      receivedAlfie = concat([receivedAlfie, chunk]);
     });
 
     let receivedBetty = new Uint8Array(0);
 
     onAsyncIterate(betty, (chunk) => {
-      receivedBetty = concat(receivedBetty, chunk);
+      receivedBetty = concat([receivedBetty, chunk]);
     });
 
     await test.step("send and assert", async () => {

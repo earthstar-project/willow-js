@@ -1,6 +1,6 @@
-import { EntryDriverMemory } from "./storage/entry_drivers/memory.ts";
-import { EntryDriver, PayloadDriver } from "./storage/types.ts";
-import {
+import type { EntryDriverMemory } from "./storage/entry_drivers/memory.ts";
+import type { EntryDriver, PayloadDriver } from "./storage/types.ts";
+import type {
   EntryInput,
   IngestEvent,
   IngestPayloadEvent,
@@ -17,24 +17,24 @@ import {
   PayloadIngestEvent,
   PayloadRemoveEvent,
 } from "./events.ts";
-import {
-  AreaOfInterest,
-  areaTo3dRange,
-  bigintToBytes,
-  deferred,
-  Entry,
-  OPEN_END,
-  orderPath,
-  Path,
-  Range3d,
-  successorPath,
-  successorPrefix,
-} from "../../deps.ts";
-import { Storage3d } from "./storage/storage_3d/types.ts";
+import type { Storage3d } from "./storage/storage_3d/types.ts";
 import { WillowError } from "../errors.ts";
 import Mutex from "./mutex.ts";
 import { EntryDriverKvStore } from "./storage/entry_drivers/kv_store.ts";
 import { KvDriverInMemory } from "./storage/kv/kv_driver_in_memory.ts";
+import {
+  type AreaOfInterest,
+  areaTo3dRange,
+  bigintToBytes,
+  type Entry,
+  OPEN_END,
+  orderPath,
+  type Path,
+  type Range3d,
+  successorPath,
+  successorPrefix,
+} from "@earthstar/willow-utils";
+import { deferred } from "../../deps.ts";
 
 /** A local set of a particular namespace's authorised entries to be written to, read from, and synced with other `Store`s. Applies the concepts of the [Willow Data Model](https://willowprotocol.org/specs/data-model/index.html#data_model) to the set of entries stored inside.
  *

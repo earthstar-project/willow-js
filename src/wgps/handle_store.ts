@@ -1,4 +1,4 @@
-import { Deferred, deferred } from "../../deps.ts";
+import { type Deferred, deferred } from "../../deps.ts";
 import { ValidationError } from "../errors.ts";
 
 /** A mapping of handles to data */

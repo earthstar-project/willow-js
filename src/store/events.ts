@@ -1,5 +1,5 @@
-import { Entry } from "../../deps.ts";
-import { Payload } from "./types.ts";
+import type { Entry } from "@earthstar/willow-utils";
+import type { Payload } from "./types.ts";
 
 export class EntryPayloadSetEvent<
   NamespacePublicKey,

@@ -1,5 +1,5 @@
 import { compareKeys, isFirstKeyPrefixOfSecondKey } from "./types.ts";
-import { KvBatch, KvDriver, KvKey } from "./types.ts";
+import type { KvBatch, KvDriver, KvKey } from "./types.ts";
 
 export class KvDriverDeno implements KvDriver {
   private kv: Deno.Kv;

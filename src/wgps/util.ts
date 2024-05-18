@@ -1,4 +1,4 @@
-import { ReadAuthorisation } from "./types.ts";
+import type { ReadAuthorisation } from "./types.ts";
 
 export function isSubspaceReadAuthorisation<
   ReadCapability,

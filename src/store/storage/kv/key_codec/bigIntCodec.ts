@@ -1,4 +1,4 @@
-import { Accumulator } from "./accumulator.ts";
+import type { Accumulator } from "./accumulator.ts";
 import * as TYPE from "./types.ts";
 
 //====================================

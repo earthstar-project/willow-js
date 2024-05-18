@@ -1,4 +1,4 @@
-import { KvBatch, KvDriver, KvKey } from "./types.ts";
+import type { KvBatch, KvDriver, KvKey } from "./types.ts";
 
 export class PrefixedDriver implements KvDriver {
   private parentDriver: KvDriver;

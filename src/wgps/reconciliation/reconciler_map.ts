@@ -1,6 +1,6 @@
-import { Deferred, deferred } from "../../../deps.ts";
+import { type Deferred, deferred } from "../../../deps.ts";
 import { WgpsMessageValidationError, WillowError } from "../../errors.ts";
-import { Reconciler } from "./reconciler.ts";
+import type { Reconciler } from "./reconciler.ts";
 
 export class ReconcilerMap<
   NamespaceId,

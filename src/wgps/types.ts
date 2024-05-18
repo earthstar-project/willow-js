@@ -1,4 +1,4 @@
-import {
+import type {
   Area,
   AreaOfInterest,
   EncodingScheme,
@@ -7,8 +7,8 @@ import {
   PrivyEncodingScheme,
   Range3d,
   SignatureScheme,
-} from "../../deps.ts";
-import {
+} from "@earthstar/willow-utils";
+import type {
   AuthorisationScheme,
   FingerprintScheme,
   LengthyEntry,
@@ -16,7 +16,7 @@ import {
   PayloadScheme,
   SubspaceScheme,
 } from "../store/types.ts";
-import { PaiScheme } from "./pai/types.ts";
+import type { PaiScheme } from "./pai/types.ts";
 
 /** The peer which initiated the synchronisation session. */
 export const IS_ALFIE = Symbol("alfie");

@@ -1,4 +1,4 @@
-import { Path } from "../../../../deps.ts";
+import type { Path } from "@earthstar/willow-utils";
 
 /** A data structure which stores Path-value pairs, and can efficiently track which paths are prefixes of others. */
 export interface PrefixIterator<ValueType> {

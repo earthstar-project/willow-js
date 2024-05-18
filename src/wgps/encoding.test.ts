@@ -1,4 +1,3 @@
-import { delay } from "https://deno.land/std@0.202.0/async/delay.ts";
 import { decodeMessages } from "./decoding/decode_messages.ts";
 import { MessageEncoder } from "./encoding/message_encoder.ts";
 import { transportPairInMemory } from "./transports/in_memory.ts";
@@ -7,17 +6,17 @@ import {
   HandleType,
   LogicalChannel,
   MsgKind,
-  MsgReconciliationAnnounceEntries,
-  MsgReconciliationSendEntry,
-  MsgReconciliationTerminatePayload,
-  SyncMessage,
-  SyncSchemes,
+  type MsgReconciliationAnnounceEntries,
+  type MsgReconciliationSendEntry,
+  type MsgReconciliationTerminatePayload,
+  type SyncMessage,
+  type SyncSchemes,
 } from "./types.ts";
-import { assertEquals } from "https://deno.land/std@0.202.0/assert/assert_equals.ts";
+import { assertEquals } from "@std/assert";
 import { shuffle } from "https://deno.land/x/proc@0.21.9/mod3.ts";
 import {
   TestNamespace,
-  TestReadCap,
+  type TestReadCap,
   testSchemeAccessControl,
   testSchemeAuthorisation,
   testSchemeAuthorisationToken,
@@ -29,17 +28,18 @@ import {
   testSchemeSubspace,
   testSchemeSubspaceCap,
   TestSubspace,
-  TestSubspaceReadCap,
+  type TestSubspaceReadCap,
 } from "../test/test_schemes.ts";
 import { randomPath } from "../test/utils.ts";
 import { onAsyncIterate } from "./util.ts";
+import { delay } from "@std/async";
 import {
   ANY_SUBSPACE,
   defaultEntry,
   defaultRange3d,
   fullArea,
   OPEN_END,
-} from "../../deps.ts";
+} from "@earthstar/willow-utils";
 
 const vectors: SyncMessage<
   TestReadCap,

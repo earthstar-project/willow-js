@@ -1,13 +1,13 @@
-import { decodeCompactWidth, GrowingBytes } from "../../../deps.ts";
+import { decodeCompactWidth, type GrowingBytes } from "@earthstar/willow-utils";
 import {
   HandleType,
   LogicalChannel,
-  MsgControlAbsolve,
-  MsgControlAnnounceDropping,
-  MsgControlApologise,
-  MsgControlFree,
-  MsgControlIssueGuarantee,
-  MsgControlPlead,
+  type MsgControlAbsolve,
+  type MsgControlAnnounceDropping,
+  type MsgControlApologise,
+  type MsgControlFree,
+  type MsgControlIssueGuarantee,
+  type MsgControlPlead,
   MsgKind,
 } from "../types.ts";
 import { compactWidthFromEndOfByte } from "./util.ts";

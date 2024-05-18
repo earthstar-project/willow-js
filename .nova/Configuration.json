@@ -13,7 +13,8 @@
     "src",
     "mod.universal.ts",
     "mod.deno.ts",
-    "mod.browser.ts"
+    "mod.browser.ts",
+    "deno.json"
   ],
   "deno.unstable" : true
 }

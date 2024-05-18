@@ -1,12 +1,8 @@
-import {
-  assertEquals,
-  assertNotEquals,
-} from "https://deno.land/std@0.202.0/assert/mod.ts";
 import { transportPairInMemory } from "./transports/in_memory.ts";
-import { GetStoreFn, WgpsMessenger } from "./wgps_messenger.ts";
+import { type GetStoreFn, WgpsMessenger } from "./wgps_messenger.ts";
 import {
   TestNamespace,
-  TestReadCap,
+  type TestReadCap,
   testSchemeAccessControl,
   testSchemeAuthorisation,
   testSchemeAuthorisationToken,
@@ -19,18 +15,19 @@ import {
   testSchemeSubspaceCap,
   TestSubspace,
 } from "../test/test_schemes.ts";
-import { delay } from "https://deno.land/std@0.202.0/async/delay.ts";
-import { ANY_SUBSPACE, encodeBase64, OPEN_END, Range3d } from "../../deps.ts";
+import { delay } from "@std/async";
 import { Store } from "../store/store.ts";
-import { EntryDriver, PayloadDriver } from "../store/storage/types.ts";
-import { StoreSchemes } from "../store/types.ts";
+import type { EntryDriver, PayloadDriver } from "../store/storage/types.ts";
+import type { StoreSchemes } from "../store/types.ts";
 import { PayloadDriverMemory } from "../store/storage/payload_drivers/memory.ts";
 import { EntryDriverKvStore } from "../store/storage/entry_drivers/kv_store.ts";
 import { KvDriverInMemory } from "../store/storage/kv/kv_driver_in_memory.ts";
 import { PayloadDriverFilesystem } from "../store/storage/payload_drivers/filesystem.ts";
 import { KvDriverDeno } from "../store/storage/kv/kv_driver_deno.ts";
-import { emptyDir } from "https://deno.land/std@0.173.0/fs/empty_dir.ts";
-import { ensureDir } from "https://deno.land/std@0.188.0/fs/ensure_dir.ts";
+import { emptyDir, ensureDir } from "@std/fs";
+import { ANY_SUBSPACE, OPEN_END, type Range3d } from "@earthstar/willow-utils";
+import { assertEquals, assertNotEquals } from "@std/assert";
+import { encodeBase64 } from "@std/encoding/base64";
 
 type WgpsScenario = {
   name: string;

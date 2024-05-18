@@ -1,7 +1,6 @@
-import { assertEquals } from "https://deno.land/std@0.202.0/assert/assert_equals.ts";
-import { Path } from "../../deps.ts";
+import { assertEquals, assertNotEquals } from "@std/assert";
+import type { Path } from "@earthstar/willow-utils";
 import { decryptPath, encryptPath } from "./encryption.ts";
-import { assertNotEquals } from "https://deno.land/std@0.202.0/assert/assert_not_equals.ts";
 
 type EncryptPathVector = Path;
 

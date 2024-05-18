@@ -1,5 +1,6 @@
-import { concat, deferred } from "../../deps.ts";
-import { SyncRole, Transport } from "./types.ts";
+import { concat } from "@std/bytes";
+import { deferred } from "../../deps.ts";
+import type { SyncRole, Transport } from "./types.ts";
 
 /** A transport which only emits encoded messages, following the initial max payload size and commitment.
  *
@@ -72,7 +73,7 @@ export class ReadyTransport implements Transport {
       }
 
       if (this.receivedCommitment.state === "pending") {
-        const combined = concat(this.commitmentAcc, bytes);
+        const combined = concat([this.commitmentAcc, bytes]);
 
         if (combined.byteLength === this.challengeHashLength) {
           this.receivedCommitment.resolve(combined);

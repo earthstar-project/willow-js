@@ -1,11 +1,10 @@
-import { Area, Entry, GrowingBytes } from "../../../deps.ts";
 import {
   MsgKind,
-  MsgReconciliationTerminatePayload,
-  ReadCapPrivy,
-  SyncMessage,
-  SyncSchemes,
-  Transport,
+  type MsgReconciliationTerminatePayload,
+  type ReadCapPrivy,
+  type SyncMessage,
+  type SyncSchemes,
+  type Transport,
 } from "../types.ts";
 import { decodeCommitmentReveal } from "./commitment_reveal.ts";
 import {
@@ -35,7 +34,7 @@ import {
 } from "./reconciliation.ts";
 import {
   ReconcileMsgTracker,
-  ReconcileMsgTrackerOpts,
+  type ReconcileMsgTrackerOpts,
 } from "../reconciliation/reconcile_msg_tracker.ts";
 import {
   decodeDataBindPayloadRequest,
@@ -45,6 +44,7 @@ import {
   decodeDataSetEagerness,
 } from "./data.ts";
 import { WgpsMessageValidationError } from "../../errors.ts";
+import { type Area, type Entry, GrowingBytes } from "@earthstar/willow-utils";
 
 export type DecodeMessagesOpts<
   ReadCapability,

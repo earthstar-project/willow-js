@@ -1,7 +1,7 @@
 import { deferred } from "../../../../deps.ts";
-import { compareKeys, KeyPart, KvDriver, KvKey } from "../kv/types.ts";
-import { combineMonoid, LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
-import { SummarisableStorage } from "./types.ts";
+import { compareKeys, type KeyPart, type KvDriver, type KvKey } from "../kv/types.ts";
+import { combineMonoid, type LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
+import type { SummarisableStorage } from "./types.ts";
 
 /*
 This file implements a skiplist on top of a traditional kv-store.

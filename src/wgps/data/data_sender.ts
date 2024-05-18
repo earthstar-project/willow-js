@@ -1,14 +1,15 @@
-import { Entry, FIFO } from "../../../deps.ts";
-import { HandleStore } from "../handle_store.ts";
+import { FIFO } from "../../../deps.ts";
+import type { HandleStore } from "../handle_store.ts";
 import { WillowError } from "../../errors.ts";
-import { Payload } from "../../store/types.ts";
+import type { Payload } from "../../store/types.ts";
 import {
-  MsgDataReplyPayload,
-  MsgDataSendEntry,
-  MsgDataSendPayload,
+  type MsgDataReplyPayload,
+  type MsgDataSendEntry,
+  type MsgDataSendPayload,
   MsgKind,
 } from "../types.ts";
-import { GetStoreFn } from "../wgps_messenger.ts";
+import type { GetStoreFn } from "../wgps_messenger.ts";
+import type { Entry } from "@earthstar/willow-utils";
 
 type DataSendEntryPack<
   DynamicToken,

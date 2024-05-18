@@ -1,11 +1,7 @@
-import {
-  assert,
-  assertEquals,
-} from "https://deno.land/std@0.177.0/testing/asserts.ts";
 import { Store } from "./store.ts";
-import { crypto } from "https://deno.land/std@0.188.0/crypto/crypto.ts";
+import { crypto } from "@std/crypto";
 import {
-  TestNamespace,
+  type TestNamespace,
   testSchemeAuthorisation,
   testSchemeFingerprint,
   testSchemeNamespace,
@@ -14,7 +10,8 @@ import {
   testSchemeSubspace,
   TestSubspace,
 } from "../test/test_schemes.ts";
-import { fullArea, orderBytes, orderPath } from "../../deps.ts";
+import { assert, assertEquals } from "@std/assert";
+import { fullArea, orderBytes, orderPath } from "@earthstar/willow-utils";
 
 class TestStore extends Store<
   TestNamespace,

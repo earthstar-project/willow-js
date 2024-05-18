@@ -1,11 +1,12 @@
 import { RadixTree } from "./radix_tree.ts";
-import { PrefixIterator } from "./types.ts";
+import type { PrefixIterator } from "./types.ts";
 import { KvDriverDeno } from "../kv/kv_driver_deno.ts";
 import { SimpleKeyIterator } from "./simple_key_iterator.ts";
 import { randomPath } from "../../../test/utils.ts";
-import { concat, Path, prefixesOf } from "../../../../deps.ts";
 import { PrefixedDriver } from "../kv/prefixed_driver.ts";
-import { assertEquals } from "https://deno.land/std@0.223.0/assert/assert_equals.ts";
+import { type Path, prefixesOf } from "@earthstar/willow-utils";
+import { concat } from "@std/bytes";
+import { assertEquals } from "@std/assert";
 
 const MAX_PATH_SETS = 64;
 
@@ -86,7 +87,7 @@ Deno.test("Prefix Iterator", async (test) => {
           const idx = Math.floor(Math.random() * (remaining.size - 1));
           const remainingArr = Array.from(remaining);
           const pathToInsert = remainingArr[idx];
-          const valueToInsert = concat(...pathToInsert);
+          const valueToInsert = concat(pathToInsert);
 
           await iterator.insert(pathToInsert, valueToInsert);
 
@@ -112,7 +113,7 @@ Deno.test("Prefix Iterator", async (test) => {
         for await (
           const [path, value] of iterator.prefixesOf(pathToTest)
         ) {
-          assertEquals(concat(...path), value);
+          assertEquals(concat(path), value);
 
           actualPrefixes.push(path);
         }
@@ -125,7 +126,7 @@ Deno.test("Prefix Iterator", async (test) => {
         for await (
           const [path, value] of iterator.prefixedBy(pathToTest)
         ) {
-          assertEquals(concat(...path), value);
+          assertEquals(concat(path), value);
 
           actualPrefixedBy.push(path);
         }
@@ -151,7 +152,7 @@ Deno.test("Prefix Iterator", async (test) => {
         for await (
           const [path, value] of iterator.prefixesOf(pathToTest)
         ) {
-          assertEquals(concat(...path), value);
+          assertEquals(concat(path), value);
           actualPrefixesAfterRemoval.push(path);
         }
 
@@ -166,7 +167,7 @@ Deno.test("Prefix Iterator", async (test) => {
         for await (
           const [path, value] of iterator.prefixedBy(pathSet[splitPoint])
         ) {
-          assertEquals(concat(...path), value);
+          assertEquals(concat(path), value);
 
           actualPrefixedByAfterRemoval.push(path);
         }

@@ -1,12 +1,12 @@
-import {
+import type {
   EncodingScheme,
   Entry,
   Path,
   PathScheme,
   SuccessorFn,
   TotalOrder,
-} from "../../deps.ts";
-import { EntryDriver, PayloadDriver } from "./storage/types.ts";
+} from "@earthstar/willow-utils";
+import type { EntryDriver, PayloadDriver } from "./storage/types.ts";
 
 /** Configures the [`NamespaceId` parameter](https://willowprotocol.org/specs/data-model/index.html#NamespaceId) of the [Willow data model](https://willowprotocol.org/specs/data-model/index.html#data_model), as well as some associated parameters for the [Willow General Sync Protocol](https://willowprotocol.org/specs/sync/index.html#sync). */
 export type NamespaceScheme<NamespaceId> = EncodingScheme<NamespaceId> & {

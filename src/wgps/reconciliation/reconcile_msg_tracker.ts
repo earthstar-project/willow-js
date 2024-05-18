@@ -1,5 +1,10 @@
-import { defaultEntry, defaultRange3d, Entry, Range3d } from "../../../deps.ts";
 import {
+  defaultEntry,
+  defaultRange3d,
+  type Entry,
+  type Range3d,
+} from "@earthstar/willow-utils";
+import type {
   MsgReconciliationAnnounceEntries,
   MsgReconciliationSendEntry,
   MsgReconciliationSendFingerprint,

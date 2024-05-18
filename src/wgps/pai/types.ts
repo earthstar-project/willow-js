@@ -1,4 +1,4 @@
-import { EncodingScheme, Path } from "../../../deps.ts";
+import type { EncodingScheme, Path } from "@earthstar/willow-utils";
 
 export type FragmentTriple<NamespaceId, SubspaceId> = [
   NamespaceId,

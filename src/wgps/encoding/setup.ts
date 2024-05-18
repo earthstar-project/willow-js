@@ -1,13 +1,5 @@
-import {
-  Area,
-  compactWidth,
-  concat,
-  encodeAreaInArea,
-  encodeCompactWidth,
-  PathScheme,
-  TotalOrder,
-} from "../../../deps.ts";
-import {
+import { concat } from "@std/bytes";
+import type {
   MsgSetupBindAreaOfInterest,
   MsgSetupBindReadCapability,
   MsgSetupBindStaticToken,
@@ -15,6 +7,14 @@ import {
   ReadCapPrivy,
 } from "../types.ts";
 import { compactWidthOr } from "./util.ts";
+import {
+  type Area,
+  compactWidth,
+  encodeAreaInArea,
+  encodeCompactWidth,
+  type PathScheme,
+  type TotalOrder,
+} from "@earthstar/willow-utils";
 
 export function encodeSetupBindReadCapability<
   ReadCapability,
@@ -36,10 +36,12 @@ export function encodeSetupBindReadCapability<
   const header = compactWidthOr(0x20, handleWidth);
 
   return concat(
-    new Uint8Array([header]),
-    encodeCompactWidth(msg.handle),
-    encodeReadCapability(msg.capability, privy),
-    encodeSignature(msg.signature),
+    [
+      new Uint8Array([header]),
+      encodeCompactWidth(msg.handle),
+      encodeReadCapability(msg.capability, privy),
+      encodeSignature(msg.signature),
+    ],
   );
 }
 
@@ -77,7 +79,7 @@ export function encodeSetupBindAreaOfInterest<SubspaceId>(
     msg.areaOfInterest.maxCount === 0 &&
     msg.areaOfInterest.maxSize === BigInt(0)
   ) {
-    return concat(new Uint8Array([header]), authHandle, areaInArea);
+    return concat([new Uint8Array([header]), authHandle, areaInArea]);
   }
 
   const maxCountMask = compactWidthOr(
@@ -95,12 +97,14 @@ export function encodeSetupBindAreaOfInterest<SubspaceId>(
   const lengthBytes = maxSizeMask << 4;
 
   return concat(
-    new Uint8Array([header]),
-    authHandle,
-    areaInArea,
-    new Uint8Array([lengthBytes]),
-    encodeCompactWidth(msg.areaOfInterest.maxCount),
-    encodeCompactWidth(msg.areaOfInterest.maxSize),
+    [
+      new Uint8Array([header]),
+      authHandle,
+      areaInArea,
+      new Uint8Array([lengthBytes]),
+      encodeCompactWidth(msg.areaOfInterest.maxCount),
+      encodeCompactWidth(msg.areaOfInterest.maxSize),
+    ],
   );
 }
 
@@ -109,7 +113,6 @@ export function encodeSetupBindStaticToken<StaticToken>(
   encodeStaticToken: (token: StaticToken) => Uint8Array,
 ) {
   return concat(
-    new Uint8Array([0x30]),
-    encodeStaticToken(msg.staticToken),
+    [new Uint8Array([0x30]), encodeStaticToken(msg.staticToken)],
   );
 }

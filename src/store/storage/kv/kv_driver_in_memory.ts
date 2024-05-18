@@ -1,12 +1,12 @@
 import { RedBlackTree } from "https://deno.land/std@0.188.0/collections/red_black_tree.ts";
-import { RedBlackNode } from "https://deno.land/std@0.188.0/collections/red_black_node.ts";
+import type { RedBlackNode } from "https://deno.land/std@0.188.0/collections/red_black_node.ts";
 
 import {
   compareKeys,
   isFirstKeyPrefixOfSecondKey,
-  KvBatch,
-  KvDriver,
-  KvKey,
+  type KvBatch,
+  type KvDriver,
+  type KvKey,
 } from "./types.ts";
 
 /**

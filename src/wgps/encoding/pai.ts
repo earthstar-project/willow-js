@@ -1,16 +1,16 @@
-import { compactWidth, concat, encodeCompactWidth } from "../../../deps.ts";
-import {
+import { concat } from "@std/bytes";
+import type {
   MsgCommitmentReveal,
   MsgPaiBindFragment,
   MsgPaiReplyFragment,
   MsgPaiReplySubspaceCapability,
   MsgPaiRequestSubspaceCapability,
 } from "../types.ts";
+import { compactWidth, encodeCompactWidth } from "@earthstar/willow-utils";
 
 export function encodeCommitmentReveal(msg: MsgCommitmentReveal): Uint8Array {
   return concat(
-    new Uint8Array([0]),
-    msg.nonce,
+    [new Uint8Array([0]), msg.nonce],
   );
 }
 
@@ -19,8 +19,10 @@ export function encodePaiBindFragment<PsiGroup>(
   encodeGroupMember: (group: PsiGroup) => Uint8Array,
 ): Uint8Array {
   return concat(
-    new Uint8Array([msg.isSecondary ? 6 : 4]),
-    encodeGroupMember(msg.groupMember),
+    [
+      new Uint8Array([msg.isSecondary ? 6 : 4]),
+      encodeGroupMember(msg.groupMember),
+    ],
   );
 }
 
@@ -39,9 +41,11 @@ export function encodePaiReplyFragment<PsiGroup>(
     : 0xb;
 
   return concat(
-    new Uint8Array([header]),
-    encodeCompactWidth(msg.handle),
-    encodeGroupMember(msg.groupMember),
+    [
+      new Uint8Array([header]),
+      encodeCompactWidth(msg.handle),
+      encodeGroupMember(msg.groupMember),
+    ],
   );
 }
 
@@ -59,8 +63,7 @@ export function encodePaiRequestSubspaceCapability(
     : 0xf;
 
   return concat(
-    new Uint8Array([header]),
-    encodeCompactWidth(msg.handle),
+    [new Uint8Array([header]), encodeCompactWidth(msg.handle)],
   );
 }
 
@@ -83,9 +86,11 @@ export function encodePaiReplySubspaceCapability<
     : 0x13;
 
   return concat(
-    new Uint8Array([header]),
-    encodeCompactWidth(msg.handle),
-    encodeSubspaceCapability(msg.capability),
-    encodeSyncSubspaceSignature(msg.signature),
+    [
+      new Uint8Array([header]),
+      encodeCompactWidth(msg.handle),
+      encodeSubspaceCapability(msg.capability),
+      encodeSyncSubspaceSignature(msg.signature),
+    ],
   );
 }

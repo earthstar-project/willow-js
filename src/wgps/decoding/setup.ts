@@ -1,18 +1,18 @@
 import {
-  Area,
+  type Area,
   decodeCompactWidth,
   decodeStreamAreaInArea,
-  EncodingScheme,
-  GrowingBytes,
-  PathScheme,
-} from "../../../deps.ts";
+  type EncodingScheme,
+  type GrowingBytes,
+  type PathScheme,
+} from "@earthstar/willow-utils";
 import {
   MsgKind,
-  MsgSetupBindAreaOfInterest,
-  MsgSetupBindReadCapability,
-  MsgSetupBindStaticToken,
-  ReadCapEncodingScheme,
-  ReadCapPrivy,
+  type MsgSetupBindAreaOfInterest,
+  type MsgSetupBindReadCapability,
+  type MsgSetupBindStaticToken,
+  type ReadCapEncodingScheme,
+  type ReadCapPrivy,
 } from "../types.ts";
 import { compactWidthFromEndOfByte } from "./util.ts";
 

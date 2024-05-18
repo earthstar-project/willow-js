@@ -1,7 +1,9 @@
-import { concat, Entry, FIFO } from "../../../deps.ts";
+import { concat } from "https://deno.land/x/proc@0.21.9/mod3.ts";
+import type { Entry } from "@earthstar/willow-utils";
+import { FIFO } from "../../../deps.ts";
 import { WgpsMessageValidationError } from "../../errors.ts";
 import { onAsyncIterate } from "../util.ts";
-import { GetStoreFn } from "../wgps_messenger.ts";
+import type { GetStoreFn } from "../wgps_messenger.ts";
 
 const CANCELLATION = Symbol("cancellation");
 
@@ -133,7 +135,7 @@ class CancellableIngestion {
       if (event === CANCELLATION) {
         break;
       } else {
-        bytes = concat(bytes, event);
+        bytes = concat([bytes, event]);
 
         yield event;
       }

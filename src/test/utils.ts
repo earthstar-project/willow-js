@@ -1,5 +1,5 @@
-import { Path } from "../../deps.ts";
-import { TestNamespace, TestSubspace } from "./test_schemes.ts";
+import type { Path } from "@earthstar/willow-utils";
+import type { TestNamespace, TestSubspace } from "./test_schemes.ts";
 
 export function randomNamespace(): TestNamespace {
   return Math.floor(Math.random() * 5);

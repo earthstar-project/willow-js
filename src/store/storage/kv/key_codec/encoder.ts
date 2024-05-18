@@ -1,4 +1,4 @@
-import { KeyPart } from "./types.ts";
+import type { KeyPart } from "./types.ts";
 import { encodeBigInt, isBigInt } from "./bigIntCodec.ts";
 import { encodeDouble } from "./doubleCodec.ts";
 import { Accumulator } from "./accumulator.ts";

@@ -1,17 +1,17 @@
 import {
   ANY_SUBSPACE,
-  Area,
-  FIFO,
+  type Area,
   OPEN_END,
-  Path,
+  type Path,
   prefixesOf,
-} from "../../../deps.ts";
+} from "@earthstar/willow-utils";
+import { FIFO } from "../../../deps.ts";
 import { WgpsMessageValidationError, WillowError } from "../../errors.ts";
-import { NamespaceScheme } from "../../store/types.ts";
-import { HandleStore } from "../handle_store.ts";
-import { ReadAuthorisation, ReadCapPrivy } from "../types.ts";
+import type { NamespaceScheme } from "../../store/types.ts";
+import type { HandleStore } from "../handle_store.ts";
+import type { ReadAuthorisation, ReadCapPrivy } from "../types.ts";
 import { isSubspaceReadAuthorisation } from "../util.ts";
-import {
+import type {
   Fragment,
   FragmentKit,
   FragmentPair,

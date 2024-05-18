@@ -1,5 +1,5 @@
-import { assertEquals } from "https://deno.land/std@0.202.0/assert/mod.ts";
-import { delay } from "https://deno.land/std@0.202.0/async/delay.ts";
+import { assertEquals } from "@std/assert";
+import { delay } from "@std/async";
 import { GuaranteedQueue } from "./guaranteed_queue.ts";
 
 Deno.test("Guaranteed queue", async () => {

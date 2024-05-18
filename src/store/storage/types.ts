@@ -1,9 +1,8 @@
-import { Entry } from "../../../deps.ts";
-import { ValidationError } from "../../errors.ts";
-import { Payload } from "../types.ts";
-
-import { PrefixIterator } from "./prefix_iterators/types.ts";
-import { Storage3d } from "./storage_3d/types.ts";
+import type { Entry } from "@earthstar/willow-utils";
+import type { ValidationError } from "../../errors.ts";
+import type { Payload } from "../types.ts";
+import type { PrefixIterator } from "./prefix_iterators/types.ts";
+import type { Storage3d } from "./storage_3d/types.ts";
 
 /** Writes and reads flags indicating write operations to the store, in order to recover from errors mid-write. */
 export interface WriteAheadFlag<

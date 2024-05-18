@@ -1,9 +1,4 @@
-import {
-  assert,
-  assertEquals,
-  assertNotEquals,
-} from "https://deno.land/std@0.202.0/assert/mod.ts";
-import { PayloadDriver } from "../types.ts";
+import type { PayloadDriver } from "../types.ts";
 import { collectUint8Arrays } from "./util.ts";
 import { PayloadDriverMemory } from "./memory.ts";
 import { testSchemePayload } from "../../../test/test_schemes.ts";
@@ -11,7 +6,8 @@ import { PayloadDriverFilesystem } from "./filesystem.ts";
 import { PayloadDriverIndexedDb } from "./indexeddb.ts";
 import "https://deno.land/x/indexeddb@1.3.5/polyfill_memory.ts";
 import { notErr } from "../../../errors.ts";
-import { delay } from "https://deno.land/std@0.202.0/async/delay.ts";
+import { assert, assertEquals, assertNotEquals } from "@std/assert";
+import { delay } from "@std/async";
 
 testPayloadDriver("Memory", () => {
   return new PayloadDriverMemory(testSchemePayload);

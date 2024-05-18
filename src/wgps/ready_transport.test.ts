@@ -1,8 +1,8 @@
-import { assertEquals } from "https://deno.land/std@0.202.0/assert/mod.ts";
-import { delay } from "https://deno.land/std@0.202.0/async/mod.ts";
+import { assertEquals } from "@std/assert";
+import { delay } from "@std/async";
 import { ReadyTransport } from "./ready_transport.ts";
 import { transportPairInMemory } from "./transports/in_memory.ts";
-import { concat } from "../../deps.ts";
+import { concat } from "@std/bytes";
 
 Deno.test("Ready transport receives max payload ", async () => {
   // Happy path
@@ -18,7 +18,7 @@ Deno.test("Ready transport receives max payload ", async () => {
 
     (async () => {
       for await (const bytes of readyTransport) {
-        received = concat(received, bytes);
+        received = concat([received, bytes]);
       }
     })();
 
@@ -50,7 +50,7 @@ Deno.test("Ready transport receives max payload ", async () => {
 
     (async () => {
       for await (const bytes of readyTransport) {
-        received = concat(received, bytes);
+        received = concat([received, bytes]);
       }
     })();
 
@@ -80,7 +80,7 @@ Deno.test("Ready transport receives max payload ", async () => {
 
     (async () => {
       for await (const bytes of readyTransport) {
-        received = concat(received, bytes);
+        received = concat([received, bytes]);
       }
     })();
 
@@ -111,7 +111,7 @@ Deno.test("Ready transport receives max payload ", async () => {
 
     (async () => {
       for await (const bytes of readyTransport) {
-        received = concat(received, bytes);
+        received = concat([received, bytes]);
       }
     })();
 

@@ -1,4 +1,4 @@
-import { Path } from "../../deps.ts";
+import type { Path } from "@earthstar/willow-utils";
 
 /** Encrypt a `Path`.
  *

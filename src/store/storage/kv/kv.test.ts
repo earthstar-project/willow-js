@@ -1,19 +1,19 @@
 // deno test --unstable-kv ./src/store/storage/kv/kv.test.ts
 
 import "https://deno.land/x/indexeddb@1.3.5/polyfill_memory.ts";
-import { assertEquals } from "https://deno.land/std@0.223.0/assert/assert_equals.ts";
-import { delay } from "https://deno.land/std@0.223.0/async/delay.ts";
 
 import {
   compareKeys,
   isFirstKeyPrefixOfSecondKey,
-  KvBatch,
-  KvDriver,
-  KvKey,
+  type KvBatch,
+  type KvDriver,
+  type KvKey,
 } from "./types.ts";
 import { KvDriverInMemory } from "./kv_driver_in_memory.ts";
 import { KvDriverDeno } from "./kv_driver_deno.ts";
 import { KvDriverIndexedDB } from "./kv_driver_indexeddb.ts";
+import { assertEquals } from "@std/assert";
+import { delay } from "@std/async";
 
 Deno.test("Test control kv store", async (t) => {
   const store = new KvDriverControl();

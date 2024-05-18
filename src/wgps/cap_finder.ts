@@ -1,13 +1,9 @@
-import {
-  encodeBase64,
-  Entry,
-  entryPosition,
-  isIncludedArea,
-} from "../../deps.ts";
-import { NamespaceScheme, SubspaceScheme } from "../store/types.ts";
-import { HandleStore } from "./handle_store.ts";
-import { AccessControlScheme } from "./types.ts";
+import type { NamespaceScheme, SubspaceScheme } from "../store/types.ts";
+import type { HandleStore } from "./handle_store.ts";
+import type { AccessControlScheme } from "./types.ts";
 import { WillowError } from "../errors.ts";
+import { encodeBase64 } from "@std/encoding/base64";
+import { type Entry, entryPosition, isIncludedArea } from "@earthstar/willow-utils";
 
 /** Helps you get capabilities for given entries */
 export class CapFinder<

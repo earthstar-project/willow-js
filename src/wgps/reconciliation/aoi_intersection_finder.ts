@@ -1,7 +1,8 @@
-import { AreaOfInterest, FIFO, intersectArea } from "../../../deps.ts";
+import { type AreaOfInterest, intersectArea } from "@earthstar/willow-utils";
+import { FIFO } from "../../../deps.ts";
 import { WillowError } from "../../errors.ts";
-import { NamespaceScheme, SubspaceScheme } from "../../store/types.ts";
-import { HandleStore } from "../handle_store.ts";
+import type { NamespaceScheme, SubspaceScheme } from "../../store/types.ts";
+import type { HandleStore } from "../handle_store.ts";
 
 export type AoiIntersectionFinderOpts<NamespaceId, SubspaceId> = {
   namespaceScheme: NamespaceScheme<NamespaceId>;
