@@ -8,7 +8,7 @@
     "./browser-bundle": "./dist/willow.web.js"
   },
   "publish": {
-    "exclude": ["!./dist/willow.web.js"]
+    "exclude": ["!./dist", "./.github", "./.nova", "./debug", "./scripts"]
   },
   "tasks": {
     "test": "deno test -A --unstable-kv src",
