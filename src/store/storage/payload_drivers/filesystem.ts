@@ -1,9 +1,8 @@
 import { ValidationError, WillowError } from "../../../errors.ts";
 import type { Payload, PayloadScheme } from "../../types.ts";
 import type { PayloadDriver } from "../types.ts";
-import { join } from "https://deno.land/std@0.188.0/path/mod.ts";
-import { ensureDir } from "https://deno.land/std@0.188.0/fs/ensure_dir.ts";
-import { move } from "https://deno.land/std@0.188.0/fs/move.ts";
+import { join } from "@std/path";
+import { ensureDir, move } from "@std/fs";
 import { encodeBase32 } from "@std/encoding/base32";
 
 /** Stores and retrieves payloads from the filesystem. */

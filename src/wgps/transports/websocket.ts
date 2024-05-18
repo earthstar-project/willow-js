@@ -38,7 +38,7 @@ export class TransportWebsocket implements Transport {
     }
   }
 
-  async *[Symbol.asyncIterator]() {
+  async *[Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
     for await (const msg of this.received) {
       if (this.closed || msg === SOCKET_CLOSED) {
         break;
@@ -53,7 +53,7 @@ export class TransportWebsocket implements Transport {
     this.socket.close();
   }
 
-  get isClosed() {
+  get isClosed(): boolean {
     return this.closed;
   }
 }

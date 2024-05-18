@@ -7,14 +7,15 @@
   "co.gwil.deno.config.enableLinting" : "true",
   "co.gwil.deno.config.enableUnstable" : true,
   "deno.disablePaths" : [
-    "dist"
+
   ],
   "deno.enablePaths" : [
     "src",
     "mod.universal.ts",
     "mod.deno.ts",
     "mod.browser.ts",
-    "deno.json"
+    "deno.json",
+    "vendor"
   ],
   "deno.unstable" : true
 }

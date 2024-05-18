@@ -220,7 +220,7 @@ export class Skiplist<
     this.isSetup.resolve();
   }
 
-  async maxHeight() {
+  async maxHeight(): Promise<number> {
     await this.isSetup.promise;
 
     return this._maxHeight;

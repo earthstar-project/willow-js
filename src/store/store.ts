@@ -166,7 +166,9 @@ export class Store<
     input: EntryInput<SubspaceId>,
     /** The `AuthorisationOpts` configured by `AuthorisationScheme` to produce a valid `AuthorisationToken`, e.g. a keypair for signing.  */
     authorisation: AuthorisationOpts,
-  ) {
+  ): Promise<
+    IngestEvent<NamespaceId, SubspaceId, PayloadDigest, AuthorisationToken>
+  > {
     const timestamp = input.timestamp !== undefined
       ? input.timestamp
       : BigInt(Date.now() * 1000);

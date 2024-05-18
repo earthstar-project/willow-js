@@ -28,7 +28,7 @@ export class TransportInMemory implements Transport {
     return Promise.resolve();
   }
 
-  async *[Symbol.asyncIterator]() {
+  async *[Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
     for await (const msg of this.incoming) {
       if (msg === TRANSPORT_CLOSED) {
         break;
@@ -43,7 +43,7 @@ export class TransportInMemory implements Transport {
     this.incoming.push(TRANSPORT_CLOSED);
   }
 
-  get isClosed() {
+  get isClosed(): boolean {
     return this.closed;
   }
 }

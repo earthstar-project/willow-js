@@ -1,4 +1,4 @@
-import { concat } from "https://deno.land/x/proc@0.21.9/mod3.ts";
+import { concat } from "@std/bytes";
 import type { Entry } from "@earthstar/willow-utils";
 import { FIFO } from "fifo";
 import { WgpsMessageValidationError } from "../../errors.ts";

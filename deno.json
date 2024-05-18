@@ -4,8 +4,11 @@
   "exports": {
     ".": "./mod.universal.ts",
     "./deno": "./mod.deno.ts",
-    "./browser": "./mod.browser.ts",
-    "./browser-bundle": "/dist/willow.web.js"
+    //"./browser": "./mod.browser.ts",
+    "./browser-bundle": "./dist/willow.web.js"
+  },
+  "publish": {
+    "exclude": ["!./dist/willow.web.js"]
   },
   "tasks": {
     "test": "deno test -A --unstable-kv src",
@@ -13,7 +16,6 @@
     "bundle": "deno run --allow-all scripts/build_web_bundle.ts"
   },
   "lock": false,
-  "exclude": ["./dist"],
   "unstable": ["kv"],
   "imports": {
     "@earthstar/willow-utils": "jsr:@earthstar/willow-utils@^0.8.1",
@@ -26,8 +28,9 @@
     "@std/data-structures": "jsr:@std/data-structures@^0.224.0",
     "@std/encoding": "jsr:@std/encoding@^0.224.1",
     "@std/fs": "jsr:@std/fs@^0.229.1",
+    "@std/path": "jsr:@std/path@^0.225.1",
     "@std/streams": "jsr:@std/streams@^0.224.0",
-    "fifo": "./vendor/deno.land/x/fifo@v0.2.2/mod.ts",
-    "esbuild": "npm:esbuild@^0.21.3"
+    "esbuild": "npm:esbuild@^0.21.3",
+    "fifo": "./vendor/deno.land/x/fifo@v0.2.2/mod.ts"
   }
 }

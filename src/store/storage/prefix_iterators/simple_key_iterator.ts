@@ -9,11 +9,11 @@ export class SimpleKeyIterator<ValueType> implements PrefixIterator<ValueType> {
     this.kv = kv;
   }
 
-  insert(path: Path, value: ValueType) {
+  insert(path: Path, value: ValueType): Promise<void> {
     return this.kv.set(path, value);
   }
 
-  async remove(path: Path) {
+  async remove(path: Path): Promise<true> {
     await this.kv.delete(path);
 
     return true;

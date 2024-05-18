@@ -1,4 +1,3 @@
-import type { delay } from "@std/async";
 import { ValidationError, WillowError } from "../../../errors.ts";
 import type { Payload, PayloadScheme } from "../../types.ts";
 import type { PayloadDriver } from "../types.ts";

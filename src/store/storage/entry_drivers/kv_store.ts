@@ -18,7 +18,11 @@ import type { PrefixIterator } from "../prefix_iterators/types.ts";
 import { TripleStorage } from "../storage_3d/triple_storage.ts";
 import type { Storage3d } from "../storage_3d/types.ts";
 import { Skiplist } from "../summarisable_storage/monoid_skiplist.ts";
-import type { EntryDriver, PayloadReferenceCounter } from "../types.ts";
+import type {
+  EntryDriver,
+  PayloadReferenceCounter,
+  WriteAheadFlag,
+} from "../types.ts";
 
 type EntryDriverKvOpts<
   NamespaceId,
@@ -274,5 +278,5 @@ export class EntryDriverKvStore<
     unflagRemoval: async () => {
       await this.wafDriver.delete(["waf", "remove"]);
     },
-  };
+  } as WriteAheadFlag<NamespaceId, SubspaceId, PayloadDigest>;
 }
