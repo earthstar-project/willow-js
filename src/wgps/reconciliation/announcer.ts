@@ -1,6 +1,6 @@
 import type { Range3d } from "@earthstar/willow-utils";
 import { encodeBase64 } from "@std/encoding/base64";
-import { FIFO } from "../../../deps.ts";
+import { FIFO } from "fifo";
 import { WillowError } from "../../errors.ts";
 import type { Store } from "../../store/store.ts";
 import type { LengthyEntry, PayloadScheme } from "../../store/types.ts";

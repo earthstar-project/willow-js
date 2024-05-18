@@ -1,6 +1,6 @@
 import { concat } from "https://deno.land/x/proc@0.21.9/mod3.ts";
 import type { Entry } from "@earthstar/willow-utils";
-import { FIFO } from "../../../deps.ts";
+import { FIFO } from "fifo";
 import { WgpsMessageValidationError } from "../../errors.ts";
 import { onAsyncIterate } from "../util.ts";
 import type { GetStoreFn } from "../wgps_messenger.ts";

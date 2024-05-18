@@ -1,4 +1,4 @@
-import { FIFO } from "../../deps.ts";
+import { FIFO } from "fifo";
 
 /** A FIFO queue which does not emit data until it has received guarantees that the data will be accepted.
  *

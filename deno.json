@@ -27,6 +27,7 @@
     "@std/encoding": "jsr:@std/encoding@^0.224.1",
     "@std/fs": "jsr:@std/fs@^0.229.1",
     "@std/streams": "jsr:@std/streams@^0.224.0",
+    "fifo": "./vendor/deno.land/x/fifo@v0.2.2/mod.ts",
     "esbuild": "npm:esbuild@^0.21.3"
   }
 }

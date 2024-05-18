@@ -1,5 +1,5 @@
 import { type AreaOfInterest, intersectArea } from "@earthstar/willow-utils";
-import { FIFO } from "../../../deps.ts";
+import { FIFO } from "fifo";
 import { WillowError } from "../../errors.ts";
 import type { NamespaceScheme, SubspaceScheme } from "../../store/types.ts";
 import type { HandleStore } from "../handle_store.ts";

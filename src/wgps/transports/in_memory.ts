@@ -1,4 +1,4 @@
-import { FIFO } from "../../../deps.ts";
+import { FIFO } from "fifo";
 import { IS_ALFIE, IS_BETTY, type SyncRole, type Transport } from "../types.ts";
 
 const TRANSPORT_CLOSED = Symbol("transport_closed");

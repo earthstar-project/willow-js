@@ -1,4 +1,4 @@
-import { FIFO } from "../../../deps.ts";
+import { FIFO } from "fifo";
 import type { SyncRole, Transport } from "../types.ts";
 
 const SOCKET_CLOSED = Symbol("socket_close");
