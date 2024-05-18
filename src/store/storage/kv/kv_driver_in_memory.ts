@@ -1,5 +1,6 @@
-import { RedBlackTree } from "https://deno.land/std@0.188.0/collections/red_black_tree.ts";
-import type { RedBlackNode } from "https://deno.land/std@0.188.0/collections/red_black_node.ts";
+import { RedBlackTree } from "@std/data-structures";
+
+type RedBlackNode<PhysicalKey> = NonNullable<RedBlackTree<PhysicalKey>["root"]>;
 
 import {
   compareKeys,
