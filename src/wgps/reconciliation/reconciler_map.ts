@@ -1,4 +1,3 @@
-import { type Deferred, deferred } from "../../../deps.ts";
 import { WgpsMessageValidationError, WillowError } from "../../errors.ts";
 import type { Reconciler } from "./reconciler.ts";
 
@@ -31,7 +30,7 @@ export class ReconcilerMap<
 
   private eventuallyMap = new Map<
     string,
-    Deferred<
+    PromiseWithResolvers<
       Reconciler<
         NamespaceId,
         SubspaceId,
@@ -109,7 +108,7 @@ export class ReconcilerMap<
         this.getReconciler(aoiHandleOurs, aoiHandleTheirs),
       );
     } catch {
-      const promise = deferred<
+      const withResolvers = Promise.withResolvers<
         Reconciler<
           NamespaceId,
           SubspaceId,
@@ -121,9 +120,12 @@ export class ReconcilerMap<
         >
       >();
 
-      this.eventuallyMap.set(`${aoiHandleOurs}_${aoiHandleTheirs}`, promise);
+      this.eventuallyMap.set(
+        `${aoiHandleOurs}_${aoiHandleTheirs}`,
+        withResolvers,
+      );
 
-      return promise;
+      return withResolvers.promise;
     }
   }
 

@@ -1,5 +1,4 @@
 import { delay } from "@std/async";
-import { deferred } from "../../../deps.ts";
 import { IS_ALFIE, IS_BETTY, type Transport } from "../types.ts";
 import { onAsyncIterate } from "../util.ts";
 import { transportPairInMemory } from "./in_memory.ts";
@@ -21,7 +20,7 @@ const scenarioMemory: TestScenarioTransport = {
 const scenarioWebsocket: TestScenarioTransport = {
   name: "Websocket",
   makePair: async () => {
-    const serverSocketPromise = deferred<WebSocket>();
+    const serverSocketPromise = Promise.withResolvers<WebSocket>();
 
     const server = Deno.serve({
       handler: (req) => {
@@ -37,7 +36,7 @@ const scenarioWebsocket: TestScenarioTransport = {
 
     const clientSocket = new WebSocket("http://0.0.0.0:1099");
 
-    const serverSocket = await serverSocketPromise;
+    const serverSocket = await serverSocketPromise.promise;
 
     serverSocket.addEventListener("close", () => {
       server.shutdown();

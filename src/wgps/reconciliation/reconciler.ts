@@ -3,7 +3,7 @@ import {
   intersectRange3d,
   type Range3d,
 } from "@earthstar/willow-utils";
-import { deferred, FIFO } from "../../../deps.ts";
+import { FIFO } from "../../../deps.ts";
 import { WillowError } from "../../errors.ts";
 import type { Store } from "../../store/store.ts";
 import type { FingerprintScheme, SubspaceScheme } from "../../store/types.ts";
@@ -86,7 +86,7 @@ export class Reconciler<
     covers: bigint | typeof COVERS_NONE;
   }>();
 
-  range = deferred<Range3d<SubspaceId>>();
+  range = Promise.withResolvers<Range3d<SubspaceId>>();
 
   constructor(
     opts: ReconcilerOpts<
@@ -135,7 +135,7 @@ export class Reconciler<
   }
 
   async initiate() {
-    const intersection = await this.range;
+    const intersection = await this.range.promise;
 
     // Initialise sync with that first range.
     const { fingerprint } = await this.store.summarise(intersection);

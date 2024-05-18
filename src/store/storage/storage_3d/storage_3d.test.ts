@@ -176,7 +176,7 @@ Deno.test("Storage3d.insert, get, and remove", async (test) => {
   }
 });
 
-Deno.test.only("Storage3d.summarise", async () => {
+Deno.test("Storage3d.summarise", async () => {
   // A 'special' fingerprint which really just lists all the items it is made from.
   const specialFingerprintScheme = {
     fingerprintSingleton(

@@ -1,10 +1,10 @@
-import { deferred, FIFO } from "../../../deps.ts";
+import { FIFO } from "../../../deps.ts";
 import type { SyncRole, Transport } from "../types.ts";
 
 const SOCKET_CLOSED = Symbol("socket_close");
 
 export class TransportWebsocket implements Transport {
-  private socketOpened = deferred<true>();
+  private socketOpened = Promise.withResolvers<true>();
   private received = new FIFO<ArrayBuffer | typeof SOCKET_CLOSED>();
   private closed = false;
 
@@ -12,11 +12,11 @@ export class TransportWebsocket implements Transport {
     socket.binaryType = "arraybuffer";
 
     if (socket.readyState === socket.OPEN) {
-      this.socketOpened.resolve();
+      this.socketOpened.resolve(true);
     }
 
     socket.onopen = () => {
-      this.socketOpened.resolve();
+      this.socketOpened.resolve(true);
     };
 
     this.socket.onmessage = (event) => {
@@ -31,7 +31,7 @@ export class TransportWebsocket implements Transport {
   }
 
   async send(bytes: Uint8Array): Promise<void> {
-    await this.socketOpened;
+    await this.socketOpened.promise;
 
     if (this.socket.readyState === this.socket.OPEN) {
       this.socket.send(bytes);

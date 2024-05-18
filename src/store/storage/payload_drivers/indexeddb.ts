@@ -1,5 +1,4 @@
-import type { delay } from "https://deno.land/std@0.202.0/async/delay.ts";
-import { deferred } from "../../../../deps.ts";
+import type { delay } from "@std/async";
 import { ValidationError, WillowError } from "../../../errors.ts";
 import type { Payload, PayloadScheme } from "../../types.ts";
 import type { PayloadDriver } from "../types.ts";
@@ -11,7 +10,7 @@ const PAYLOAD_STORE = "payload";
 /** Stores and retrieves payloads from IndexedDB. */
 export class PayloadDriverIndexedDb<PayloadDigest>
   implements PayloadDriver<PayloadDigest> {
-  private db = deferred<IDBDatabase>();
+  private db = Promise.withResolvers<IDBDatabase>();
 
   constructor(readonly payloadScheme: PayloadScheme<PayloadDigest>) {
     const request = ((window as any).indexedDB as IDBFactory).open(
@@ -45,14 +44,14 @@ export class PayloadDriverIndexedDb<PayloadDigest>
 
   private getPayload(key: Uint8Array): Payload {
     const getBytes = async () => {
-      const db = await this.db;
+      const db = await this.db.promise;
 
       const payloadStore = db.transaction([PAYLOAD_STORE], "readonly")
         .objectStore(
           PAYLOAD_STORE,
         );
 
-      const didGet = deferred<Uint8Array | undefined>();
+      const didGet = Promise.withResolvers<Uint8Array | undefined>();
 
       const getOp = payloadStore.get(key);
 
@@ -64,7 +63,7 @@ export class PayloadDriverIndexedDb<PayloadDigest>
         didGet.reject();
       };
 
-      return didGet;
+      return didGet.promise;
     };
 
     return {
@@ -101,14 +100,14 @@ export class PayloadDriverIndexedDb<PayloadDigest>
   }
 
   async get(payloadHash: PayloadDigest): Promise<Payload | undefined> {
-    const db = await this.db;
+    const db = await this.db.promise;
 
     const payloadStore = db.transaction([PAYLOAD_STORE], "readonly")
       .objectStore(
         PAYLOAD_STORE,
       );
 
-    const exists = deferred<boolean>();
+    const exists = Promise.withResolvers<boolean>();
 
     const key = this.getKey(payloadHash);
 
@@ -118,7 +117,7 @@ export class PayloadDriverIndexedDb<PayloadDigest>
       exists.resolve(countReq.result > 0);
     };
 
-    const itExists = await exists;
+    const itExists = await exists.promise;
 
     if (!itExists) {
       return undefined;
@@ -128,7 +127,7 @@ export class PayloadDriverIndexedDb<PayloadDigest>
   }
 
   async erase(digest: PayloadDigest): Promise<true | ValidationError> {
-    const db = await this.db;
+    const db = await this.db.promise;
 
     const payloadStore = db.transaction([PAYLOAD_STORE], "readwrite")
       .objectStore(
@@ -139,13 +138,13 @@ export class PayloadDriverIndexedDb<PayloadDigest>
 
     const deleteOp = payloadStore.delete(key);
 
-    const didDelete = deferred<boolean>();
+    const didDelete = Promise.withResolvers<boolean>();
 
     deleteOp.onsuccess = () => {
       didDelete.resolve(deleteOp.result === undefined);
     };
 
-    const isDeleted = await didDelete;
+    const isDeleted = await didDelete.promise;
 
     if (!isDeleted) {
       return new ValidationError("No payload with that digest found.");
@@ -155,14 +154,14 @@ export class PayloadDriverIndexedDb<PayloadDigest>
   }
 
   async length(payloadHash: PayloadDigest): Promise<bigint> {
-    const db = await this.db;
+    const db = await this.db.promise;
 
     const payloadStore = db.transaction([PAYLOAD_STORE], "readonly")
       .objectStore(
         PAYLOAD_STORE,
       );
 
-    const exists = deferred<boolean>();
+    const exists = Promise.withResolvers<boolean>();
 
     const key = this.getKey(payloadHash);
 
@@ -172,7 +171,7 @@ export class PayloadDriverIndexedDb<PayloadDigest>
       exists.resolve(countReq.result > 0);
     };
 
-    const itExists = await exists;
+    const itExists = await exists.promise;
 
     if (!itExists) {
       return 0n;
@@ -194,14 +193,14 @@ export class PayloadDriverIndexedDb<PayloadDigest>
 
     const key = this.getKey(digest);
 
-    const db = await this.db;
+    const db = await this.db.promise;
 
     const payloadStore = db.transaction([PAYLOAD_STORE], "readwrite")
       .objectStore(
         PAYLOAD_STORE,
       );
 
-    const didSet = deferred<
+    const didSet = Promise.withResolvers<
       { digest: PayloadDigest; length: bigint; payload: Payload }
     >();
 
@@ -215,7 +214,7 @@ export class PayloadDriverIndexedDb<PayloadDigest>
       });
     };
 
-    return didSet;
+    return didSet.promise;
   }
 
   async receive(
@@ -226,7 +225,7 @@ export class PayloadDriverIndexedDb<PayloadDigest>
       knownDigest: PayloadDigest;
     },
   ): Promise<{ digest: PayloadDigest; length: bigint }> {
-    const db = await this.db;
+    const db = await this.db.promise;
 
     const key = this.getKey(opts.knownDigest);
 
@@ -234,7 +233,7 @@ export class PayloadDriverIndexedDb<PayloadDigest>
 
     if (opts.offset > 0) {
       // Get existing blob.
-      const didGet = deferred<Uint8Array | undefined>();
+      const didGet = Promise.withResolvers<Uint8Array | undefined>();
 
       const payloadStore = db.transaction([PAYLOAD_STORE], "readwrite")
         .objectStore(
@@ -251,7 +250,7 @@ export class PayloadDriverIndexedDb<PayloadDigest>
         didGet.reject();
       };
 
-      const justGotBytes = await didGet;
+      const justGotBytes = await didGet.promise;
 
       if (justGotBytes) {
         existingBytes = justGotBytes.slice(0, opts.offset);
@@ -273,7 +272,7 @@ export class PayloadDriverIndexedDb<PayloadDigest>
         PAYLOAD_STORE,
       );
 
-    const didSet = deferred<
+    const didSet = Promise.withResolvers<
       { digest: PayloadDigest; length: bigint }
     >();
 
@@ -286,6 +285,6 @@ export class PayloadDriverIndexedDb<PayloadDigest>
       });
     };
 
-    return didSet;
+    return didSet.promise;
   }
 }

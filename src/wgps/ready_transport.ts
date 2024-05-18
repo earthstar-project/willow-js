@@ -1,5 +1,4 @@
 import { concat } from "@std/bytes";
-import { deferred } from "../../deps.ts";
 import type { SyncRole, Transport } from "./types.ts";
 
 /** A transport which only emits encoded messages, following the initial max payload size and commitment.
@@ -12,10 +11,21 @@ export class ReadyTransport implements Transport {
 
   role: SyncRole;
 
+  private _maximumPayloadSize = Promise.withResolvers<bigint>();
+  private _receivedCommitment = Promise.withResolvers<Uint8Array>();
+
   /** The maximum payload size derived from the first byte sent over the transport. */
-  maximumPayloadSize = deferred<bigint>();
+  get maximumPayloadSize() {
+    return this._maximumPayloadSize.promise;
+  }
+
   /** The received commitment sent after the first byte over the transport */
-  receivedCommitment = deferred<Uint8Array>();
+  get receivedCommitment() {
+    return this._receivedCommitment.promise;
+  }
+
+  private isMaximumPayloadSizeFulfilled = false;
+  private isReceivedCommitmentFulfilled = false;
 
   constructor(opts: {
     transport: Transport;
@@ -24,6 +34,14 @@ export class ReadyTransport implements Transport {
     this.role = opts.transport.role;
     this.transport = opts.transport;
     this.challengeHashLength = opts.challengeHashLength;
+
+    this._maximumPayloadSize.promise.then(() => {
+      this.isMaximumPayloadSizeFulfilled = true;
+    });
+
+    this._receivedCommitment.promise.then(() => {
+      this.isReceivedCommitmentFulfilled = true;
+    });
   }
 
   send(bytes: Uint8Array): Promise<void> {
@@ -43,27 +61,27 @@ export class ReadyTransport implements Transport {
   async *[Symbol.asyncIterator]() {
     for await (const bytes of this.transport) {
       if (
-        this.maximumPayloadSize.state === "fulfilled" &&
-        this.receivedCommitment.state === "fulfilled"
+        this.isMaximumPayloadSizeFulfilled &&
+        this.isReceivedCommitmentFulfilled
       ) {
         yield bytes;
       }
 
-      if (this.maximumPayloadSize.state === "pending") {
+      if (!this.isMaximumPayloadSizeFulfilled) {
         const view = new DataView(bytes.buffer);
 
         const power = view.getUint8(0);
 
-        this.maximumPayloadSize.resolve(BigInt(2) ** BigInt(power));
+        this._maximumPayloadSize.resolve(BigInt(2) ** BigInt(power));
 
         const rest = bytes.slice(1);
 
         if (rest.byteLength < this.challengeHashLength) {
           this.commitmentAcc = rest;
         } else if (rest.byteLength === this.challengeHashLength) {
-          this.receivedCommitment.resolve(rest);
+          this._receivedCommitment.resolve(rest);
         } else {
-          this.receivedCommitment.resolve(
+          this._receivedCommitment.resolve(
             rest.slice(0, this.challengeHashLength),
           );
           yield rest.slice(this.challengeHashLength);
@@ -72,15 +90,15 @@ export class ReadyTransport implements Transport {
         continue;
       }
 
-      if (this.receivedCommitment.state === "pending") {
+      if (!this.isReceivedCommitmentFulfilled) {
         const combined = concat([this.commitmentAcc, bytes]);
 
         if (combined.byteLength === this.challengeHashLength) {
-          this.receivedCommitment.resolve(combined);
+          this._receivedCommitment.resolve(combined);
         } else if (combined.byteLength < this.challengeHashLength) {
           this.commitmentAcc = combined;
         } else {
-          this.receivedCommitment.resolve(
+          this._receivedCommitment.resolve(
             combined.slice(0, this.challengeHashLength),
           );
 

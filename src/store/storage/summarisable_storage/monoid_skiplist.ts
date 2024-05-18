@@ -1,6 +1,14 @@
-import { deferred } from "../../../../deps.ts";
-import { compareKeys, type KeyPart, type KvDriver, type KvKey } from "../kv/types.ts";
-import { combineMonoid, type LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
+import {
+  compareKeys,
+  type KeyPart,
+  type KvDriver,
+  type KvKey,
+} from "../kv/types.ts";
+import {
+  combineMonoid,
+  type LiftingMonoid,
+  sizeMonoid,
+} from "./lifting_monoid.ts";
 import type { SummarisableStorage } from "./types.ts";
 
 /*
@@ -118,7 +126,7 @@ export class Skiplist<
   private logicalValueEq: (a: LogicalValue, b: LogicalValue) => boolean;
   private kv: KvDriver;
   private _maxHeight = 0;
-  private isSetup = deferred();
+  private isSetup = Promise.withResolvers<void>();
   private monoid: LiftingMonoid<
     [LogicalKey, LogicalValue],
     [SummaryData, number]
@@ -213,7 +221,7 @@ export class Skiplist<
   }
 
   async maxHeight() {
-    await this.isSetup;
+    await this.isSetup.promise;
 
     return this._maxHeight;
   }
@@ -231,7 +239,7 @@ export class Skiplist<
       layer?: number;
     },
   ): Promise<void> {
-    await this.isSetup;
+    await this.isSetup.promise;
 
     // console.log("\n====\nentering insert for key", key, " and value ", value);
 
@@ -486,7 +494,7 @@ export class Skiplist<
   }
 
   async remove(key: LogicalKey): Promise<boolean> {
-    await this.isSetup;
+    await this.isSetup.promise;
 
     // console.log("\n====\nentering delete for key", key);
 

@@ -1,4 +1,3 @@
-import type { EntryDriverMemory } from "./storage/entry_drivers/memory.ts";
 import type { EntryDriver, PayloadDriver } from "./storage/types.ts";
 import type {
   EntryInput,
@@ -34,7 +33,6 @@ import {
   successorPath,
   successorPrefix,
 } from "@earthstar/willow-utils";
-import { deferred } from "../../deps.ts";
 
 /** A local set of a particular namespace's authorised entries to be written to, read from, and synced with other `Store`s. Applies the concepts of the [Willow Data Model](https://willowprotocol.org/specs/data-model/index.html#data_model) to the set of entries stored inside.
  *
@@ -78,7 +76,7 @@ export class Store<
     Prefingerprint
   >;
 
-  private checkedWriteAheadFlag = deferred();
+  private checkedWriteAheadFlag = Promise.withResolvers<void>();
 
   private ingestionMutex = new Mutex();
 
@@ -229,7 +227,7 @@ export class Store<
       AuthorisationToken
     >
   > {
-    await this.checkedWriteAheadFlag;
+    await this.checkedWriteAheadFlag.promise;
 
     const acquisitionId = await this.ingestionMutex.acquire();
 

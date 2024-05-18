@@ -1,4 +1,4 @@
-import { deferred, FIFO } from "../../deps.ts";
+import { FIFO } from "../../deps.ts";
 import {
   ValidationError,
   WgpsMessageValidationError,
@@ -257,8 +257,8 @@ export class WgpsMessenger<
 
   private challengeHash: (bytes: Uint8Array) => Promise<Uint8Array>;
   private nonce: Uint8Array;
-  private ourChallenge = deferred<Uint8Array>();
-  private theirChallenge = deferred<Uint8Array>();
+  private ourChallenge = Promise.withResolvers<Uint8Array>();
+  private theirChallenge = Promise.withResolvers<Uint8Array>();
 
   private schemes: SyncSchemes<
     ReadCapability,
@@ -575,7 +575,7 @@ export class WgpsMessenger<
           receiverAoiHandle,
         );
 
-        return reconciler.range;
+        return reconciler.range.promise;
       },
       getCurrentlySentEntry: () => {
         return this.currentlySentEntry;
@@ -682,7 +682,7 @@ export class WgpsMessenger<
           senderAoiHandle,
         );
 
-        return reconciler.range;
+        return reconciler.range.promise;
       },
       // TODO: this might need to be async and use handleStore.getEventually
       aoiHandlesToArea: (senderHandle, receiverHandle) => {
@@ -935,7 +935,7 @@ export class WgpsMessenger<
       const signature = await this.schemes.subspaceCap.signatures.sign(
         receiver,
         secretKey,
-        await this.ourChallenge,
+        await this.ourChallenge.promise,
       );
 
       this.encoder.encode({
@@ -961,7 +961,7 @@ export class WgpsMessenger<
         const signature = await this.schemes.accessControl.signatures.sign(
           receiver,
           receiverSecretKey,
-          await this.ourChallenge,
+          await this.ourChallenge.promise,
         );
 
         const capHandle = this.handlesCapsOurs.bind(authorisation.capability);
@@ -1202,7 +1202,7 @@ export class WgpsMessenger<
         const isValid = await this.schemes.subspaceCap.signatures.verify(
           this.schemes.subspaceCap.getReceiver(message.capability),
           message.signature,
-          await this.theirChallenge,
+          await this.theirChallenge.promise,
         );
 
         if (!isValid) {
@@ -1552,7 +1552,7 @@ export class WgpsMessenger<
     const isAuthentic = await this.schemes.accessControl.signatures.verify(
       this.schemes.accessControl.getReceiver(message.capability),
       message.signature,
-      await this.theirChallenge,
+      await this.theirChallenge.promise,
     );
 
     if (!isAuthentic) {

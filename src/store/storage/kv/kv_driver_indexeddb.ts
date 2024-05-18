@@ -8,14 +8,14 @@ import {
 import { pack, unpack } from "./key_codec/kv_key_codec.ts";
 
 import { WillowError } from "../../../errors.ts";
-import { deferred, FIFO } from "../../../../deps.ts";
+import { FIFO } from "../../../../deps.ts";
 import { successorBytesFixedWidth } from "@earthstar/willow-utils";
 
 const KV_STORE = "kv";
 const END_LIST = Symbol("end_list");
 
 export class KvDriverIndexedDB implements KvDriver {
-  private db = deferred<IDBDatabase>();
+  private db = Promise.withResolvers<IDBDatabase>();
 
   constructor() {
     const request = ((window as any).indexedDB as IDBFactory).open(
@@ -44,13 +44,13 @@ export class KvDriverIndexedDB implements KvDriver {
   }
 
   async get<Value>(key: KvKey): Promise<Value | undefined> {
-    const db = await this.db;
+    const db = await this.db.promise;
 
     const kvStore = db.transaction([KV_STORE], "readonly").objectStore(
       KV_STORE,
     );
 
-    const didGet = deferred<Value | undefined>();
+    const didGet = Promise.withResolvers<Value | undefined>();
 
     const packed = pack(key);
 
@@ -64,11 +64,11 @@ export class KvDriverIndexedDB implements KvDriver {
       didGet.reject();
     };
 
-    return didGet;
+    return didGet.promise;
   }
 
   async set<Value>(key: KvKey, value: Value): Promise<void> {
-    const db = await this.db;
+    const db = await this.db.promise;
 
     const kvStore = db.transaction([KV_STORE], "readwrite").objectStore(
       KV_STORE,
@@ -78,17 +78,17 @@ export class KvDriverIndexedDB implements KvDriver {
 
     const request = kvStore.put(value, packed.buffer);
 
-    const didSet = deferred<void>();
+    const didSet = Promise.withResolvers<void>();
 
     request.onsuccess = () => {
       didSet.resolve();
     };
 
-    return didSet;
+    return didSet.promise;
   }
 
   async delete(key: KvKey): Promise<boolean> {
-    const db = await this.db;
+    const db = await this.db.promise;
 
     const kvStore = db.transaction([KV_STORE], "readwrite").objectStore(
       KV_STORE,
@@ -98,13 +98,13 @@ export class KvDriverIndexedDB implements KvDriver {
 
     const deleteOp = kvStore.delete(packed.buffer);
 
-    const didDelete = deferred<boolean>();
+    const didDelete = Promise.withResolvers<boolean>();
 
     deleteOp.onsuccess = () => {
       didDelete.resolve(deleteOp.result === undefined);
     };
 
-    return didDelete;
+    return didDelete.promise;
   }
 
   async *list<Value>(
@@ -119,7 +119,7 @@ export class KvDriverIndexedDB implements KvDriver {
       batchSize?: number | undefined;
     } | undefined = {},
   ): AsyncIterable<{ key: KvKey; value: Value }> {
-    const db = await this.db;
+    const db = await this.db.promise;
 
     const kvStore = db.transaction([KV_STORE], "readwrite").objectStore(
       KV_STORE,
@@ -183,7 +183,7 @@ export class KvDriverIndexedDB implements KvDriver {
       end?: KvKey | undefined;
     } | undefined,
   ): Promise<void> {
-    const db = await this.db;
+    const db = await this.db.promise;
 
     const kvStore = db.transaction([KV_STORE], "readwrite").objectStore(
       KV_STORE,
@@ -195,7 +195,7 @@ export class KvDriverIndexedDB implements KvDriver {
       return Promise.resolve();
     }
 
-    const cleared = deferred<void>();
+    const cleared = Promise.withResolvers<void>();
 
     const cursor = kvStore.openCursor(openCursorParam);
 
@@ -212,11 +212,11 @@ export class KvDriverIndexedDB implements KvDriver {
       cleared.reject();
     };
 
-    return cleared;
+    return cleared.promise;
   }
 
   batch(): KvBatch {
-    return new BatchIndexedDB(this.db);
+    return new BatchIndexedDB(this.db.promise);
   }
 }
 

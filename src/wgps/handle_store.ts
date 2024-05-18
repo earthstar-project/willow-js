@@ -1,4 +1,3 @@
-import { type Deferred, deferred } from "../../deps.ts";
 import { ValidationError } from "../errors.ts";
 
 /** A mapping of handles to data */
@@ -11,7 +10,7 @@ export class HandleStore<ValueType> {
    * - The number of unprocessed messages which refer to this handle. */
   private map = new Map<bigint, [ValueType, boolean, number]>();
 
-  private eventuallyMap = new Map<bigint, Deferred<ValueType>>();
+  private eventuallyMap = new Map<bigint, PromiseWithResolvers<ValueType>>();
 
   /** Indicates whether this a store of handles we have bound, or a store of handles bound by another peer. */
   // private isOurs: boolean;
@@ -40,14 +39,14 @@ export class HandleStore<ValueType> {
     const existingPromise = this.eventuallyMap.get(handle);
 
     if (existingPromise) {
-      return existingPromise;
+      return existingPromise.promise;
     }
 
-    const newPromise = deferred<ValueType>();
+    const newPromise = Promise.withResolvers<ValueType>();
 
     this.eventuallyMap.set(handle, newPromise);
 
-    return newPromise;
+    return newPromise.promise;
   }
 
   /** Bind some data to a handle. */
