@@ -52,6 +52,7 @@ export { IS_ALFIE, IS_BETTY } from "./src/wgps/types.ts";
 export type {
   AccessControlScheme,
   AuthorisationTokenScheme,
+  ReadAuthorisation,
   SubspaceCapScheme,
   Transport,
 } from "./src/wgps/types.ts";
