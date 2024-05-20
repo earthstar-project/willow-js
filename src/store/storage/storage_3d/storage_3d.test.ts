@@ -788,10 +788,10 @@ Deno.test("Storage3d.query", async (test) => {
         >;
 
         const encodedEntry = encodeEntry({
-          namespaceScheme: testSchemeNamespace,
-          subspaceScheme: testSchemeSubspace,
+          encodeNamespace: testSchemeNamespace.encode,
+          encodeSubspace: testSchemeSubspace.encode,
           pathScheme: testSchemePath,
-          payloadScheme: testSchemePayload,
+          encodePayload: testSchemePayload.encode,
         }, removed);
 
         testSchemePayload.fromBytes(encodedEntry).then((hash) => {
@@ -832,10 +832,10 @@ Deno.test("Storage3d.query", async (test) => {
         );
 
         const encodedEntry = encodeEntry({
-          namespaceScheme: testSchemeNamespace,
-          subspaceScheme: testSchemeSubspace,
+          encodeNamespace: testSchemeNamespace.encode,
+          encodeSubspace: testSchemeSubspace.encode,
           pathScheme: testSchemePath,
-          payloadScheme: testSchemePayload,
+          encodePayload: testSchemePayload.encode,
         }, result.entry);
 
         const entryHash = await testSchemePayload.fromBytes(encodedEntry);
@@ -927,10 +927,10 @@ Deno.test("Storage3d.query", async (test) => {
           )
         ) {
           const encodedEntry = encodeEntry({
-            namespaceScheme: testSchemeNamespace,
-            subspaceScheme: testSchemeSubspace,
+            encodeNamespace: testSchemeNamespace.encode,
+            encodeSubspace: testSchemeSubspace.encode,
             pathScheme: testSchemePath,
-            payloadScheme: testSchemePayload,
+            encodePayload: testSchemePayload.encode,
           }, entry);
 
           const entryHash = await testSchemePayload.fromBytes(encodedEntry);

@@ -241,10 +241,10 @@ export class EntryDriverKvStore<
       authTokenHash: PayloadDigest,
     ) => {
       const entryEncoded = encodeEntry({
-        namespaceScheme: this.namespaceScheme,
-        subspaceScheme: this.subspaceScheme,
+        encodeNamespace: this.namespaceScheme.encode,
+        encodeSubspace: this.subspaceScheme.encode,
         pathScheme: this.pathScheme,
-        payloadScheme: this.payloadScheme,
+        encodePayload: this.payloadScheme.encode,
       }, entry);
 
       const authHashEncoded = this.payloadScheme.encode(authTokenHash);
@@ -262,10 +262,10 @@ export class EntryDriverKvStore<
 
     flagRemoval: (entry: Entry<NamespaceId, SubspaceId, PayloadDigest>) => {
       const entryEncoded = encodeEntry({
-        namespaceScheme: this.namespaceScheme,
-        subspaceScheme: this.subspaceScheme,
+        encodeNamespace: this.namespaceScheme.encode,
+        encodeSubspace: this.subspaceScheme.encode,
         pathScheme: this.pathScheme,
-        payloadScheme: this.payloadScheme,
+        encodePayload: this.payloadScheme.encode,
       }, entry);
 
       return this.wafDriver.set(["waf", "remove"], entryEncoded);

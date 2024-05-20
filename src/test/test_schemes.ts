@@ -416,10 +416,10 @@ export const testSchemeFingerprint: FingerprintScheme<
   neutralFinalised: new Uint8Array(32),
   async fingerprintSingleton(lengthy) {
     const encodedEntry = encodeEntry({
-      namespaceScheme: testSchemeNamespace,
-      subspaceScheme: testSchemeSubspace,
+      encodeNamespace: testSchemeNamespace.encode,
+      encodeSubspace: testSchemeSubspace.encode,
       pathScheme: testSchemePath,
-      payloadScheme: testSchemePayload,
+      encodePayload: testSchemePayload.encode,
     }, lengthy.entry);
 
     const lengthEnc = bigintToBytes(lengthy.available);
@@ -465,10 +465,10 @@ export const testSchemeAuthorisation: AuthorisationScheme<
 > = {
   async authorise(entry, secretKey) {
     const encodedEntry = encodeEntry({
-      namespaceScheme: testSchemeNamespace,
-      subspaceScheme: testSchemeSubspace,
+      encodeNamespace: testSchemeNamespace.encode,
+      encodeSubspace: testSchemeSubspace.encode,
       pathScheme: testSchemePath,
-      payloadScheme: testSchemePayload,
+      encodePayload: testSchemePayload.encode,
     }, entry);
 
     const hash = await crypto.subtle.digest("SHA-256", encodedEntry);
@@ -477,10 +477,10 @@ export const testSchemeAuthorisation: AuthorisationScheme<
   },
   async isAuthorisedWrite(entry, token) {
     const encodedEntry = encodeEntry({
-      namespaceScheme: testSchemeNamespace,
-      subspaceScheme: testSchemeSubspace,
+      encodeNamespace: testSchemeNamespace.encode,
+      encodeSubspace: testSchemeSubspace.encode,
       pathScheme: testSchemePath,
-      payloadScheme: testSchemePayload,
+      encodePayload: testSchemePayload.encode,
     }, entry);
 
     const hash = await crypto.subtle.digest("SHA-256", encodedEntry);
