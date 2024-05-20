@@ -5,10 +5,11 @@ written in TypeScript.
 
 ## API
 
-API documentation can be found here:
+This module is published on JSR. Please see the
+[@earthstar/willow page](https://jsr.io/@earthstar/willow) for installation
+instructions.
 
-- [Browser APIs](https://deno.land/x/willow@0.2.1/mod.browser.ts?doc=)
-- [Deno APIs](https://deno.land/x/willow@0.2.1/mod.deno.ts?doc=)
+API documentation can be found [here](https://jsr.io/@earthstar/willow).
 
 ## Overview
 
