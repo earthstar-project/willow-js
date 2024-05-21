@@ -3,7 +3,8 @@
   "version": "0.3.6",
   "exports": {
     ".": "./mod.universal.ts",
-    "./deno": "./mod.deno.ts"
+    "./deno": "./mod.deno.ts",
+    "./browser": "./mod.browser.ts"
   },
   "publish": {
     "exclude": ["!./dist", "./.github", "./.nova", "./debug", "./scripts"]
@@ -30,5 +31,8 @@
     "@std/streams": "jsr:@std/streams@^0.224.0",
     "esbuild": "npm:esbuild@^0.21.3",
     "fifo": "./vendor/deno.land/x/fifo@v0.2.2/mod.ts"
+  },
+  "compilerOptions": {
+    "lib": ["dom", "deno.window", "deno.unstable"]
   }
 }
