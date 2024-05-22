@@ -108,6 +108,7 @@ export type KvBatch = {
   commit: () => Promise<void>;
 };
 
+/** A generic interface for writing to and reading from an ordered key-value store. */
 export interface KvDriver {
   get<Value>(key: KvKey): Promise<Value | undefined>;
   set<Value>(key: KvKey, value: Value): Promise<void>;

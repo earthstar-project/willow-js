@@ -1,4 +1,12 @@
-// Willow data model
+/**
+ * [Willow](https://willowprotocol.org) is a family of protocols for peer-to-peer data stores. This module provides implementations of the [Willow Data Model](https://willowprotocol.org/specs/data-model/index.html#data_model) and the [Willow General Purpose Sync Protocol](https://willowprotocol.org/specs/sync/index.html#sync).
+ *
+ * This module — just like the specs it is based on — is highly parametrised. It exports many low-level primitives for others to build their own protocols with.
+ *
+ * For more information on how to configure these parameters, please see the README.
+ *
+ * @module
+ */
 
 export type {
   AuthorisationScheme,
@@ -31,6 +39,8 @@ export * from "./src/store/storage/kv/kv_driver_in_memory.ts";
 export * from "./src/store/storage/payload_drivers/memory.ts";
 
 export * from "./src/store/storage/prefix_iterators/types.ts";
+export * from "./src/store/storage/prefix_iterators/simple_key_iterator.ts";
+export * from "./src/store/storage/prefix_iterators/radix_tree.ts";
 
 export type {
   RangeOfInterest,
@@ -45,7 +55,12 @@ export {
 
 // Encryption
 
-export * from "./src/utils/encryption.ts";
+export {
+  decryptPath,
+  decryptPathAtOffset,
+  encryptPath,
+  encryptPathAtOffset,
+} from "./src/utils/encryption.ts";
 
 // Willow General Purpose Sync Protocol
 export { IS_ALFIE, IS_BETTY } from "./src/wgps/types.ts";

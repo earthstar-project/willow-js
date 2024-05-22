@@ -1,5 +1,7 @@
 import type { KvBatch, KvDriver, KvKey } from "./types.ts";
 
+/** Takes an existing {@link KvDriver} and modifies all write operations so that each {@linkcode KvKey} is prefixed with the the given prefix.
+ */
 export class PrefixedDriver implements KvDriver {
   private parentDriver: KvDriver;
   private prefix: KvKey;

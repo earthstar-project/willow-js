@@ -118,6 +118,7 @@ export type SkiplistOpts<
   monoid: LiftingMonoid<[LogicalKey, LogicalValue], SummaryData>;
 };
 
+/** A monoid skiplist used for summarising ranges of {@linkcode LogicalValue} into {@linkcode SummaryData} */
 export class Skiplist<
   LogicalKey extends KvKey,
   LogicalValue,

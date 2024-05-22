@@ -1,6 +1,7 @@
 import { compareKeys, isFirstKeyPrefixOfSecondKey } from "./types.ts";
 import type { KvBatch, KvDriver, KvKey } from "./types.ts";
 
+/** Implements {@linkcode KvDriver} on top of {@linkcode Deno.Kv}. */
 export class KvDriverDeno implements KvDriver {
   private kv: Deno.Kv;
 

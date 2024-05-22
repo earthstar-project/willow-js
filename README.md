@@ -106,6 +106,10 @@ of optional enhancements yet to be implemented:
   field of `ReconciliationSendFingerprint` and `ReconciliationAnnounceEntries`
 - 🌶🌶 Make `WgpsMessenger`'s resources user configurable (currently guarantees
   effectively infinite memory to the other peer).
+- 🌶🌶 Add events to `WgpsMessenger` so that the progress of a sync session can be
+  tracked.
+- 🌶🌶 Make `WgpsMessenger` able to add and remove `ReadAuthorisation` during a
+  sync session.
 - 🌶🌶🌶 Post-reconciliation forwarding of messages using a push-lazy-push
   multicast tree (plumtree), `DataSetMetadata`, and `DataSendEntry`.
 - 🌶🌶🌶 Make WgpsMessenger intelligently free handles no longer in use via
