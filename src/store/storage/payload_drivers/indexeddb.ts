@@ -6,7 +6,7 @@ import { concat } from "@std/bytes";
 
 const PAYLOAD_STORE = "payload";
 
-/** Stores and retrieves payloads from IndexedDB. */
+/** Implements {@linkcode PayloadDriver} on top of [IndexedDB](https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API). */
 export class PayloadDriverIndexedDb<PayloadDigest>
   implements PayloadDriver<PayloadDigest> {
   private db = Promise.withResolvers<IDBDatabase>();

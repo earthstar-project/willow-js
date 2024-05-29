@@ -3,6 +3,7 @@ import { IS_ALFIE, IS_BETTY, type SyncRole, type Transport } from "../types.ts";
 
 const TRANSPORT_CLOSED = Symbol("transport_closed");
 
+/** A {@linkcode Transport} which transports data in-memory. */
 export class TransportInMemory implements Transport {
   private incoming: FIFO<Uint8Array | typeof TRANSPORT_CLOSED>;
   private outgoing: FIFO<Uint8Array | typeof TRANSPORT_CLOSED>;
@@ -48,6 +49,7 @@ export class TransportInMemory implements Transport {
   }
 }
 
+/** Create a linked pair of {@linkcode TransportInMemory}. */
 export function transportPairInMemory(): [
   TransportInMemory,
   TransportInMemory,

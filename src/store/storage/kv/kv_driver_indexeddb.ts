@@ -13,6 +13,7 @@ import { successorBytesFixedWidth } from "@earthstar/willow-utils";
 const KV_STORE = "kv";
 const END_LIST = Symbol("end_list");
 
+/** Implements {@linkcode KvDriver} on top of [IndexedDB](https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API). */
 export class KvDriverIndexedDB implements KvDriver {
   private db = Promise.withResolvers<IDBDatabase>();
 

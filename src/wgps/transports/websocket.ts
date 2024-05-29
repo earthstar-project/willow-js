@@ -3,6 +3,7 @@ import type { SyncRole, Transport } from "../types.ts";
 
 const SOCKET_CLOSED = Symbol("socket_close");
 
+/** A {@linkcode Transport} implemented over [Websockets](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API). */
 export class TransportWebsocket implements Transport {
   private socketOpened = Promise.withResolvers<true>();
   private received = new FIFO<ArrayBuffer | typeof SOCKET_CLOSED>();

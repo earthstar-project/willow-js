@@ -1,3 +1,4 @@
+/** Ordered storage with the capability to summarise arbitrary ranges of data into a single value. */
 export interface SummarisableStorage<LogicalKey, LogicalValue, SummaryData> {
   get(key: LogicalKey): Promise<LogicalValue | undefined>;
   insert(key: LogicalKey, value: LogicalValue): Promise<void>;
