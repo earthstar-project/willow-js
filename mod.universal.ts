@@ -1,10 +1,13 @@
 /**
  * [Willow](https://willowprotocol.org) is a family of protocols for peer-to-peer data stores. This module provides implementations of the [Willow Data Model](https://willowprotocol.org/specs/data-model/index.html#data_model) and the [Willow General Purpose Sync Protocol](https://willowprotocol.org/specs/sync/index.html#sync).
  *
- * This module — just like the specs it is based on — is highly parametrised. It exports many low-level primitives for others to build their own protocols with.
+ * This module — just like the specs it is based on — is highly parametrised. It exports many low-level primitives for others to build their own protocols with. For more information on how to configure these parameters, please see the README.
  *
- * For more information on how to configure these parameters, please see the README.
- *
+ * Implementations of the following Willow specifications are available:
+ * - {@linkcode Store} - [Willow Data Model](https://willowprotocol.org/specs/data-model/index.html#data_model)
+ * - {@linkcode WgpsMessenger } - [Willow General Purpose Sync protocol](https://willowprotocol.org/specs/sync/index.html#sync)
+ * - {@linkcode createDrop}, {@linkcode ingestDrop} - [Willow Sideloading protocol](https://willowprotocol.org/specs/sideloading/index.html#sideloading)
+
  * @module
  */
 
@@ -76,6 +79,16 @@ export * from "./src/wgps/transports/in_memory.ts";
 export * from "./src/wgps/transports/websocket.ts";
 
 export { type PaiScheme } from "./src/wgps/pai/types.ts";
+
+// Sideloading
+
+export {
+  createDrop,
+  DropContentsStream,
+  type DropContentsStreamOpts,
+  type DropOpts,
+} from "./src/sideload/create_drop.ts";
+export { ingestDrop, type IngestDropOpts } from "./src/sideload/ingest_drop.ts";
 
 // Errors
 
