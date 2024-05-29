@@ -9,14 +9,18 @@ This module is published on JSR. Please see the
 [@earthstar/willow page](https://jsr.io/@earthstar/willow) for installation
 instructions.
 
-API documentation can be found [here](https://jsr.io/@earthstar/willow).
+API documentation can be found [here](https://jsr.io/@earthstar/willow/doc).
 
 ## Overview
 
-`willow-js` includes a `Store` compliant with the
-[Willow Data model](https://willowprotocol.org/specs/data-model/index.html#data_model),
-and a `WgpsMessenger` which syncs data between two stores via the
-[Willow General Purpose Sync Protocol](https://willowprotocol.org/specs/sync/index.html#sync).
+`willow-js` includes:
+
+- A `Store` compliant with the
+  [Willow Data model](https://willowprotocol.org/specs/data-model/index.html#data_model),
+- A `WgpsMessenger` which syncs data between two stores via the
+  [Willow General Purpose Sync Protocol](https://willowprotocol.org/specs/sync/index.html#sync),
+- and `createDrop` and `ingestDrop` compliant with the
+  [Willow Sideloading protocol](https://willowprotocol.org/specs/sideloading/index.html#sideloading).
 
 This is a low-level module for people to build their own protocols on top of,
 like [Earthstar](https://earthstar-project.org). It is an _extremely_ generic
@@ -99,6 +103,8 @@ of optional enhancements yet to be implemented:
 
 - 🌶 Make WgpsMessenger send payloads below `maximum_payload_size` during
   reconciliation via `ReconciliationSendPayload`
+- 🌶 Make it possible to configure an upper byte length limit over which payloads
+  are not requested.
 - 🌶 Make the threshold at which 3d range-based reconciliation stop comparing
   fingerprints and just return entries user-configurable.
 - 🌶 A WebRTC `Transport`.
@@ -114,10 +120,6 @@ of optional enhancements yet to be implemented:
   multicast tree (plumtree), `DataSetMetadata`, and `DataSendEntry`.
 - 🌶🌶🌶 Make WgpsMessenger intelligently free handles no longer in use via
   `ControlFree`
-
-### Miscellaneous
-
-- 🌶 NPM compatible distribution.
 
 ## Dev
 
