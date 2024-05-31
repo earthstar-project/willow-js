@@ -31,10 +31,10 @@ const scenarioWebsocket: TestScenarioTransport = {
         return response;
       },
       hostname: "0.0.0.0",
-      port: 1099,
+      port: 0,
     });
 
-    const clientSocket = new WebSocket("http://0.0.0.0:1099");
+    const clientSocket = new WebSocket(`http://0.0.0.0:${server.addr.port}`);
 
     const serverSocket = await serverSocketPromise.promise;
 
