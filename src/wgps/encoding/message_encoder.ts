@@ -46,7 +46,7 @@ import {
 } from "./data.ts";
 import { msgLogicalChannels } from "../channels.ts";
 import type { Entry } from "@earthstar/willow-utils";
-import { FIFO } from "fifo";
+import { FIFO } from "@korkje/fifo";
 
 export type EncodedSyncMessage = {
   channel: LogicalChannel | null;

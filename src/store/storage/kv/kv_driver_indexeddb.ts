@@ -7,7 +7,7 @@ import {
 } from "./types.ts";
 import { pack, unpack } from "./key_codec/kv_key_codec.ts";
 import { WillowError } from "../../../errors.ts";
-import { FIFO } from "fifo";
+import { FIFO } from "@korkje/fifo";
 import { successorBytesFixedWidth } from "@earthstar/willow-utils";
 
 const KV_STORE = "kv";

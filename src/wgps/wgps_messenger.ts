@@ -1,4 +1,4 @@
-import { FIFO } from "fifo";
+import { FIFO } from "@korkje/fifo";
 import {
   ValidationError,
   WgpsMessageValidationError,

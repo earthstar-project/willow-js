@@ -1,6 +1,6 @@
 import { concat } from "@std/bytes";
 import type { Entry } from "@earthstar/willow-utils";
-import { FIFO } from "fifo";
+import { FIFO } from "@korkje/fifo";
 import { WgpsMessageValidationError } from "../../errors.ts";
 import { onAsyncIterate } from "../util.ts";
 import type { GetStoreFn } from "../wgps_messenger.ts";

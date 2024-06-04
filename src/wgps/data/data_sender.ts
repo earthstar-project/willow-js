@@ -1,4 +1,4 @@
-import { FIFO } from "fifo";
+import { FIFO } from "@korkje/fifo";
 import type { HandleStore } from "../handle_store.ts";
 import { WillowError } from "../../errors.ts";
 import type { Payload } from "../../store/types.ts";

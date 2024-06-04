@@ -3,7 +3,7 @@ import {
   intersectRange3d,
   type Range3d,
 } from "@earthstar/willow-utils";
-import { FIFO } from "fifo";
+import { FIFO } from "@korkje/fifo";
 import { WillowError } from "../../errors.ts";
 import type { Store } from "../../store/store.ts";
 import type { FingerprintScheme, SubspaceScheme } from "../../store/types.ts";

@@ -8,7 +8,7 @@ import {
 import type { Store } from "../store/store.ts";
 import type { GetStoreFn } from "../wgps/wgps_messenger.ts";
 import { ValidationError } from "../errors.ts";
-import FIFO from "fifo";
+import FIFO from "@korkje/fifo";
 import type {
   NamespaceScheme,
   PayloadScheme,

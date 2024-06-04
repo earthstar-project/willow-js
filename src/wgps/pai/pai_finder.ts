@@ -5,7 +5,7 @@ import {
   type Path,
   prefixesOf,
 } from "@earthstar/willow-utils";
-import { FIFO } from "fifo";
+import { FIFO } from "@korkje/fifo";
 import { WgpsMessageValidationError, WillowError } from "../../errors.ts";
 import type { NamespaceScheme } from "../../store/types.ts";
 import type { HandleStore } from "../handle_store.ts";
