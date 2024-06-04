@@ -133,8 +133,6 @@ export class ReconcilerMap<
     const innerMap = this.map.get(aoiHandleOurs);
 
     if (!innerMap) {
-      console.log("oh shit!!!");
-
       throw new WillowError(
         "Could not dereference one of our AOI handles to a reconciler",
       );
