@@ -26,6 +26,7 @@ export class EntryPayloadSetEvent<
   }
 }
 
+/** Emitted after a {@linkcode Store} attempts to ingest an {@linkcode Entry}. */
 export class EntryIngestEvent<
   NamespacePublicKey,
   SubspacePublicKey,
@@ -50,6 +51,7 @@ export class EntryIngestEvent<
   }
 }
 
+/** Emitted after a {@linkcode Store} attempts to ingest a payload. */
 export class PayloadIngestEvent<
   NamespacePublicKey,
   SubspacePublicKey,
@@ -75,6 +77,7 @@ export class PayloadIngestEvent<
   }
 }
 
+/** Emitted after a {@linkcode Store} removes an {@linkcode Entry}. */
 export class EntryRemoveEvent<
   NamespacePublicKey,
   SubspacePublicKey,
@@ -105,6 +108,7 @@ export class EntryRemoveEvent<
   }
 }
 
+/** Emitted after a {@linkcode Store} removes a payload. */
 export class PayloadRemoveEvent<
   NamespacePublicKey,
   SubspacePublicKey,
