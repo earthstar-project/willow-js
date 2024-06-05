@@ -17,11 +17,19 @@ export class PayloadIngester<
   PayloadDigest,
   AuthorisationOpts,
 > {
-  private currentIngestion = new FIFO<Uint8Array | typeof CANCELLATION>();
-  private currentEntry:
-    | Entry<NamespaceId, SubspaceId, PayloadDigest>
-    | undefined;
-  private currentlyReceivedLength = 0n;
+  private currentIngestion: {
+    kind: "active" | "cancelled";
+    fifo: FIFO<Uint8Array | typeof CANCELLATION>;
+    receivedLength: bigint;
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+  } | {
+    kind: "pending";
+    entry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
+  } | {
+    kind: "uninitialised";
+  } = {
+    kind: "uninitialised",
+  };
 
   private events = new FIFO<
     Uint8Array | {
@@ -55,41 +63,57 @@ export class PayloadIngester<
 
     onAsyncIterate(this.events, async (event) => {
       if (event === CANCELLATION) {
-        this.currentIngestion.push(CANCELLATION);
+        if (this.currentIngestion.kind === "active") {
+          this.currentIngestion.fifo.push(CANCELLATION);
+          this.currentIngestion.kind = "cancelled";
+        }
       } else if ("entry" in event) {
-        this.currentIngestion.push(CANCELLATION);
-        this.currentIngestion = new FIFO();
+        if (this.currentIngestion.kind === "active") {
+          this.currentIngestion.fifo.push(CANCELLATION);
+        }
 
-        const store = await opts.getStore(event.entry.namespaceId);
-
-        this.currentEntry = event.entry;
-        this.currentlyReceivedLength = 0n;
-
-        store.ingestPayload({
-          path: event.entry.path,
-          subspace: event.entry.subspaceId,
-          timestamp: event.entry.timestamp,
-        }, new CancellableIngestion(this.currentIngestion)).then(
-          (ingestEvent) => {
-            if (
-              ingestEvent.kind === "failure" &&
-              this.currentlyReceivedLength === event.entry.payloadLength
-            ) {
-              throw new WgpsMessageValidationError(
-                "Ingestion failed: " + ingestEvent.reason,
-              );
-            }
-          },
-        );
+        this.currentIngestion = {
+          kind: "pending",
+          entry: event.entry,
+        };
       } else {
-        const transformed = this.processReceivedPayload(
-          event,
-          this.currentEntry!.payloadLength,
-        );
+        if (this.currentIngestion.kind === "active") {
+          const transformed = this.processReceivedPayload(
+            event,
+            this.currentIngestion.entry.payloadLength,
+          );
 
-        this.currentlyReceivedLength += BigInt(transformed.byteLength);
+          this.currentIngestion.receivedLength += BigInt(
+            transformed.byteLength,
+          );
+          this.currentIngestion.fifo.push(transformed);
+        } else if (this.currentIngestion.kind === "pending") {
+          const { entry } = this.currentIngestion;
 
-        this.currentIngestion.push(transformed);
+          const store = await opts.getStore(entry.namespaceId);
+
+          const fifo = new FIFO<Uint8Array | typeof CANCELLATION>();
+
+          const transformed = this.processReceivedPayload(
+            event,
+            this.currentIngestion.entry.payloadLength,
+          );
+
+          fifo.push(transformed);
+
+          store.ingestPayload({
+            path: entry.path,
+            subspace: entry.subspaceId,
+            timestamp: entry.timestamp,
+          }, new CancellableIngestion(fifo));
+
+          this.currentIngestion = {
+            kind: "active",
+            receivedLength: BigInt(transformed.byteLength),
+            entry,
+            fifo,
+          };
+        }
       }
     });
   }
