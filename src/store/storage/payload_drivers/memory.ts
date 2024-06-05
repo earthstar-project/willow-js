@@ -8,6 +8,7 @@ import { encodeBase64 } from "@std/encoding/base64";
 /** Stores and retrieves payloads in memory. */
 export class PayloadDriverMemory<PayloadDigest>
   implements PayloadDriver<PayloadDigest> {
+  private partialMap = new Map<string, Uint8Array>();
   private payloadMap = new Map<string, Uint8Array>();
 
   private getKey(payloadHash: PayloadDigest) {
@@ -115,12 +116,19 @@ export class PayloadDriverMemory<PayloadDigest>
     opts: {
       payload: AsyncIterable<Uint8Array> | Uint8Array;
       offset: number;
-      knownLength: bigint;
-      knownDigest: PayloadDigest;
+      expectedLength: bigint;
+      expectedDigest: PayloadDigest;
     },
-  ): Promise<{ digest: PayloadDigest; length: bigint }> {
-    const key = this.getKey(opts.knownDigest);
-    const existingBytes = this.payloadMap.get(key) || new Uint8Array();
+  ): Promise<
+    {
+      digest: PayloadDigest;
+      length: bigint;
+      commit: (isCompletePayload: boolean) => Promise<void>;
+      reject: () => Promise<void>;
+    }
+  > {
+    const finalKey = this.getKey(opts.expectedDigest);
+    const existingBytes = this.partialMap.get(finalKey) || new Uint8Array();
 
     const collectedBytes = opts.payload instanceof Uint8Array
       ? opts.payload
@@ -130,13 +138,23 @@ export class PayloadDriverMemory<PayloadDigest>
       [existingBytes.slice(0, opts.offset), collectedBytes],
     );
 
-    this.payloadMap.set(key, assembled);
-
     const digest = await this.payloadScheme.fromBytes(assembled);
 
     return {
       digest,
       length: BigInt(assembled.byteLength),
+      commit: (isCompletePayload) => {
+        if (isCompletePayload) {
+          this.payloadMap.set(finalKey, assembled);
+          return Promise.resolve();
+        }
+
+        this.partialMap.set(finalKey, assembled);
+        return Promise.resolve();
+      },
+      reject: () => {
+        return Promise.resolve();
+      },
     };
   }
 }

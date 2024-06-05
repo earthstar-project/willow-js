@@ -687,6 +687,43 @@ Deno.test("Store.ingestPayload", async (test) => {
 
     assert(orderBytes(payload, retrievedPayload) === 0);
   });
+
+  await test.step("does not report a no-op if there only a partial payload is held", async () => {
+    const store = new TestStore();
+    const otherStore = new TestStore();
+
+    const payload = new Uint8Array(32);
+
+    crypto.getRandomValues(payload);
+
+    const res = await otherStore.set({
+      path: [new Uint8Array([0, 2])],
+      payload,
+      subspace: alfie,
+    }, alfie);
+
+    assert(res.kind === "success");
+
+    const res2 = await store.ingestEntry(res.entry, res.authToken);
+
+    assert(res2.kind === "success");
+
+    const res3 = await store.ingestPayload(
+      {
+        path: res.entry.path,
+        subspace: res.entry.subspaceId,
+        timestamp: res.entry.timestamp,
+      },
+      new Blob([payload.subarray(0, 8)]).stream(),
+      true,
+    );
+
+    assert(res3.kind === "success");
+
+    const result = await store.getPayload(res.entry);
+
+    assertEquals(result, undefined);
+  });
 });
 
 // ==================================

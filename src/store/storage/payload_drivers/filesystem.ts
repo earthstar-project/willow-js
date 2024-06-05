@@ -160,19 +160,35 @@ export class PayloadDriverFilesystem<PayloadDigest>
     opts: {
       payload: AsyncIterable<Uint8Array> | Uint8Array;
       offset: number;
-      knownLength: bigint;
-      knownDigest: PayloadDigest;
+      expectedLength: bigint;
+      expectedDigest: PayloadDigest;
     },
-  ): Promise<{ digest: PayloadDigest; length: bigint }> {
+  ): Promise<
+    {
+      digest: PayloadDigest;
+      length: bigint;
+      commit: (isCompletePayload: boolean) => Promise<void>;
+      reject: () => Promise<void>;
+    }
+  > {
     try {
-      await this.ensureDir();
+      await this.ensureDir("staging");
 
-      const key = this.getKey(opts.knownDigest);
+      const key = this.getKey(opts.expectedDigest);
+      const tempKey = encodeBase32(crypto.getRandomValues(new Uint8Array(32)));
+      const stagingFilePath = join(this.path, "staging", tempKey);
 
-      const filePath = join(this.path, key);
+      if (opts.offset > 0) {
+        try {
+          const partialFile = join(this.path, "partial", key);
+          await Deno.copyFile(partialFile, stagingFilePath);
+        } catch {
+          // There was no partial to copy. This is going to fail, but gracefully.
+        }
+      }
 
       const file = await Deno.open(
-        filePath,
+        stagingFilePath,
         opts.offset === 0
           ? {
             create: true,
@@ -206,7 +222,7 @@ export class PayloadDriverFilesystem<PayloadDigest>
 
           receivedLength += BigInt(chunk.byteLength);
 
-          if (receivedLength >= opts.knownLength) {
+          if (receivedLength >= opts.expectedLength) {
             break;
           }
         }
@@ -219,6 +235,17 @@ export class PayloadDriverFilesystem<PayloadDigest>
       return {
         digest,
         length: BigInt(receivedLength),
+        commit: async (isCompletePayload) => {
+          await this.ensureDir("partial");
+
+          const committedFilePath = isCompletePayload
+            ? join(this.path, key)
+            : join(this.path, "partial", key);
+          await move(stagingFilePath, committedFilePath);
+        },
+        reject: async () => {
+          await Deno.remove(stagingFilePath);
+        },
       };
     } catch (err) {
       throw new WillowError("Payload driver error: " + err);

@@ -84,8 +84,8 @@ export interface PayloadDriver<PayloadDigest> {
     opts: {
       payload: Uint8Array | AsyncIterable<Uint8Array>;
       offset: number;
-      knownLength: bigint;
-      knownDigest: PayloadDigest;
+      expectedLength: bigint;
+      expectedDigest: PayloadDigest;
     },
   ): Promise<
     {
@@ -93,6 +93,10 @@ export interface PayloadDriver<PayloadDigest> {
       digest: PayloadDigest;
       /** the length after ingestion */
       length: bigint;
+      /** Commits the payload, saving it. */
+      commit: (isCompletePayload: boolean) => Promise<void>;
+      /** Rejects the payload, deleting it. */
+      reject: () => Promise<void>;
     }
   >;
 

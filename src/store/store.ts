@@ -599,6 +599,7 @@ export class Store<
       subspace: SubspaceId;
     },
     payload: AsyncIterable<Uint8Array>,
+    allowPartial = false,
     offset = 0,
   ): Promise<IngestPayloadEvent> {
     const getResult = await this.storage.get(
@@ -627,23 +628,27 @@ export class Store<
     const result = await this.payloadDriver.receive({
       payload: payload,
       offset,
-      knownDigest: entry.payloadDigest,
-      knownLength: entry.payloadLength,
+      expectedDigest: entry.payloadDigest,
+      expectedLength: entry.payloadLength,
     });
 
     if (
-      result.length !== entry.payloadLength ||
-      (result.length === entry.payloadLength &&
+      (allowPartial === false && entry.payloadLength !== result.length) ||
+      result.length === entry.payloadLength &&
         this.schemes.payload.order(
             result.digest,
             entry.payloadDigest,
-          ) !== 0)
+          ) !== 0
     ) {
+      await result.reject();
+
       return {
         kind: "failure",
         reason: "data_mismatch",
       };
     }
+
+    await result.commit(result.length === entry.payloadLength);
 
     if (
       result.length === entry.payloadLength &&
