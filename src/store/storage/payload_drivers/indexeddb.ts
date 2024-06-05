@@ -5,6 +5,7 @@ import { collectUint8Arrays } from "./util.ts";
 import { concat } from "@std/bytes";
 
 const PAYLOAD_STORE = "payload";
+const PARTIAL_STORE = "partial";
 
 /** Implements {@linkcode PayloadDriver} on top of [IndexedDB](https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API). */
 export class PayloadDriverIndexedDb<PayloadDigest>
@@ -28,6 +29,9 @@ export class PayloadDriverIndexedDb<PayloadDigest>
 
       // Storing digest / blob kv pairs.
       db.createObjectStore(PAYLOAD_STORE);
+
+      // Storingi digest / partial pairs
+      db.createObjectStore(PARTIAL_STORE);
     };
 
     request.onsuccess = () => {
@@ -218,15 +222,22 @@ export class PayloadDriverIndexedDb<PayloadDigest>
 
   async receive(
     opts: {
-      payload: Uint8Array | AsyncIterable<Uint8Array>;
+      payload: AsyncIterable<Uint8Array> | Uint8Array;
       offset: number;
-      knownLength: bigint;
-      knownDigest: PayloadDigest;
+      expectedLength: bigint;
+      expectedDigest: PayloadDigest;
     },
-  ): Promise<{ digest: PayloadDigest; length: bigint }> {
+  ): Promise<
+    {
+      digest: PayloadDigest;
+      length: bigint;
+      commit: (isCompletePayload: boolean) => Promise<void>;
+      reject: () => Promise<void>;
+    }
+  > {
     const db = await this.db.promise;
 
-    const key = this.getKey(opts.knownDigest);
+    const key = this.getKey(opts.expectedDigest);
 
     let existingBytes = new Uint8Array();
 
@@ -234,9 +245,9 @@ export class PayloadDriverIndexedDb<PayloadDigest>
       // Get existing blob.
       const didGet = Promise.withResolvers<Uint8Array | undefined>();
 
-      const payloadStore = db.transaction([PAYLOAD_STORE], "readwrite")
+      const payloadStore = db.transaction([PARTIAL_STORE], "readwrite")
         .objectStore(
-          PAYLOAD_STORE,
+          PARTIAL_STORE,
         );
 
       const getOp = payloadStore.get(key);
@@ -266,24 +277,43 @@ export class PayloadDriverIndexedDb<PayloadDigest>
       new Uint8Array(finalBytes),
     );
 
-    const payloadStore = db.transaction([PAYLOAD_STORE], "readwrite")
-      .objectStore(
-        PAYLOAD_STORE,
-      );
+    return {
+      digest,
+      length: BigInt(finalBytes.byteLength),
+      commit: (isCompletePayload) => {
+        if (isCompletePayload) {
+          const payloadStore = db.transaction([PAYLOAD_STORE], "readwrite")
+            .objectStore(
+              PAYLOAD_STORE,
+            );
 
-    const didSet = Promise.withResolvers<
-      { digest: PayloadDigest; length: bigint }
-    >();
+          const request = payloadStore.put(finalBytes, key);
 
-    const request = payloadStore.put(finalBytes, key);
+          const didSet = Promise.withResolvers<void>();
 
-    request.onsuccess = () => {
-      didSet.resolve({
-        digest,
-        length: BigInt(finalBytes.byteLength),
-      });
+          request.onsuccess = () => {
+            didSet.resolve();
+          };
+
+          return didSet.promise;
+        }
+
+        const payloadStore = db.transaction([PARTIAL_STORE], "readwrite")
+          .objectStore(
+            PARTIAL_STORE,
+          );
+
+        const request = payloadStore.put(finalBytes, key);
+
+        const didSet = Promise.withResolvers<void>();
+
+        request.onsuccess = () => {
+          didSet.resolve();
+        };
+
+        return didSet.promise;
+      },
+      reject: () => Promise.resolve(),
     };
-
-    return didSet.promise;
   }
 }

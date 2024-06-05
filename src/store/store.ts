@@ -261,7 +261,7 @@ export class Store<
       return {
         kind: "failure",
         reason: "invalid_entry",
-        message: "One or more of the entry's signatures was invalid.",
+        message: "Authorisation token does not permit writing of entry",
         err: null,
       };
     }
@@ -591,6 +591,11 @@ export class Store<
   /** Attempt to store the corresponding payload for one of the store's entries.
    *
    * A payload will not be ingested if the given entry is not stored in the store; if the hash of the payload does not match the entry's; or if it is already held.
+   *
+   * @param entryDetails - The attributes of the entry corresponding to this payload.
+   * @param payload - An {@linkcode AsyncIterable} of the bytes to be verified (and possibly ingested).
+   * @param [allowPartial=false] - Whether to allow partial payloads. If enabled, does not reject if the ingested data is of a smaller length than the entry's. Defaults to `false`.
+   * @param [offset=0] - The offset at which to begin writing the ingested data.
    */
   async ingestPayload(
     entryDetails: {
@@ -599,6 +604,7 @@ export class Store<
       subspace: SubspaceId;
     },
     payload: AsyncIterable<Uint8Array>,
+    allowPartial = false,
     offset = 0,
   ): Promise<IngestPayloadEvent> {
     const getResult = await this.storage.get(
@@ -627,23 +633,28 @@ export class Store<
     const result = await this.payloadDriver.receive({
       payload: payload,
       offset,
-      knownDigest: entry.payloadDigest,
-      knownLength: entry.payloadLength,
+      expectedDigest: entry.payloadDigest,
+      expectedLength: entry.payloadLength,
     });
 
     if (
-      result.length !== entry.payloadLength ||
-      (result.length === entry.payloadLength &&
+      (result.length > entry.payloadLength) ||
+      (allowPartial === false && entry.payloadLength !== result.length) ||
+      result.length === entry.payloadLength &&
         this.schemes.payload.order(
             result.digest,
             entry.payloadDigest,
-          ) !== 0)
+          ) !== 0
     ) {
+      await result.reject();
+
       return {
         kind: "failure",
         reason: "data_mismatch",
       };
     }
+
+    await result.commit(result.length === entry.payloadLength);
 
     if (
       result.length === entry.payloadLength &&

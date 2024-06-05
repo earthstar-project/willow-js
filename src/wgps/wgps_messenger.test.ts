@@ -26,7 +26,7 @@ import { PayloadDriverFilesystem } from "../store/storage/payload_drivers/filesy
 import { KvDriverDeno } from "../store/storage/kv/kv_driver_deno.ts";
 import { emptyDir, ensureDir } from "@std/fs";
 import { ANY_SUBSPACE, OPEN_END, type Range3d } from "@earthstar/willow-utils";
-import { assertEquals, assertNotEquals } from "@std/assert";
+import { assert, assertEquals, assertNotEquals } from "@std/assert";
 import { encodeBase64 } from "@std/encoding/base64";
 
 type WgpsScenario = {
@@ -1782,9 +1782,11 @@ function testWgpsMessenger(scenario: WgpsScenario) {
 
         let actualSizeFamilyAlfie = 0;
         let actualSizeFamilyBetty = 0;
+        let alfieHasAllPayloads = true;
+        let bettyHasAllPayloads = true;
 
         for await (
-          const _ of storeFamilyAlfie.query({
+          const [, payload] of storeFamilyAlfie.query({
             area: {
               includedSubspaceId: TestSubspace.Gemma,
               pathPrefix: [],
@@ -1798,10 +1800,14 @@ function testWgpsMessenger(scenario: WgpsScenario) {
           }, "subspace")
         ) {
           actualSizeFamilyAlfie += 1;
+
+          if (!payload) {
+            alfieHasAllPayloads = false;
+          }
         }
 
         for await (
-          const _ of storeFamilyBetty.query({
+          const [, payload] of storeFamilyBetty.query({
             area: {
               includedSubspaceId: TestSubspace.Gemma,
               pathPrefix: [],
@@ -1815,10 +1821,16 @@ function testWgpsMessenger(scenario: WgpsScenario) {
           }, "subspace")
         ) {
           actualSizeFamilyBetty += 1;
+
+          if (!payload) {
+            bettyHasAllPayloads = false;
+          }
         }
 
         assertEquals(actualSizeFamilyAlfie, 15);
         assertEquals(actualSizeFamilyBetty, 10);
+        assert(alfieHasAllPayloads, "Alfie does not have all payloads");
+        assert(bettyHasAllPayloads, "Betty does not have all payloads");
 
         messengerAlfie.close();
         messengerBetty.close();
@@ -2051,9 +2063,11 @@ function testWgpsMessenger(scenario: WgpsScenario) {
 
         let actualSizeFamilyAlfie = 0;
         let actualSizeFamilyBetty = 0;
+        let alfieHasAllPayloads = true;
+        let bettyHasAllPayloads = true;
 
         for await (
-          const _ of storeFamilyAlfie.query({
+          const [, payload] of storeFamilyAlfie.query({
             area: {
               includedSubspaceId: TestSubspace.Gemma,
               pathPrefix: [],
@@ -2067,10 +2081,14 @@ function testWgpsMessenger(scenario: WgpsScenario) {
           }, "subspace")
         ) {
           actualSizeFamilyAlfie += 1;
+
+          if (!payload) {
+            alfieHasAllPayloads = false;
+          }
         }
 
         for await (
-          const _ of storeFamilyBetty.query({
+          const [, payload] of storeFamilyBetty.query({
             area: {
               includedSubspaceId: TestSubspace.Gemma,
               pathPrefix: [],
@@ -2084,10 +2102,16 @@ function testWgpsMessenger(scenario: WgpsScenario) {
           }, "subspace")
         ) {
           actualSizeFamilyBetty += 1;
+
+          if (!payload) {
+            bettyHasAllPayloads = false;
+          }
         }
 
         assertEquals(actualSizeFamilyAlfie, 20);
         assertEquals(actualSizeFamilyBetty, 20);
+        assert(alfieHasAllPayloads, "Alfie does not have all payloads");
+        assert(bettyHasAllPayloads, "Betty does not have all payloads");
 
         messengerAlfie.close();
         messengerBetty.close();
@@ -2329,9 +2353,11 @@ function testWgpsMessenger(scenario: WgpsScenario) {
 
         let actualSizeFamilyAlfie = 0;
         let actualSizeFamilyBetty = 0;
+        let alfieHasAllPayloads = true;
+        let bettyHasAllPayloads = true;
 
         for await (
-          const _ of storeFamilyAlfie.query({
+          const [, payload] of storeFamilyAlfie.query({
             area: {
               includedSubspaceId: TestSubspace.Gemma,
               pathPrefix: [],
@@ -2345,10 +2371,14 @@ function testWgpsMessenger(scenario: WgpsScenario) {
           }, "subspace")
         ) {
           actualSizeFamilyAlfie += 1;
+
+          if (!payload) {
+            alfieHasAllPayloads = false;
+          }
         }
 
         for await (
-          const _ of storeFamilyBetty.query({
+          const [, payload] of storeFamilyBetty.query({
             area: {
               includedSubspaceId: TestSubspace.Gemma,
               pathPrefix: [],
@@ -2362,10 +2392,16 @@ function testWgpsMessenger(scenario: WgpsScenario) {
           }, "subspace")
         ) {
           actualSizeFamilyBetty += 1;
+
+          if (!payload) {
+            bettyHasAllPayloads = false;
+          }
         }
 
         assertEquals(actualSizeFamilyAlfie, 2);
         assertEquals(actualSizeFamilyBetty, 2);
+        assert(alfieHasAllPayloads, "Alfie does not have all payloads");
+        assert(bettyHasAllPayloads, "Betty does not have all payloads");
 
         messengerAlfie.close();
         messengerBetty.close();
@@ -2678,9 +2714,11 @@ function testWgpsMessenger(scenario: WgpsScenario) {
 
         let actualSizeFamilyAlfie = 0;
         let actualSizeFamilyBetty = 0;
+        let alfieHasAllFamilyPayloads = true;
+        let bettyHasAllFamilyPayloads = true;
 
         for await (
-          const _ of storeFamilyAlfie.query({
+          const [, payload] of storeFamilyAlfie.query({
             area: {
               includedSubspaceId: TestSubspace.Gemma,
               pathPrefix: [],
@@ -2694,10 +2732,14 @@ function testWgpsMessenger(scenario: WgpsScenario) {
           }, "subspace")
         ) {
           actualSizeFamilyAlfie += 1;
+
+          if (!payload) {
+            alfieHasAllFamilyPayloads = false;
+          }
         }
 
         for await (
-          const _ of storeFamilyBetty.query({
+          const [, payload] of storeFamilyBetty.query({
             area: {
               includedSubspaceId: TestSubspace.Gemma,
               pathPrefix: [],
@@ -2711,10 +2753,22 @@ function testWgpsMessenger(scenario: WgpsScenario) {
           }, "subspace")
         ) {
           actualSizeFamilyBetty += 1;
+
+          if (!payload) {
+            bettyHasAllFamilyPayloads = false;
+          }
         }
 
         assertEquals(actualSizeFamilyAlfie, 20);
         assertEquals(actualSizeFamilyBetty, 20);
+        assert(
+          alfieHasAllFamilyPayloads,
+          "Alfie does not have all family payloads",
+        );
+        assert(
+          bettyHasAllFamilyPayloads,
+          "Betty does not have all family payloads",
+        );
 
         const range2: Range3d<TestSubspace> = {
           subspaceRange: {
@@ -2741,9 +2795,11 @@ function testWgpsMessenger(scenario: WgpsScenario) {
 
         let actualSizeProjectAlfie = 0;
         let actualSizeProjectBetty = 0;
+        let alfieHasAllProjectPayloads = true;
+        let bettyHasAllProjectPayloads = true;
 
         for await (
-          const _ of storeProjectAlfie.query({
+          const [, payload] of storeProjectAlfie.query({
             area: {
               includedSubspaceId: TestSubspace.Dalton,
               pathPrefix: [],
@@ -2757,10 +2813,14 @@ function testWgpsMessenger(scenario: WgpsScenario) {
           }, "subspace")
         ) {
           actualSizeProjectAlfie += 1;
+
+          if (!payload) {
+            alfieHasAllProjectPayloads = false;
+          }
         }
 
         for await (
-          const _ of storeProjectBetty.query({
+          const [, payload] of storeProjectBetty.query({
             area: {
               includedSubspaceId: TestSubspace.Dalton,
               pathPrefix: [],
@@ -2774,10 +2834,22 @@ function testWgpsMessenger(scenario: WgpsScenario) {
           }, "subspace")
         ) {
           actualSizeProjectBetty += 1;
+
+          if (!payload) {
+            bettyHasAllProjectPayloads = false;
+          }
         }
 
         assertEquals(actualSizeProjectAlfie, 20);
         assertEquals(actualSizeProjectBetty, 20);
+        assert(
+          alfieHasAllProjectPayloads,
+          "Alfie does not have all family payloads",
+        );
+        assert(
+          bettyHasAllProjectPayloads,
+          "Betty does not have all family payloads",
+        );
 
         messengerAlfie.close();
         messengerBetty.close();
