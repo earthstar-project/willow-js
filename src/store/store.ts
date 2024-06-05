@@ -261,7 +261,7 @@ export class Store<
       return {
         kind: "failure",
         reason: "invalid_entry",
-        message: "One or more of the entry's signatures was invalid.",
+        message: "Authorisation token does not permit writing of entry",
         err: null,
       };
     }
