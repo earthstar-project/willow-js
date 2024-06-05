@@ -671,7 +671,7 @@ export class Store<
         );
       }
 
-      const authToken = await this.payloadDriver.get(authTokenHash);
+      const authToken = await this.getauthTokenByHash(authTokenHash);
 
       if (!authToken) {
         throw new WillowError(
@@ -726,14 +726,11 @@ export class Store<
     ) {
       const payload = await this.payloadDriver.get(entry.payloadDigest);
 
-      const authTokenPayload = await this.payloadDriver.get(authTokenHash);
+      const authToken = await this.getauthTokenByHash(authTokenHash);
 
-      if (!authTokenPayload) {
+      if (!authToken) {
         continue;
       }
-      const authTokenEncoded = await authTokenPayload.bytes();
-      const authToken = this.schemes.authorisation.tokenEncoding
-        .decode(authTokenEncoded);
 
       yield [entry, payload, authToken];
     }
@@ -792,16 +789,13 @@ export class Store<
     ) {
       const payload = await this.payloadDriver.get(entry.payloadDigest);
 
-      const authTokenPayload = await this.payloadDriver.get(authTokenHash);
+      const authToken = await this.getauthTokenByHash(authTokenHash);
 
-      if (!authTokenPayload) {
+      if (!authToken) {
         throw new WillowError(
           "Malformed storage. No authorisation token for stored entry.",
         );
       }
-      const authTokenEncoded = await authTokenPayload.bytes();
-      const authToken = this.schemes.authorisation.tokenEncoding
-        .decode(authTokenEncoded);
 
       yield [entry, payload, authToken];
     }
@@ -838,6 +832,22 @@ export class Store<
     ) {
       authToken = token;
     }
+
+    return authToken;
+  }
+
+  /** Retrieve an `AuthorisationToken` by hash, if held in storage. */
+  private async getauthTokenByHash(
+    authTokenHash: PayloadDigest,
+  ): Promise<AuthorisationToken | undefined> {
+    const authTokenPayload = await this.payloadDriver.get(authTokenHash);
+
+    if (!authTokenPayload) {
+      return;
+    }
+    const authTokenEncoded = await authTokenPayload.bytes();
+    const authToken = this.schemes.authorisation.tokenEncoding
+      .decode(authTokenEncoded);
 
     return authToken;
   }
