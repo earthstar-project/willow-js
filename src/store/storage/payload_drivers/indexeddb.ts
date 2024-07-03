@@ -14,7 +14,7 @@ export class PayloadDriverIndexedDb<PayloadDigest>
 
   constructor(readonly payloadScheme: PayloadScheme<PayloadDigest>) {
     const request = ((window as any).indexedDB as IDBFactory).open(
-      `willow`,
+      `willow_payloads`,
       1,
     );
 
