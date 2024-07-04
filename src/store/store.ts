@@ -298,7 +298,7 @@ export class Store<
             range: {
               pathRange: {
                 start: entry.path,
-                end: successorPrefix(entry.path) ||
+                end: successorPrefix(entry.path, this.schemes.path) ||
                   OPEN_END,
               },
               subspaceRange: {
