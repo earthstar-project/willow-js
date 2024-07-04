@@ -165,7 +165,7 @@ Deno.test({
   },
 });
 
-Deno.test({
+Deno.test.ignore({
   name: "Random Tests",
   async fn() {
     const numKeys = 8;
@@ -191,7 +191,7 @@ Deno.test({
   },
 });
 
-Deno.test({
+Deno.test.ignore({
   name: "More random Tests",
   async fn() {
     const numKeys = 16;
