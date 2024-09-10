@@ -325,12 +325,7 @@ function selectorToIdbBound({ start, end, prefix }: {
       actualPackedStart && actualPackedEnd &&
       equalsBytes(actualPackedStart, actualPackedEnd)
     ) {
-      return IDBKeyRange.bound(
-        actualPackedStart,
-        actualPackedEnd,
-        false,
-        false,
-      );
+      return "notMatchingAnything";
     }
 
     return IDBKeyRange.bound(
