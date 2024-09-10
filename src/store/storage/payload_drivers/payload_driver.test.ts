@@ -20,7 +20,7 @@ testPayloadDriver("Filesystem", () => {
 });
 
 testPayloadDriver("IndexedDB", () => {
-  return new PayloadDriverIndexedDb(testSchemePayload);
+  return new PayloadDriverIndexedDb('test', testSchemePayload);
 }, () => Promise.resolve());
 
 function testPayloadDriver(

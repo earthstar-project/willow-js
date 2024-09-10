@@ -17,9 +17,9 @@ const END_LIST = Symbol("end_list");
 export class KvDriverIndexedDB implements KvDriver {
   private db = Promise.withResolvers<IDBDatabase>();
 
-  constructor() {
+  constructor(id: string) {
     const request = ((window as any).indexedDB as IDBFactory).open(
-      `willow`,
+      `willow_${id}`,
       1,
     );
 

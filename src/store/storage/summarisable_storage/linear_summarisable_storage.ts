@@ -5,7 +5,11 @@
  */
 
 import type { KvDriver, KvKey } from "../kv/types.ts";
-import { combineMonoid, type LiftingMonoid, sizeMonoid } from "./lifting_monoid.ts";
+import {
+  combineMonoid,
+  type LiftingMonoid,
+  sizeMonoid,
+} from "./lifting_monoid.ts";
 import type { SummarisableStorage } from "./types.ts";
 
 export type LinearStorageOpts<
