@@ -91,7 +91,9 @@ export class PrefixedDriver implements KvDriver {
       delete(key) {
         return batch.delete([...prefix, ...key]);
       },
-      commit: batch.commit,
+      commit() {
+        return batch.commit();
+      },
     };
   }
 }
