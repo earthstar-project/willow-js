@@ -32,7 +32,7 @@ Deno.test("Test deno kv store", async (t) => {
 });
 
 Deno.test("Test IndexedDB kv store", async (t) => {
-  const store = new KvDriverIndexedDB();
+  const store = new KvDriverIndexedDB("test");
   await testKvStore(t, store);
 });
 
@@ -940,7 +940,7 @@ Deno.test({
       key: 2,
     }];
 
-    const indexDbKv = new KvDriverIndexedDB();
+    const indexDbKv = new KvDriverIndexedDB("test");
     await runTestCase(ops, queries, indexDbKv);
     await indexDbKv.clear();
     // Let IndexedDB polyfill timers run their course.
@@ -967,7 +967,7 @@ Deno.test({
       },
     ];
 
-    const indexDbKv = new KvDriverIndexedDB();
+    const indexDbKv = new KvDriverIndexedDB("test");
     await runTestCase(ops, queries, indexDbKv);
     await indexDbKv.clear();
     // Let IndexedDB polyfill timers run their course.
@@ -1048,7 +1048,7 @@ Deno.test({
       },
     ];
 
-    const indexDbKv = new KvDriverIndexedDB();
+    const indexDbKv = new KvDriverIndexedDB("test");
     await runTestCase(ops, queries, indexDbKv);
     await indexDbKv.clear();
     // Let IndexedDB polyfill timers run their course.
@@ -1117,7 +1117,7 @@ Deno.test({
       },
     ];
 
-    const indexDbKv = new KvDriverIndexedDB();
+    const indexDbKv = new KvDriverIndexedDB("test");
     await runTestCase(ops, queries, indexDbKv);
     await indexDbKv.clear();
     // Let IndexedDB polyfill timers run their course.
@@ -1143,7 +1143,7 @@ Deno.test.ignore({
           queries.push(randomQuery(numKeys));
         }
 
-        const idbKv = new KvDriverIndexedDB();
+        const idbKv = new KvDriverIndexedDB("test");
         await runTestCase(ops, queries, idbKv);
 
         await idbKv.clear();
@@ -1167,7 +1167,7 @@ Deno.test.ignore({
           queries.push(randomQuery(numKeys));
         }
 
-        const idbKv = new KvDriverIndexedDB();
+        const idbKv = new KvDriverIndexedDB("test");
         await runTestCase(ops, queries, idbKv);
 
         await idbKv.clear();

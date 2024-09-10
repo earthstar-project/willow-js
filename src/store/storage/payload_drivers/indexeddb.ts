@@ -12,9 +12,12 @@ export class PayloadDriverIndexedDb<PayloadDigest>
   implements PayloadDriver<PayloadDigest> {
   private db = Promise.withResolvers<IDBDatabase>();
 
-  constructor(readonly payloadScheme: PayloadScheme<PayloadDigest>) {
+  constructor(
+    id: string,
+    readonly payloadScheme: PayloadScheme<PayloadDigest>,
+  ) {
     const request = ((window as any).indexedDB as IDBFactory).open(
-      `willow_payloads`,
+      `willow_payloads_${id}`,
       1,
     );
 

@@ -3,7 +3,11 @@ import type { HandleStore } from "./handle_store.ts";
 import type { AccessControlScheme } from "./types.ts";
 import { WillowError } from "../errors.ts";
 import { encodeBase64 } from "@std/encoding/base64";
-import { type Entry, entryPosition, isIncludedArea } from "@earthstar/willow-utils";
+import {
+  type Entry,
+  entryPosition,
+  isIncludedArea,
+} from "@earthstar/willow-utils";
 
 /** Helps you get capabilities for given entries */
 export class CapFinder<
