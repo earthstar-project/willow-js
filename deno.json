@@ -1,6 +1,6 @@
 {
   "name": "@earthstar/willow",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "exports": {
     ".": "./mod.universal.ts",
     "./deno": "./mod.deno.ts",
