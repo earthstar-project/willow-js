@@ -9,6 +9,7 @@ import { pack, unpack } from "./key_codec/kv_key_codec.ts";
 import { WillowError } from "../../../errors.ts";
 import { FIFO } from "@korkje/fifo";
 import { successorBytesFixedWidth } from "@earthstar/willow-utils";
+import { equals as equalsBytes } from "@std/bytes";
 
 const KV_STORE = "kv";
 const END_LIST = Symbol("end_list");
@@ -130,7 +131,7 @@ export class KvDriverIndexedDB implements KvDriver {
       return;
     }
 
-    const direction = opts?.reverse ? "prevunique" : "nextunique";
+    const direction = opts?.reverse ? "prev" : "next";
 
     const resultFifo = new FIFO<
       { packedKey: Uint8Array; value: Value } | typeof END_LIST
@@ -226,7 +227,7 @@ type BatchOp = {
   value: unknown;
 } | { kind: "delete"; key: KvKey };
 
-class BatchIndexedDB<Value> implements KvBatch {
+class BatchIndexedDB implements KvBatch {
   private db: Promise<IDBDatabase>;
 
   private ops: BatchOp[] = [];
@@ -320,7 +321,24 @@ function selectorToIdbBound({ start, end, prefix }: {
       }
     }
 
-    return IDBKeyRange.bound(actualPackedStart, actualPackedEnd, false, true);
+    if (
+      actualPackedStart && actualPackedEnd &&
+      equalsBytes(actualPackedStart, actualPackedEnd)
+    ) {
+      return IDBKeyRange.bound(
+        actualPackedStart,
+        actualPackedEnd,
+        false,
+        false,
+      );
+    }
+
+    return IDBKeyRange.bound(
+      actualPackedStart,
+      actualPackedEnd,
+      false,
+      true,
+    );
   } else {
     // The simple cases: no prefix to consider.
     if (
