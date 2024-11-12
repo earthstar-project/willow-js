@@ -355,13 +355,25 @@ export class Store<
         };
       }
 
-      const otherPayloadLengthIsGreater =
-        entry.payloadLength < otherEntry.payloadLength;
-
       // If the timestamps and hashes are the same, and the other payload's length is greater, we have a no-op.
       if (
         otherEntry.timestamp === entry.timestamp &&
-        payloadDigestOrder === 0 && otherPayloadLengthIsGreater
+        payloadDigestOrder === 0 &&
+        entry.payloadLength < otherEntry.payloadLength
+      ) {
+        this.ingestionMutex.release(acquisitionId);
+
+        return {
+          kind: "no_op",
+          reason: "obsolete_from_same_subspace",
+        };
+      }
+
+      // If all three qualities are the same, neither is newer than the other. So we can also have a no-op.
+      if (
+        otherEntry.timestamp === entry.timestamp &&
+        payloadDigestOrder === 0 &&
+        entry.payloadLength === otherEntry.payloadLength
       ) {
         this.ingestionMutex.release(acquisitionId);
 
