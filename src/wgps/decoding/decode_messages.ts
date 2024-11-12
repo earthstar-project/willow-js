@@ -1,6 +1,5 @@
 import {
   MsgKind,
-  type MsgReconciliationTerminatePayload,
   type ReadCapPrivy,
   type SyncMessage,
   type SyncSchemes,
@@ -31,6 +30,7 @@ import {
   decodeReconciliationSendEntry,
   decodeReconciliationSendFingerprint,
   decodeReconciliationSendPayload,
+  decodeReconciliationTerminatePayload,
 } from "./reconciliation.ts";
 import {
   ReconcileMsgTracker,
@@ -243,13 +243,11 @@ export async function* decodeMessages<
 
       if (reconcileMsgTracker.isExpectingPayloadOrTermination()) {
         if ((firstByte & 0x58) === 0x58) {
-          reconcileMsgTracker.onTerminatePayload();
-          // It's a terminate message.
+          const message = await decodeReconciliationTerminatePayload(bytes);
 
-          bytes.prune(1);
-          yield {
-            kind: MsgKind.ReconciliationTerminatePayload,
-          };
+          reconcileMsgTracker.onTerminatePayload(message);
+
+          yield message;
         } else {
           yield await decodeReconciliationSendPayload(bytes);
         }

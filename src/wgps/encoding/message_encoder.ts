@@ -304,7 +304,7 @@ export class MessageEncoder<
       }
 
       case MsgKind.ReconciliationTerminatePayload: {
-        bytes = encodeReconciliationTerminatePayload();
+        bytes = encodeReconciliationTerminatePayload(message);
         break;
       }
 

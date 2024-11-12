@@ -299,8 +299,8 @@ export type MsgReconciliationAnnounceEntries<SubspaceId> = Msg<
   {
     /** The 3dRange whose LengthyEntries to transmit. */
     range: Range3d<SubspaceId>;
-    /** The number of Entries the sender has in the range. */
-    count: bigint;
+    /** True if and only if the the sender has zero Entries in the range. */
+    isEmpty: boolean;
     /** A boolean flag to indicate whether the sender wishes to receive a ReconciliationAnnounceEntries message for the same 3dRange in return. */
     wantResponse: boolean;
     /** Whether the sender promises to send the Entries in the range sorted from oldest to newest. */
@@ -340,9 +340,13 @@ export type MsgReconciliationSendPayload = Msg<
 >;
 
 /** Indicate that no more bytes will be transmitted for the currently transmitted Payload as part of set reconciliation. */
-export type MsgReconciliationTerminatePayload = {
-  kind: MsgKind.ReconciliationTerminatePayload;
-};
+export type MsgReconciliationTerminatePayload = Msg<
+  MsgKind.ReconciliationTerminatePayload,
+  {
+    /** True if and only if no further ReconciliationSendEntry message will be sent as part of reconciling the current 3dRange. */
+    isFinal: boolean;
+  }
+>;
 
 /** Transmit an AuthorisedEntry to the other peer, and optionally prepare transmission of its Payload. */
 export type MsgDataSendEntry<

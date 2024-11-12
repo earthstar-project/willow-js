@@ -500,7 +500,7 @@ const sendEntryVectors: (
     receiverHandle: 220n,
     senderHandle: 250n,
     wantResponse: true,
-    count: 1n,
+    isEmpty: false,
     willSort: true,
     range: {
       subspaceRange: {
@@ -536,13 +536,14 @@ const sendEntryVectors: (
   },
   {
     kind: MsgKind.ReconciliationTerminatePayload,
+    isFinal: true,
   },
   {
     kind: MsgKind.ReconciliationAnnounceEntries,
     receiverHandle: 0n,
     senderHandle: 0n,
     wantResponse: false,
-    count: 0n,
+    isEmpty: true,
     willSort: false,
     range: {
       subspaceRange: {
@@ -565,7 +566,7 @@ const sendEntryVectors: (
     receiverHandle: 0n,
     senderHandle: 0n,
     wantResponse: false,
-    count: 4n,
+    isEmpty: false,
     willSort: false,
     range: {
       subspaceRange: {
@@ -602,6 +603,7 @@ const sendEntryVectors: (
   },
   {
     kind: MsgKind.ReconciliationTerminatePayload,
+    isFinal: false,
   },
   {
     kind: MsgKind.ReconciliationSendEntry,
@@ -621,6 +623,7 @@ const sendEntryVectors: (
   },
   {
     kind: MsgKind.ReconciliationTerminatePayload,
+    isFinal: false,
   },
   {
     kind: MsgKind.ReconciliationSendEntry,
@@ -640,6 +643,7 @@ const sendEntryVectors: (
   },
   {
     kind: MsgKind.ReconciliationTerminatePayload,
+    isFinal: false,
   },
   {
     kind: MsgKind.ReconciliationSendEntry,
@@ -659,6 +663,7 @@ const sendEntryVectors: (
   },
   {
     kind: MsgKind.ReconciliationTerminatePayload,
+    isFinal: true,
   },
 ];
 
