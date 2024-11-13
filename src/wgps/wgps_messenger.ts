@@ -846,6 +846,9 @@ export class WgpsMessenger<
     // Send the digest of the nonce to the other peer.
     await this.transport.send(commitment);
 
+    // Give announcer the other peer's maximumPayloadSize.
+    this.announcer.otherMaximumPayloadSize = await this.transport.maximumPayloadSize;
+
     // Wait until we have the received commitment.
     await this.transport.receivedCommitment;
 
@@ -1012,7 +1015,7 @@ export class WgpsMessenger<
 
   private setupReconciliation() {
     // When our announcer releases an 'announcement pack' (everything needed to announce and send some entries)...
-    onAsyncIterate(this.announcer.announcementPacks(), (pack) => {
+    onAsyncIterate(this.announcer.announcementPacks(), async (pack) => {
       // Bind any static tokens first.
       for (const staticToken of pack.staticTokenBinds) {
         this.encoder.encode({
@@ -1042,7 +1045,13 @@ export class WgpsMessenger<
           staticTokenHandle: entry.staticTokenHandle,
         });
 
-        // We should check if the entry's payload length is less than our partner's maximum_payload_size and send the payload, but at the time of writing time is short and that requires something of a refactor to the announcer.
+        if (entry.payload !== null) {
+            this.encoder.encode({
+              kind: MsgKind.ReconciliationSendPayload,
+              amount: entry.lengthyEntry.available,
+              bytes: await entry.payload.bytes(),
+            });
+        }
 
         this.encoder.encode({
           kind: MsgKind.ReconciliationTerminatePayload,

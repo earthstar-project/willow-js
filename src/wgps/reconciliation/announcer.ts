@@ -3,7 +3,7 @@ import { encodeBase64 } from "@std/encoding/base64";
 import { FIFO } from "@korkje/fifo";
 import { WillowError } from "../../errors.ts";
 import type { Store } from "../../store/store.ts";
-import type { LengthyEntry, PayloadScheme } from "../../store/types.ts";
+import type { LengthyEntry, Payload, PayloadScheme } from "../../store/types.ts";
 import type { HandleStore } from "../handle_store.ts";
 import type { AuthorisationTokenScheme, COVERS_NONE } from "../types.ts";
 
@@ -45,6 +45,7 @@ type AnnouncementPack<
     lengthyEntry: LengthyEntry<NamespaceId, SubspaceId, PayloadDigest>;
     staticTokenHandle: bigint;
     dynamicToken: DynamicToken;
+    payload: Payload | null;
   }[];
 };
 
@@ -78,6 +79,8 @@ export class Announcer<
       PayloadDigest
     >
   >();
+
+  otherMaximumPayloadSize: bigint = BigInt(0);
 
   constructor(
     opts: AnnouncerOpts<
@@ -142,6 +145,7 @@ export class Announcer<
       lengthyEntry: LengthyEntry<NamespaceId, SubspaceId, PayloadDigest>;
       staticTokenHandle: bigint;
       dynamicToken: DynamicToken;
+      payload: Payload | null;
     }[] = [];
 
     for await (
@@ -163,13 +167,22 @@ export class Announcer<
         staticTokenBinds.push(staticToken);
       }
 
+      let available = payload ? await payload.length() : 0n;
+
+      // If the payload is less-equal to the other peer's maximum payload size,
+      // we can immediatly send it along with the entry.
+      const sendPayload = payload &&
+        entry.payloadLength <= this.otherMaximumPayloadSize &&
+        entry.payloadLength == available;
+
       entries.push({
         lengthyEntry: {
           entry,
-          available: payload ? await payload.length() : 0n,
+          available,
         },
         dynamicToken,
         staticTokenHandle,
+        payload: sendPayload ? payload : null,
       });
     }
 
