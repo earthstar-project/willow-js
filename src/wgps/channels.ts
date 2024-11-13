@@ -22,6 +22,8 @@ export const msgLogicalChannels: Record<MsgKind, LogicalChannel | null> = {
   [MsgKind.ControlApologise]: null,
   [MsgKind.ControlFree]: null,
   [MsgKind.ControlPlead]: null,
+  [MsgKind.ControlLimitSending]: null,
+  [MsgKind.ControlLimitReceiving]: null,
   [MsgKind.ControlIssueGuarantee]: null,
   [MsgKind.PaiRequestSubspaceCapability]: null,
   [MsgKind.PaiReplySubspaceCapability]: null,

@@ -151,6 +151,26 @@ const vectors: SyncMessage<
     handleType: HandleType.IntersectionHandle,
     mine: false,
   },
+  {
+    kind: MsgKind.ControlLimitSending,
+    channel: LogicalChannel.CapabilityChannel,
+    bound: BigInt(2147483648),
+  },
+  {
+    kind: MsgKind.ControlLimitSending,
+    channel: LogicalChannel.CapabilityChannel,
+    bound: BigInt(0),
+  },
+  {
+    kind: MsgKind.ControlLimitReceiving,
+    channel: LogicalChannel.CapabilityChannel,
+    bound: BigInt(2147483648),
+  },
+  {
+    kind: MsgKind.ControlLimitReceiving,
+    channel: LogicalChannel.CapabilityChannel,
+    bound: BigInt(0),
+  },
 
   // PAI
 

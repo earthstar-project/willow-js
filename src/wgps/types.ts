@@ -110,6 +110,8 @@ export enum MsgKind {
   ControlIssueGuarantee,
   ControlAbsolve,
   ControlPlead,
+  ControlLimitSending,
+  ControlLimitReceiving,
   ControlAnnounceDropping,
   ControlApologise,
   ControlFree,
@@ -138,6 +140,8 @@ export const messageNames: Record<MsgKind, string> = {
   [MsgKind.ControlIssueGuarantee]: "ControlIssueGuarantee",
   [MsgKind.ControlAbsolve]: "ControlAbsolve",
   [MsgKind.ControlPlead]: "ControlPlead",
+  [MsgKind.ControlLimitSending]: "ControlLimitSending",
+  [MsgKind.ControlLimitReceiving]: "ControlLimitReceiving",
   [MsgKind.ControlAnnounceDropping]: "ControlAnnounceDropping",
   [MsgKind.ControlApologise]: "ControlApologise",
   [MsgKind.ControlFree]: "ControlFree",
@@ -170,6 +174,18 @@ export type MsgControlAbsolve = Msg<MsgKind.ControlAbsolve, {
 /** Ask the other peer to send an ControlAbsolve message such that the receiver remaining guarantees will be target. */
 export type MsgControlPlead = Msg<MsgKind.ControlPlead, {
   target: bigint;
+  channel: LogicalChannel;
+}>;
+
+/** Promise to the other peer an upper bound on the number of bytes of messages that you will send on some logical channel. */
+export type MsgControlLimitSending = Msg<MsgKind.ControlLimitSending, {
+  bound: bigint;
+  channel: LogicalChannel;
+}>;
+
+/** Promise to the other peer an upper bound on the number of bytes of messages that you will still receive on some logical channel. */
+export type MsgControlLimitReceiving = Msg<MsgKind.ControlLimitReceiving, {
+  bound: bigint;
   channel: LogicalChannel;
 }>;
 
@@ -420,6 +436,8 @@ export type SyncMessage<
   | MsgControlIssueGuarantee
   | MsgControlAbsolve
   | MsgControlPlead
+  | MsgControlLimitSending
+  | MsgControlLimitReceiving
   | MsgControlAnnounceDropping
   | MsgControlApologise
   | MsgControlFree
@@ -508,6 +526,8 @@ export type NoChannelMsg<PsiGroup, SubspaceCapability, SyncSubspaceSignature> =
   | MsgControlIssueGuarantee
   | MsgControlAbsolve
   | MsgControlPlead
+  | MsgControlLimitSending
+  | MsgControlLimitReceiving
   | MsgControlAnnounceDropping
   | MsgControlApologise
   | MsgControlFree
