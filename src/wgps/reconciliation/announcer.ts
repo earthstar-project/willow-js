@@ -34,7 +34,7 @@ type AnnouncementPack<
   // Then send a ReconciliationAnnounceEntries
   announcement: {
     range: Range3d<SubspaceId>;
-    count: number;
+    isEmpty: boolean;
     wantResponse: boolean;
     senderHandle: bigint;
     receiverHandle: bigint;
@@ -176,7 +176,7 @@ export class Announcer<
     this.announcementPackQueue.push({
       staticTokenBinds,
       announcement: {
-        count: entries.length,
+        isEmpty: entries.length === 0,
         range: announcement.range,
         receiverHandle: announcement.receiverHandle,
         senderHandle: announcement.senderHandle,

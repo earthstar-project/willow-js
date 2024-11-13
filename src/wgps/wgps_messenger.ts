@@ -347,7 +347,7 @@ export class WgpsMessenger<
   private currentlyReceivingEntries: {
     namespace: NamespaceId;
     range: Range3d<SubspaceId>;
-    remaining: bigint;
+    expecting: boolean;
   } | undefined;
 
   private reconciliationPayloadIngester: PayloadIngester<
@@ -1020,7 +1020,7 @@ export class WgpsMessenger<
       // Then announce the entries.
       this.encoder.encode({
         kind: MsgKind.ReconciliationAnnounceEntries,
-        count: BigInt(pack.announcement.count),
+        isEmpty: pack.announcement.isEmpty,
         range: pack.announcement.range,
         wantResponse: pack.announcement.wantResponse,
         willSort: true,
@@ -1030,6 +1030,8 @@ export class WgpsMessenger<
       });
 
       // Then send the entries.
+      const finalEntry = pack.entries.at(-1);
+
       for (const entry of pack.entries) {
         this.encoder.encode({
           kind: MsgKind.ReconciliationSendEntry,
@@ -1042,6 +1044,7 @@ export class WgpsMessenger<
 
         this.encoder.encode({
           kind: MsgKind.ReconciliationTerminatePayload,
+          isFinal: entry === finalEntry,
         });
       }
     });
@@ -1333,7 +1336,7 @@ export class WgpsMessenger<
       case MsgKind.ReconciliationAnnounceEntries: {
         if (
           this.currentlyReceivingEntries &&
-          this.currentlyReceivingEntries.remaining > 0n
+          this.currentlyReceivingEntries.expecting
         ) {
           throw new WgpsMessageValidationError(
             "Never received the entries we were promised...",
@@ -1346,7 +1349,7 @@ export class WgpsMessenger<
 
         // Set the currently receiving namespace and range and expected count.
         this.currentlyReceivingEntries = {
-          remaining: message.count,
+          expecting: !message.isEmpty,
           namespace: reconciler.store.namespace,
           range: message.range,
         };
@@ -1387,7 +1390,7 @@ export class WgpsMessenger<
           );
         }
 
-        if (this.currentlyReceivingEntries.remaining <= 0n) {
+        if (!this.currentlyReceivingEntries.expecting) {
           throw new WgpsMessageValidationError(
             "Received entry for an announcement when we are not expecting any more!",
           );
@@ -1418,8 +1421,6 @@ export class WgpsMessenger<
           );
         }
 
-        this.currentlyReceivingEntries.remaining -= 1n;
-
         this.reconciliationPayloadIngester.target(
           message.entry.entry,
           message.entry.available === message.entry.entry.payloadLength,
@@ -1434,6 +1435,10 @@ export class WgpsMessenger<
         break;
       }
       case MsgKind.ReconciliationTerminatePayload: {
+        if (message.isFinal && this.currentlyReceivingEntries) {
+            this.currentlyReceivingEntries.expecting = false;
+        }
+
         const entryToRequestPayloadFor = this.reconciliationPayloadIngester
           .terminate();
 
