@@ -763,12 +763,12 @@ export class Store<
 
   /** Retrieve an asynchronous iterator of entry-payload-authorisation triples from the store for a given [`Range`](https://willowprotocol.org/specs/grouping-entries/index.html#ranges).
    *
-   * Always returns entries in chronological order.
+   * Returns entries in order by subspace, then path, then timestamp.
    */
   async *queryRange(
     range: Range3d<SubspaceId>,
-    /** Whether to return entries newest or oldest first. */
-    order: "newest" | "oldest",
+    /** Whether to return entries descending or ascending. */
+    order: "descending" | "ascending",
   ): AsyncIterable<
     [
       Entry<NamespaceId, SubspaceId, PayloadDigest>,
@@ -783,8 +783,8 @@ export class Store<
           maxCount: 0,
           maxSize: BigInt(0),
         },
-        "timestamp",
-        order === "newest" ? true : false,
+        "subspace",
+        order === "descending" ? true : false,
       )
     ) {
       const payload = await this.payloadDriver.get(entry.payloadDigest);
@@ -828,7 +828,7 @@ export class Store<
           start: entry.timestamp,
           end: entry.timestamp + 1n,
         },
-      }, "newest")
+      }, "descending")
     ) {
       authToken = token;
     }

@@ -319,7 +319,7 @@ export type MsgReconciliationAnnounceEntries<SubspaceId> = Msg<
     isEmpty: boolean;
     /** A boolean flag to indicate whether the sender wishes to receive a ReconciliationAnnounceEntries message for the same 3dRange in return. */
     wantResponse: boolean;
-    /** Whether the sender promises to send the Entries in the range sorted from oldest to newest. */
+    /** Whether the sender promises to send the Entries in the range sorted ascendingly by subspace_id first, path second. */
     willSort: boolean;
     /** An AreaOfInterestHandle, bound by the sender of this message, that fully contains the range. */
     senderHandle: bigint;

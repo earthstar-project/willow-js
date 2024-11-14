@@ -149,7 +149,7 @@ export class Announcer<
         entry,
         payload,
         authToken,
-      ] of announcement.store.queryRange(announcement.range, "oldest")
+      ] of announcement.store.queryRange(announcement.range, "ascending")
     ) {
       const [staticToken, dynamicToken] = this.authorisationTokenScheme
         .decomposeAuthToken(authToken);
