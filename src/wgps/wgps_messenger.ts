@@ -158,6 +158,9 @@ export type WgpsMessengerOpts<
     chunk: Uint8Array,
     entryLength: bigint,
   ) => Uint8Array;
+
+  /** Used for internal testing. `message` has type any to not expose internal API. */
+  onMessage?: (message: any, isAlfie: boolean) => void;
 };
 
 /** Coordinates an open-ended synchronisation session between two peers using the [Willow General Purpose Sync Protocol](https://willowprotocol.org/specs/sync/index.html#sync).
@@ -406,6 +409,8 @@ export class WgpsMessenger<
     AuthorisationOpts
   >;
 
+  private onMessage?: (message: any, isAlfie: boolean) => void;
+
   constructor(
     opts: WgpsMessengerOpts<
       ReadCapability,
@@ -536,6 +541,8 @@ export class WgpsMessenger<
       getStore: this.getStore,
       processReceivedPayload: opts.processReceivedPayload,
     });
+
+    this.onMessage = opts.onMessage;
 
     // Send encoded messages
 
@@ -730,12 +737,9 @@ export class WgpsMessenger<
 
     // Begin handling decoded messages
     onAsyncIterate(decodedMessages, (msg) => {
-      console.log(
-        `%c${this.transport.role === IS_ALFIE ? "Alfie" : "Betty"} got: ${
-          messageNames[msg.kind]
-        }`,
-        `color: ${this.transport.role === IS_ALFIE ? "red" : "blue"}`,
-      );
+      if (this.onMessage) {
+          this.onMessage(msg, this.transport.role === IS_ALFIE);
+      }
 
       if (msg.kind === MsgKind.DataSendEntry) {
         this.currentlyReceivedEntry = msg.entry;
