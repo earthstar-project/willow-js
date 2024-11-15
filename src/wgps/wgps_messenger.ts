@@ -158,6 +158,9 @@ export type WgpsMessengerOpts<
     chunk: Uint8Array,
     entryLength: bigint,
   ) => Uint8Array;
+
+  /** Used for internal testing. `message` has type any to not expose internal API. */
+  onMessage?: (message: any, isAlfie: boolean) => void;
 };
 
 /** Coordinates an open-ended synchronisation session between two peers using the [Willow General Purpose Sync Protocol](https://willowprotocol.org/specs/sync/index.html#sync).
@@ -406,6 +409,8 @@ export class WgpsMessenger<
     AuthorisationOpts
   >;
 
+  private onMessage?: (message: any, isAlfie: boolean) => void;
+
   constructor(
     opts: WgpsMessengerOpts<
       ReadCapability,
@@ -536,6 +541,8 @@ export class WgpsMessenger<
       getStore: this.getStore,
       processReceivedPayload: opts.processReceivedPayload,
     });
+
+    this.onMessage = opts.onMessage;
 
     // Send encoded messages
 
@@ -730,12 +737,9 @@ export class WgpsMessenger<
 
     // Begin handling decoded messages
     onAsyncIterate(decodedMessages, (msg) => {
-      console.log(
-        `%c${this.transport.role === IS_ALFIE ? "Alfie" : "Betty"} got: ${
-          messageNames[msg.kind]
-        }`,
-        `color: ${this.transport.role === IS_ALFIE ? "red" : "blue"}`,
-      );
+      if (this.onMessage) {
+          this.onMessage(msg, this.transport.role === IS_ALFIE);
+      }
 
       if (msg.kind === MsgKind.DataSendEntry) {
         this.currentlyReceivedEntry = msg.entry;
@@ -841,6 +845,9 @@ export class WgpsMessenger<
 
     // Send the digest of the nonce to the other peer.
     await this.transport.send(commitment);
+
+    // Give announcer the other peer's maximumPayloadSize.
+    this.announcer.otherMaximumPayloadSize = await this.transport.maximumPayloadSize;
 
     // Wait until we have the received commitment.
     await this.transport.receivedCommitment;
@@ -1008,7 +1015,7 @@ export class WgpsMessenger<
 
   private setupReconciliation() {
     // When our announcer releases an 'announcement pack' (everything needed to announce and send some entries)...
-    onAsyncIterate(this.announcer.announcementPacks(), (pack) => {
+    onAsyncIterate(this.announcer.announcementPacks(), async (pack) => {
       // Bind any static tokens first.
       for (const staticToken of pack.staticTokenBinds) {
         this.encoder.encode({
@@ -1038,7 +1045,13 @@ export class WgpsMessenger<
           staticTokenHandle: entry.staticTokenHandle,
         });
 
-        // We should check if the entry's payload length is less than our partner's maximum_payload_size and send the payload, but at the time of writing time is short and that requires something of a refactor to the announcer.
+        if (entry.payload !== null) {
+            this.encoder.encode({
+              kind: MsgKind.ReconciliationSendPayload,
+              amount: entry.lengthyEntry.available,
+              bytes: await entry.payload.bytes(),
+            });
+        }
 
         this.encoder.encode({
           kind: MsgKind.ReconciliationTerminatePayload,

@@ -15,6 +15,7 @@ import {
   testSchemeSubspaceCap,
   TestSubspace,
 } from "../test/test_schemes.ts";
+import { MsgKind } from "./types.ts";
 import { delay } from "@std/async";
 import { Store } from "../store/store.ts";
 import type { EntryDriver, PayloadDriver } from "../store/storage/types.ts";
@@ -2402,6 +2403,247 @@ function testWgpsMessenger(scenario: WgpsScenario) {
         assertEquals(actualSizeFamilyBetty, 2);
         assert(alfieHasAllPayloads, "Alfie does not have all payloads");
         assert(bettyHasAllPayloads, "Betty does not have all payloads");
+
+        messengerAlfie.close();
+        messengerBetty.close();
+      });
+
+      await scenario.dispose();
+    },
+  );
+
+  Deno.test(
+    `Full Reconciliation with ReconciliationSendPayload (${scenario.name})`,
+    async (test) => {
+      await test.step("sync", async () => {
+        const [alfie, betty] = transportPairInMemory();
+
+        const challengeHash = async (bytes: Uint8Array) => {
+          return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+        };
+
+        const storeMapAlfie = new StoreMap(
+          async (namespace) => {
+            const drivers = await scenario.getDrivers("alfie", namespace);
+
+            const store = new Store({
+              namespace,
+              schemes: {
+                authorisation: testSchemeAuthorisation,
+                fingerprint: testSchemeFingerprint,
+                namespace: testSchemeNamespace,
+                path: testSchemePath,
+                payload: testSchemePayload,
+                subspace: testSchemeSubspace,
+              },
+              ...drivers,
+            });
+
+            return store;
+          },
+          {
+            authorisation: testSchemeAuthorisation,
+            fingerprint: testSchemeFingerprint,
+            namespace: testSchemeNamespace,
+            path: testSchemePath,
+            payload: testSchemePayload,
+            subspace: testSchemeSubspace,
+          },
+        );
+
+        const storeFamilyAlfie = await storeMapAlfie.get(TestNamespace.Family);
+
+        const maximumPeerSizeBetty = 4;
+
+        // within maximum peer size of Betty
+        for (let i = 0; i < 10; i++) {
+          const payload = new Uint8Array(2 ** maximumPeerSizeBetty);
+          payload[0] = i;
+          await storeFamilyAlfie.set({
+            subspace: TestSubspace.Gemma,
+            payload: payload,
+            path: [
+              new Uint8Array([1]),
+              crypto.getRandomValues(new Uint8Array(4)),
+            ],
+          }, TestSubspace.Gemma);
+        }
+
+        // over maximum peer size of Betty
+        for (let i = 0; i < 10; i++) {
+          const payload = new Uint8Array(2 ** maximumPeerSizeBetty + 1);
+          payload[0] = i;
+          await storeFamilyAlfie.set({
+            subspace: TestSubspace.Gemma,
+            payload: payload,
+            path: [
+              new Uint8Array([1]),
+              crypto.getRandomValues(new Uint8Array(4)),
+            ],
+          }, TestSubspace.Gemma);
+        }
+
+        const messengerAlfie = new WgpsMessenger({
+          challengeHash,
+          challengeLength: 128,
+          challengeHashLength: 32,
+          maxPayloadSizePower: 8,
+          transport: alfie,
+          schemes: {
+            subspaceCap: testSchemeSubspaceCap,
+            namespace: testSchemeNamespace,
+            accessControl: testSchemeAccessControl,
+            pai: testSchemePai,
+            path: testSchemePath,
+            subspace: testSchemeSubspace,
+            authorisationToken: testSchemeAuthorisationToken,
+            fingerprint: testSchemeFingerprint,
+            authorisation: testSchemeAuthorisation,
+            payload: testSchemePayload,
+          },
+          getStore: (namespace) => {
+            return storeMapAlfie.get(namespace);
+          },
+          interests: new Map([[
+            {
+              capability: {
+                namespace: TestNamespace.Family,
+                subspace: TestSubspace.Gemma,
+                path: [new Uint8Array([1])],
+                receiver: TestSubspace.Alfie,
+                time: {
+                  start: BigInt(0),
+                  end: OPEN_END,
+                },
+              } as TestReadCap,
+            },
+            [{
+              area: {
+                includedSubspaceId: TestSubspace.Gemma,
+                pathPrefix: [new Uint8Array([1])],
+                timeRange: {
+                  start: BigInt(0),
+                  end: OPEN_END,
+                },
+              },
+              maxCount: 0,
+              maxSize: BigInt(0),
+            }],
+          ]]),
+          transformPayload: (bytes) => bytes,
+          processReceivedPayload: (bytes) => bytes,
+        });
+
+        const storeMapBetty = new StoreMap(
+          async (namespace) => {
+            const drivers = await scenario.getDrivers("betty", namespace);
+            const store = new Store({
+              namespace,
+              schemes: {
+                authorisation: testSchemeAuthorisation,
+                fingerprint: testSchemeFingerprint,
+                namespace: testSchemeNamespace,
+                path: testSchemePath,
+                payload: testSchemePayload,
+                subspace: testSchemeSubspace,
+              },
+              ...drivers,
+            });
+
+            return store;
+          },
+          {
+            authorisation: testSchemeAuthorisation,
+            fingerprint: testSchemeFingerprint,
+            namespace: testSchemeNamespace,
+            path: testSchemePath,
+            payload: testSchemePayload,
+            subspace: testSchemeSubspace,
+          },
+        );
+
+        const storeFamilyBetty = await storeMapBetty.get(TestNamespace.Family);
+
+        let reconciliationSendPayloadCounter = 0;
+        let dataSendPayloadCounter = 0;
+
+        const messengerBetty = new WgpsMessenger({
+          challengeHash,
+          challengeLength: 128,
+          challengeHashLength: 32,
+          maxPayloadSizePower: maximumPeerSizeBetty,
+          transport: betty,
+          schemes: {
+            subspaceCap: testSchemeSubspaceCap,
+            namespace: testSchemeNamespace,
+            accessControl: testSchemeAccessControl,
+            pai: testSchemePai,
+            path: testSchemePath,
+            subspace: testSchemeSubspace,
+            authorisationToken: testSchemeAuthorisationToken,
+            fingerprint: testSchemeFingerprint,
+            authorisation: testSchemeAuthorisation,
+            payload: testSchemePayload,
+          },
+          getStore: (namespace) => {
+            return storeMapBetty.get(namespace);
+          },
+          interests: new Map([[
+            {
+              capability: {
+                namespace: TestNamespace.Family,
+                subspace: TestSubspace.Gemma,
+                path: [new Uint8Array([1])],
+                receiver: TestSubspace.Betty,
+                time: {
+                  start: BigInt(0),
+                  end: OPEN_END,
+                },
+              } as TestReadCap,
+            },
+            [{
+              area: {
+                includedSubspaceId: TestSubspace.Gemma,
+                pathPrefix: [new Uint8Array([1])],
+                timeRange: {
+                  start: BigInt(0),
+                  end: OPEN_END,
+                },
+              },
+              maxCount: 0,
+              maxSize: BigInt(0),
+            }],
+          ]]),
+          transformPayload: (bytes) => bytes,
+          processReceivedPayload: (bytes) => bytes,
+          onMessage: (message, _) => {
+            if (message.kind === MsgKind.ReconciliationSendPayload) {
+              reconciliationSendPayloadCounter++;
+            } else if (message.kind === MsgKind.DataSendPayload) {
+              dataSendPayloadCounter++;
+            }
+          },
+        });
+
+        await delay(20 * scenario.timeMultiplier);
+
+        const range: Range3d<TestSubspace> = {
+          subspaceRange: {
+            start: TestSubspace.Gemma,
+            end: TestSubspace.Dalton,
+          },
+          pathRange: {
+            start: [],
+            end: OPEN_END,
+          },
+          timeRange: {
+            start: 0n,
+            end: OPEN_END,
+          },
+        };
+
+        assertEquals(reconciliationSendPayloadCounter, 10);
+        assertEquals(dataSendPayloadCounter, 10);
 
         messengerAlfie.close();
         messengerBetty.close();
