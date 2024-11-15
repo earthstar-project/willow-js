@@ -15,6 +15,7 @@ import {
   type MsgReconciliationSendEntry,
   type MsgReconciliationSendFingerprint,
   type MsgReconciliationSendPayload,
+  type MsgReconciliationTerminatePayload,
   type ReconciliationPrivy,
 } from "../types.ts";
 import { compactWidthFromEndOfByte } from "./util.ts";
@@ -161,7 +162,7 @@ export async function decodeReconciliationAnnounceEntries<
   const isSenderPrevSender = (firstByte & 0x2) === 0x2;
   const isReceiverPrevReceiver = (firstByte & 0x1) === 0x1;
 
-  const countWidth = 2 ** ((secondByte & 0xc) >> 2);
+  const isEmpty = (secondByte & 0x4) === 0x4;
 
   const willSort = (secondByte & 0x2) === 0x2;
 
@@ -223,12 +224,6 @@ export async function decodeReconciliationAnnounceEntries<
     receiverHandle = privy.prevReceiverHandle;
   }
 
-  await bytes.nextAbsolute(countWidth);
-
-  const count = BigInt(decodeCompactWidth(bytes.array.subarray(0, countWidth)));
-
-  bytes.prune(countWidth);
-
   const outer = encodedRelativeToPrevRange
     ? privy.prevRange
     : await opts.aoiHandlesToRange3d(senderHandle, receiverHandle);
@@ -245,7 +240,7 @@ export async function decodeReconciliationAnnounceEntries<
   return {
     kind: MsgKind.ReconciliationAnnounceEntries,
     range,
-    count,
+    isEmpty,
     receiverHandle,
     senderHandle,
     wantResponse,
@@ -395,6 +390,17 @@ export async function decodeReconciliationSendPayload(
   };
 }
 
-// Don't need to decode ReconciliationTerminatePayload
-// as there's nothing in the message and we decode the message type
-// in decode_messages.
+export async function decodeReconciliationTerminatePayload(
+  bytes: GrowingBytes,
+): Promise<MsgReconciliationTerminatePayload> {
+  await bytes.nextAbsolute(1);
+
+  const isFinal = (bytes.array[0] & 0x4) === 0x4;
+
+  bytes.prune(1);
+
+  return {
+      kind: MsgKind.ReconciliationTerminatePayload,
+      isFinal,
+  };
+}

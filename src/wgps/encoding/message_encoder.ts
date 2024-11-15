@@ -13,6 +13,8 @@ import {
   encodeControlFree,
   encodeControlIssueGuarantee,
   encodeControlPlead,
+  encodeControlLimitSending,
+  encodeControlLimitReceiving,
 } from "./control.ts";
 import {
   encodeCommitmentReveal,
@@ -165,6 +167,14 @@ export class MessageEncoder<
         bytes = encodeControlPlead(message);
         break;
       }
+      case MsgKind.ControlLimitSending: {
+        bytes = encodeControlLimitSending(message);
+        break;
+      }
+      case MsgKind.ControlLimitReceiving: {
+        bytes = encodeControlLimitReceiving(message);
+        break;
+      }
       case MsgKind.ControlAnnounceDropping: {
         bytes = encodeControlAnnounceDropping(message);
         break;
@@ -304,7 +314,7 @@ export class MessageEncoder<
       }
 
       case MsgKind.ReconciliationTerminatePayload: {
-        bytes = encodeReconciliationTerminatePayload();
+        bytes = encodeReconciliationTerminatePayload(message);
         break;
       }
 

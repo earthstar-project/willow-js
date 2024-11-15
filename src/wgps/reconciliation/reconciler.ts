@@ -81,7 +81,7 @@ export class Reconciler<
 
   private announceQueue = new FIFO<{
     range: Range3d<SubspaceId>;
-    count: number;
+    isEmpty: boolean;
     wantResponse: boolean;
     covers: bigint | typeof COVERS_NONE;
   }>();
@@ -166,14 +166,14 @@ export class Reconciler<
     if (this.fingerprintScheme.isEqual(fingerprint, fingerprintOursFinal)) {
       this.announceQueue.push({
         range,
-        count: 0,
+        isEmpty: true,
         wantResponse: false,
         covers: BigInt(yourRangeCounter),
       });
     } else if (size <= SEND_ENTRIES_THRESHOLD) {
       this.announceQueue.push({
         range,
-        count: size,
+        isEmpty: size === 0,
         wantResponse: true,
         covers: BigInt(yourRangeCounter),
       });

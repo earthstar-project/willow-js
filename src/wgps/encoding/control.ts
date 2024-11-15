@@ -3,6 +3,8 @@ import { compactWidth, encodeCompactWidth } from "@earthstar/willow-utils";
 import {
   HandleType,
   LogicalChannel,
+  MsgControlLimitReceiving,
+  MsgControlLimitSending,
   type MsgControlAbsolve,
   type MsgControlAnnounceDropping,
   type MsgControlApologise,
@@ -72,7 +74,9 @@ export function encodeControlIssueGuarantee(
 ) {
   const amountWidth = compactWidth(msg.amount);
 
-  const header = amountWidth === 1
+  const header = 0x80;
+
+  const amountMask = amountWidth === 1
     ? 0x80
     : amountWidth === 2
     ? 0x81
@@ -80,9 +84,11 @@ export function encodeControlIssueGuarantee(
     ? 0x82
     : 0x83;
 
+  const channelMask = channelMaskEnd(0, msg.channel) << 3;
+
   return concat(
     [
-      new Uint8Array([header, channelMaskStart(0, msg.channel)]),
+      new Uint8Array([header, amountMask | channelMask]),
       encodeCompactWidth(msg.amount),
     ],
   );
@@ -93,17 +99,21 @@ export function encodeControlAbsolve(
 ) {
   const amountWidth = compactWidth(msg.amount);
 
-  const header = amountWidth === 1
-    ? 0x84
+  const header = 0x82;
+
+  const amountMask = amountWidth === 1
+    ? 0x80
     : amountWidth === 2
-    ? 0x85
+    ? 0x81
     : amountWidth === 4
-    ? 0x86
-    : 0x87;
+    ? 0x82
+    : 0x83;
+
+  const channelMask = channelMaskEnd(0, msg.channel) << 3;
 
   return concat(
     [
-      new Uint8Array([header, channelMaskStart(0, msg.channel)]),
+      new Uint8Array([header, amountMask | channelMask]),
       encodeCompactWidth(msg.amount),
     ],
   );
@@ -114,18 +124,72 @@ export function encodeControlPlead(
 ) {
   const targetWidth = compactWidth(msg.target);
 
-  const header = targetWidth === 1
-    ? 0x88
+  const header = 0x84;
+
+  const targetMask = targetWidth === 1
+    ? 0x80
     : targetWidth === 2
-    ? 0x89
+    ? 0x81
     : targetWidth === 4
-    ? 0x8a
-    : 0x8b;
+    ? 0x82
+    : 0x83;
+
+  const channelMask = channelMaskEnd(0, msg.channel) << 3;
 
   return concat(
     [
-      new Uint8Array([header, channelMaskStart(0, msg.channel)]),
+      new Uint8Array([header, targetMask | channelMask]),
       encodeCompactWidth(msg.target),
+    ],
+  );
+}
+
+export function encodeControlLimitSending(
+  msg: MsgControlLimitSending,
+) {
+  const boundWidth = compactWidth(msg.bound);
+
+  const header = 0x86;
+
+  const boundMask = boundWidth === 1
+    ? 0x80
+    : boundWidth === 2
+    ? 0x81
+    : boundWidth === 4
+    ? 0x82
+    : 0x83;
+
+  const channelMask = channelMaskEnd(0, msg.channel) << 3;
+
+  return concat(
+    [
+      new Uint8Array([header, boundMask | channelMask]),
+      encodeCompactWidth(msg.bound),
+    ],
+  );
+}
+
+export function encodeControlLimitReceiving(
+  msg: MsgControlLimitReceiving,
+) {
+  const boundWidth = compactWidth(msg.bound);
+
+  const header = 0x87;
+
+  const boundMask = boundWidth === 1
+    ? 0x80
+    : boundWidth === 2
+    ? 0x81
+    : boundWidth === 4
+    ? 0x82
+    : 0x83;
+
+  const channelMask = channelMaskEnd(0, msg.channel) << 3;
+
+  return concat(
+    [
+      new Uint8Array([header, boundMask | channelMask]),
+      encodeCompactWidth(msg.bound),
     ],
   );
 }

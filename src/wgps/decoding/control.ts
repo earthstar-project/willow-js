@@ -8,6 +8,8 @@ import {
   type MsgControlFree,
   type MsgControlIssueGuarantee,
   type MsgControlPlead,
+  type MsgControlLimitSending,
+  type MsgControlLimitReceiving,
   MsgKind,
 } from "../types.ts";
 import { compactWidthFromEndOfByte } from "./util.ts";
@@ -65,15 +67,9 @@ export function decodeHandleTypeFromBeginningOfByte(byte: number): HandleType {
 export async function decodeControlIssueGuarantee(
   bytes: GrowingBytes,
 ): Promise<MsgControlIssueGuarantee> {
-  await bytes.nextAbsolute(1);
-
-  // We know we have a byte.
-  const compactWidth = compactWidthFromEndOfByte(bytes.array[0]);
-
-  // Wait for another byte and decode the channel from it
   await bytes.nextAbsolute(2);
-
-  const channel = decodeChannelFromBeginningOfByte(bytes.array[1]);
+  const compactWidth = compactWidthFromEndOfByte(bytes.array[1]);
+  const channel = decodeChannelFromEndOfByte(bytes.array[1] >> 3);
 
   // Wait for the number of bytes compact width told us to expect.
 
@@ -93,13 +89,9 @@ export async function decodeControlIssueGuarantee(
 export async function decodeControlAbsolve(
   bytes: GrowingBytes,
 ): Promise<MsgControlAbsolve> {
-  await bytes.nextAbsolute(1);
-
-  const compactWidth = compactWidthFromEndOfByte(bytes.array[0]);
-
   await bytes.nextAbsolute(2);
-
-  const channel = decodeChannelFromBeginningOfByte(bytes.array[1]);
+  const compactWidth = compactWidthFromEndOfByte(bytes.array[1]);
+  const channel = decodeChannelFromEndOfByte(bytes.array[1] >> 3);
 
   await bytes.nextAbsolute(2 + compactWidth);
 
@@ -117,13 +109,9 @@ export async function decodeControlAbsolve(
 export async function decodeControlPlead(
   bytes: GrowingBytes,
 ): Promise<MsgControlPlead> {
-  await bytes.nextAbsolute(1);
-
-  const compactWidth = compactWidthFromEndOfByte(bytes.array[0]);
-
   await bytes.nextAbsolute(2);
-
-  const channel = decodeChannelFromBeginningOfByte(bytes.array[1]);
+  const compactWidth = compactWidthFromEndOfByte(bytes.array[1]);
+  const channel = decodeChannelFromEndOfByte(bytes.array[1] >> 3);
 
   await bytes.nextAbsolute(2 + compactWidth);
 
@@ -135,6 +123,46 @@ export async function decodeControlPlead(
     kind: MsgKind.ControlPlead,
     channel,
     target: BigInt(target),
+  };
+}
+
+export async function decodeControlLimitSending(
+  bytes: GrowingBytes,
+): Promise<MsgControlLimitSending> {
+  await bytes.nextAbsolute(2);
+  const compactWidth = compactWidthFromEndOfByte(bytes.array[1]);
+  const channel = decodeChannelFromEndOfByte(bytes.array[1] >> 3);
+
+  await bytes.nextAbsolute(2 + compactWidth);
+
+  const bound = decodeCompactWidth(bytes.array.subarray(2, 2 + compactWidth));
+
+  bytes.prune(2 + compactWidth);
+
+  return {
+    kind: MsgKind.ControlLimitSending,
+    channel,
+    bound: BigInt(bound),
+  };
+}
+
+export async function decodeControlLimitReceiving(
+  bytes: GrowingBytes,
+): Promise<MsgControlLimitReceiving> {
+  await bytes.nextAbsolute(2);
+  const compactWidth = compactWidthFromEndOfByte(bytes.array[1]);
+  const channel = decodeChannelFromEndOfByte(bytes.array[1] >> 3);
+
+  await bytes.nextAbsolute(2 + compactWidth);
+
+  const bound = decodeCompactWidth(bytes.array.subarray(2, 2 + compactWidth));
+
+  bytes.prune(2 + compactWidth);
+
+  return {
+    kind: MsgKind.ControlLimitReceiving,
+    channel,
+    bound: BigInt(bound),
   };
 }
 

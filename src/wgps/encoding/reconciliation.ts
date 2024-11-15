@@ -1,6 +1,7 @@
 import { concat } from "@std/bytes";
 import {
   COVERS_NONE,
+  MsgReconciliationTerminatePayload,
   type MsgReconciliationAnnounceEntries,
   type MsgReconciliationSendEntry,
   type MsgReconciliationSendFingerprint,
@@ -171,15 +172,13 @@ export function encodeReconciliationAnnounceEntries<
     senderReceiverWidthFlags = 0x0;
   }
 
-  const countCompactWidth = compactWidth(msg.count);
-
-  const countCompactWidthFlags = compactWidthOr(0, countCompactWidth) << 2;
+  const isEmptyFlag = msg.isEmpty ? 0x4 : 0x0;
 
   const willSortFlag = msg.willSort ? 0x2 : 0x0;
 
   const coversNotNone = msg.covers !== COVERS_NONE ? 0x1 : 0x0;
 
-  const secondByte = senderReceiverWidthFlags | countCompactWidthFlags |
+  const secondByte = senderReceiverWidthFlags | isEmptyFlag |
     willSortFlag | coversNotNone;
 
   let coversCompactWidth: Uint8Array;
@@ -206,8 +205,6 @@ export function encodeReconciliationAnnounceEntries<
     ? encodeCompactWidth(msg.receiverHandle)
     : new Uint8Array();
 
-  const encodedCount = encodeCompactWidth(msg.count);
-
   const encodedRelativeRange = encodeRange3dRelative(
     {
       encodeSubspaceId: opts.encodeSubspaceId,
@@ -225,7 +222,6 @@ export function encodeReconciliationAnnounceEntries<
       coversEncoded,
       encodedSenderHandle,
       encodedReceiverHandle,
-      encodedCount,
       encodedRelativeRange,
     ],
   );
@@ -335,6 +331,14 @@ export function encodeReconciliationSendPayload(
   return concat([new Uint8Array([header]), amountEncoded, msg.bytes]);
 }
 
-export function encodeReconciliationTerminatePayload(): Uint8Array {
-  return new Uint8Array([0x58]);
+export function encodeReconciliationTerminatePayload(
+    msg: MsgReconciliationTerminatePayload,
+): Uint8Array {
+  const messageTypeMask = 0x58;
+
+  const isFinalFlag = msg.isFinal ? 0x4 : 0x0;
+
+  const byte = messageTypeMask | isFinalFlag;
+
+  return new Uint8Array([byte]);
 }

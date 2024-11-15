@@ -8,6 +8,7 @@ import type {
   MsgReconciliationAnnounceEntries,
   MsgReconciliationSendEntry,
   MsgReconciliationSendFingerprint,
+  MsgReconciliationTerminatePayload,
   ReconciliationPrivy,
 } from "../types.ts";
 
@@ -37,7 +38,7 @@ export class ReconcileMsgTracker<
 
   private announcedRange: Range3d<SubspaceId>;
   private announcedNamespace: NamespaceId;
-  private announcedEntriesRemaining = 0n;
+  private announcedEntriesExpecting = false;
 
   private handleToNamespaceId: (aoiHandle: bigint) => NamespaceId;
 
@@ -76,7 +77,7 @@ export class ReconcileMsgTracker<
 
     this.announcedRange = msg.range;
     this.announcedNamespace = this.handleToNamespaceId(msg.receiverHandle);
-    this.announcedEntriesRemaining = msg.count;
+    this.announcedEntriesExpecting = !msg.isEmpty;
   }
 
   onSendEntry(
@@ -90,13 +91,14 @@ export class ReconcileMsgTracker<
     this.prevEntry = msg.entry.entry;
     this.prevToken = msg.staticTokenHandle;
 
-    this.announcedEntriesRemaining -= 1n;
-
     this.isAwaitingTermination = true;
   }
 
-  onTerminatePayload() {
+  onTerminatePayload(msg: MsgReconciliationTerminatePayload) {
     this.isAwaitingTermination = false;
+    if (msg.isFinal) {
+      this.announcedEntriesExpecting = false;
+    }
   }
 
   isExpectingPayloadOrTermination() {
@@ -104,11 +106,7 @@ export class ReconcileMsgTracker<
   }
 
   isExpectingReconciliationSendEntry() {
-    if (this.announcedEntriesRemaining > 0n) {
-      return true;
-    }
-
-    return false;
+    return this.announcedEntriesExpecting;
   }
 
   getPrivy(): ReconciliationPrivy<NamespaceId, SubspaceId, PayloadDigest> {

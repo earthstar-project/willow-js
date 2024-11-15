@@ -110,6 +110,8 @@ export enum MsgKind {
   ControlIssueGuarantee,
   ControlAbsolve,
   ControlPlead,
+  ControlLimitSending,
+  ControlLimitReceiving,
   ControlAnnounceDropping,
   ControlApologise,
   ControlFree,
@@ -138,6 +140,8 @@ export const messageNames: Record<MsgKind, string> = {
   [MsgKind.ControlIssueGuarantee]: "ControlIssueGuarantee",
   [MsgKind.ControlAbsolve]: "ControlAbsolve",
   [MsgKind.ControlPlead]: "ControlPlead",
+  [MsgKind.ControlLimitSending]: "ControlLimitSending",
+  [MsgKind.ControlLimitReceiving]: "ControlLimitReceiving",
   [MsgKind.ControlAnnounceDropping]: "ControlAnnounceDropping",
   [MsgKind.ControlApologise]: "ControlApologise",
   [MsgKind.ControlFree]: "ControlFree",
@@ -170,6 +174,18 @@ export type MsgControlAbsolve = Msg<MsgKind.ControlAbsolve, {
 /** Ask the other peer to send an ControlAbsolve message such that the receiver remaining guarantees will be target. */
 export type MsgControlPlead = Msg<MsgKind.ControlPlead, {
   target: bigint;
+  channel: LogicalChannel;
+}>;
+
+/** Promise to the other peer an upper bound on the number of bytes of messages that you will send on some logical channel. */
+export type MsgControlLimitSending = Msg<MsgKind.ControlLimitSending, {
+  bound: bigint;
+  channel: LogicalChannel;
+}>;
+
+/** Promise to the other peer an upper bound on the number of bytes of messages that you will still receive on some logical channel. */
+export type MsgControlLimitReceiving = Msg<MsgKind.ControlLimitReceiving, {
+  bound: bigint;
   channel: LogicalChannel;
 }>;
 
@@ -299,11 +315,11 @@ export type MsgReconciliationAnnounceEntries<SubspaceId> = Msg<
   {
     /** The 3dRange whose LengthyEntries to transmit. */
     range: Range3d<SubspaceId>;
-    /** The number of Entries the sender has in the range. */
-    count: bigint;
+    /** True if and only if the the sender has zero Entries in the range. */
+    isEmpty: boolean;
     /** A boolean flag to indicate whether the sender wishes to receive a ReconciliationAnnounceEntries message for the same 3dRange in return. */
     wantResponse: boolean;
-    /** Whether the sender promises to send the Entries in the range sorted from oldest to newest. */
+    /** Whether the sender promises to send the Entries in the range sorted ascendingly by subspace_id first, path second. */
     willSort: boolean;
     /** An AreaOfInterestHandle, bound by the sender of this message, that fully contains the range. */
     senderHandle: bigint;
@@ -340,9 +356,13 @@ export type MsgReconciliationSendPayload = Msg<
 >;
 
 /** Indicate that no more bytes will be transmitted for the currently transmitted Payload as part of set reconciliation. */
-export type MsgReconciliationTerminatePayload = {
-  kind: MsgKind.ReconciliationTerminatePayload;
-};
+export type MsgReconciliationTerminatePayload = Msg<
+  MsgKind.ReconciliationTerminatePayload,
+  {
+    /** True if and only if no further ReconciliationSendEntry message will be sent as part of reconciling the current 3dRange. */
+    isFinal: boolean;
+  }
+>;
 
 /** Transmit an AuthorisedEntry to the other peer, and optionally prepare transmission of its Payload. */
 export type MsgDataSendEntry<
@@ -416,6 +436,8 @@ export type SyncMessage<
   | MsgControlIssueGuarantee
   | MsgControlAbsolve
   | MsgControlPlead
+  | MsgControlLimitSending
+  | MsgControlLimitReceiving
   | MsgControlAnnounceDropping
   | MsgControlApologise
   | MsgControlFree
@@ -504,6 +526,8 @@ export type NoChannelMsg<PsiGroup, SubspaceCapability, SyncSubspaceSignature> =
   | MsgControlIssueGuarantee
   | MsgControlAbsolve
   | MsgControlPlead
+  | MsgControlLimitSending
+  | MsgControlLimitReceiving
   | MsgControlAnnounceDropping
   | MsgControlApologise
   | MsgControlFree
