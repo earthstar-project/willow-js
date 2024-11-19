@@ -1,11 +1,10 @@
 import type { Range3d } from "@earthstar/willow-utils";
-import { encodeBase64 } from "@std/encoding/base64";
 import { FIFO } from "@korkje/fifo";
 import { WillowError } from "../../errors.ts";
 import type { Store } from "../../store/store.ts";
 import type { LengthyEntry, Payload, PayloadScheme } from "../../store/types.ts";
-import type { HandleStore } from "../handle_store.ts";
 import type { AuthorisationTokenScheme, COVERS_NONE } from "../types.ts";
+import type { StaticTokenStore } from "../static_token_store.ts";
 
 export type AnnouncerOpts<
   AuthorisationToken,
@@ -19,7 +18,7 @@ export type AnnouncerOpts<
     DynamicToken
   >;
   payloadScheme: PayloadScheme<PayloadDigest>;
-  staticTokenHandleStoreOurs: HandleStore<StaticToken>;
+  staticTokenStore: StaticTokenStore<StaticToken>,
 };
 
 type AnnouncementPack<
@@ -29,9 +28,7 @@ type AnnouncementPack<
   SubspaceId,
   PayloadDigest,
 > = {
-  // Send these first in SetupBindStaticToken messages
-  staticTokenBinds: StaticToken[];
-  // Then send a ReconciliationAnnounceEntries
+  // Send ReconciliationAnnounceEntries
   announcement: {
     range: Range3d<SubspaceId>;
     count: number;
@@ -66,9 +63,7 @@ export class Announcer<
     DynamicToken
   >;
   private payloadScheme: PayloadScheme<PayloadDigest>;
-  private staticTokenHandleStoreOurs: HandleStore<StaticToken>;
-
-  private staticTokenHandleMap = new Map<string, bigint>();
+  private staticTokenStore: StaticTokenStore<StaticToken>;
 
   private announcementPackQueue = new FIFO<
     AnnouncementPack<
@@ -92,33 +87,7 @@ export class Announcer<
   ) {
     this.authorisationTokenScheme = opts.authorisationTokenScheme;
     this.payloadScheme = opts.payloadScheme;
-    this.staticTokenHandleStoreOurs = opts.staticTokenHandleStoreOurs;
-  }
-
-  private getStaticTokenHandle(
-    staticToken: StaticToken,
-  ): { handle: bigint; alreadyExisted: boolean } {
-    const encoded = this.authorisationTokenScheme.encodings.staticToken.encode(
-      staticToken,
-    );
-    const base64 = encodeBase64(encoded);
-
-    const existingHandle = this.staticTokenHandleMap.get(base64);
-
-    if (existingHandle !== undefined) {
-      const canUse = this.staticTokenHandleStoreOurs.canUse(existingHandle);
-
-      if (!canUse) {
-        throw new WillowError("Could not use a static token handle");
-      }
-
-      return { handle: existingHandle, alreadyExisted: true };
-    }
-
-    const newHandle = this.staticTokenHandleStoreOurs.bind(staticToken);
-    this.staticTokenHandleMap.set(base64, newHandle);
-
-    return { handle: newHandle, alreadyExisted: false };
+    this.staticTokenStore = opts.staticTokenStore;
   }
 
   async queueAnnounce(announcement: {
@@ -140,7 +109,6 @@ export class Announcer<
   }) {
     // Queue announcement message.
 
-    const staticTokenBinds: StaticToken[] = [];
     const entries: {
       lengthyEntry: LengthyEntry<NamespaceId, SubspaceId, PayloadDigest>;
       staticTokenHandle: bigint;
@@ -158,14 +126,7 @@ export class Announcer<
       const [staticToken, dynamicToken] = this.authorisationTokenScheme
         .decomposeAuthToken(authToken);
 
-      const {
-        handle: staticTokenHandle,
-        alreadyExisted: staticTokenHandleAlreadyExisted,
-      } = this.getStaticTokenHandle(staticToken);
-
-      if (!staticTokenHandleAlreadyExisted) {
-        staticTokenBinds.push(staticToken);
-      }
+      const staticTokenHandle = this.staticTokenStore.getByValue(staticToken);
 
       let available = payload ? await payload.length() : 0n;
 
@@ -187,7 +148,6 @@ export class Announcer<
     }
 
     this.announcementPackQueue.push({
-      staticTokenBinds,
       announcement: {
         count: entries.length,
         range: announcement.range,

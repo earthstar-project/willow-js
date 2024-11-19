@@ -51,6 +51,7 @@ import {
   orderBytes,
   type Range3d,
 } from "@earthstar/willow-utils";
+import { StaticTokenStore } from "./static_token_store.ts";
 
 /** Return a {@link Store} for a given `NamespaceId`. */
 export type GetStoreFn<
@@ -306,8 +307,9 @@ export class WgpsMessenger<
   private handlesAoisOurs = new HandleStore<AreaOfInterest<SubspaceId>>();
   private handlesAoisTheirs = new HandleStore<AreaOfInterest<SubspaceId>>();
 
-  private handlesStaticTokensOurs = new HandleStore<StaticToken>();
   private handlesStaticTokensTheirs = new HandleStore<StaticToken>();
+
+  private staticTokenenStore: StaticTokenStore<StaticToken>;
 
   // Reconciliation
 
@@ -489,6 +491,10 @@ export class WgpsMessenger<
       intersectionHandlesTheirs: this.handlesIntersectionsTheirs,
     });
 
+    this.staticTokenenStore = new StaticTokenStore<StaticToken>(
+      opts.schemes.authorisationToken.encodings.staticToken.encode,
+    );
+
     // Reconciliation helpers
 
     this.aoiIntersectionFinder = new AoiIntersectionFinder({
@@ -501,7 +507,7 @@ export class WgpsMessenger<
     this.announcer = new Announcer({
       authorisationTokenScheme: this.schemes.authorisationToken,
       payloadScheme: this.schemes.payload,
-      staticTokenHandleStoreOurs: this.handlesStaticTokensOurs,
+      staticTokenStore: this.staticTokenenStore,
     });
 
     this.reconciliationPayloadIngester = new PayloadIngester({
@@ -1016,8 +1022,8 @@ export class WgpsMessenger<
   private setupReconciliation() {
     // When our announcer releases an 'announcement pack' (everything needed to announce and send some entries)...
     onAsyncIterate(this.announcer.announcementPacks(), async (pack) => {
-      // Bind any static tokens first.
-      for (const staticToken of pack.staticTokenBinds) {
+      // Empty static token queue so they will appear before entries
+      for (const staticToken of this.staticTokenenStore.boundStaticTokens()) {
         this.encoder.encode({
           kind: MsgKind.SetupBindStaticToken,
           staticToken,
