@@ -189,6 +189,8 @@ export class WgpsMessenger<
 > {
   private closed = false;
 
+  id: string;
+
   private interests: Map<
     ReadAuthorisation<ReadCapability, SubspaceCapability>,
     AreaOfInterest<SubspaceId>[]
@@ -436,6 +438,9 @@ export class WgpsMessenger<
       AuthorisationOpts
     >,
   ) {
+    // TODO think of a better naming scheme (maybe include protocol)
+    this.id = String(Math.floor(Math.random() * (1 << 30)));
+
     if (opts.maxPayloadSizePower < 0 || opts.maxPayloadSizePower > 64) {
       throw new ValidationError(
         "maxPayloadSizePower must be a natural number less than or equal to 64",
@@ -513,6 +518,7 @@ export class WgpsMessenger<
     this.reconciliationPayloadIngester = new PayloadIngester({
       getStore: this.getStore,
       processReceivedPayload: opts.processReceivedPayload,
+      id: this.id,
     });
 
     // Data
@@ -546,6 +552,7 @@ export class WgpsMessenger<
     this.dataPayloadIngester = new PayloadIngester({
       getStore: this.getStore,
       processReceivedPayload: opts.processReceivedPayload,
+      id: this.id,
     });
 
     this.onMessage = opts.onMessage;
@@ -1428,7 +1435,7 @@ export class WgpsMessenger<
         const result = await store.ingestEntry(
           message.entry.entry,
           authToken,
-          "TODO_DEFINE_THIS_WHEN_PLUMTREES_GROW",
+          this.id,
         );
 
         if (result.kind === "failure") {

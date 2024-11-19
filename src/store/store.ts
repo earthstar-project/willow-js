@@ -14,6 +14,7 @@ import {
   EntryPayloadSetEvent,
   EntryRemoveEvent,
   PayloadIngestEvent,
+  PayloadNoOpEvent,
   PayloadRemoveEvent,
 } from "./events.ts";
 import type { Storage3d } from "./storage/storage_3d/types.ts";
@@ -618,6 +619,7 @@ export class Store<
     payload: AsyncIterable<Uint8Array>,
     allowPartial = false,
     offset = 0,
+    externalSourceId? : string,
   ): Promise<IngestPayloadEvent> {
     const getResult = await this.storage.get(
       entryDetails.subspace,
@@ -636,6 +638,9 @@ export class Store<
     const existingPayload = await this.payloadDriver.get(entry.payloadDigest);
 
     if (existingPayload) {
+      this.dispatchEvent(
+        new PayloadNoOpEvent(entry, externalSourceId),
+      );
       return {
         kind: "no_op",
         reason: "already_have_it",
@@ -692,7 +697,7 @@ export class Store<
       }
 
       this.dispatchEvent(
-        new PayloadIngestEvent(entry, authToken, complete),
+        new PayloadIngestEvent(entry, authToken, complete, externalSourceId),
       );
     }
 

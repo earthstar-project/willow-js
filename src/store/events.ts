@@ -36,16 +36,19 @@ export class EntryIngestEvent<
   {
     entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>;
     authToken: AuthorisationToken;
+    externalSourceId?: string;
   }
 > {
   constructor(
     entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
     authToken: AuthorisationToken,
+    externalSourceId?: string,
   ) {
     super("entryingest", {
       detail: {
         entry,
         authToken,
+        externalSourceId,
       },
     });
   }
@@ -61,17 +64,43 @@ export class PayloadIngestEvent<
   entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>;
   authToken: AuthorisationToken;
   payload: Payload;
+  externalSourceId?: string;
 }> {
   constructor(
     entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
     authToken: AuthorisationToken,
     payload: Payload,
+    externalSourceId?: string,
   ) {
     super("payloadingest", {
       detail: {
         entry,
         authToken,
         payload,
+        externalSourceId,
+      },
+    });
+  }
+}
+
+/** Emitted after a {@linkcode Store} attempts to ingest a payload, but already had it. */
+export class PayloadNoOpEvent<
+  NamespacePublicKey,
+  SubspacePublicKey,
+  PayloadDigest,
+  AuthorisationToken,
+> extends CustomEvent<{
+  entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>;
+  externalSourceId?: string;
+}> {
+  constructor(
+    entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
+    externalSourceId?: string,
+  ) {
+    super("payloadnoop", {
+      detail: {
+        entry,
+        externalSourceId,
       },
     });
   }

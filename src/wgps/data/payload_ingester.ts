@@ -44,6 +44,8 @@ export class PayloadIngester<
     | Entry<NamespaceId, SubspaceId, PayloadDigest>
     | null = null;
 
+  private id: string;
+
   constructor(opts: {
     getStore: GetStoreFn<
       Prefingerprint,
@@ -58,8 +60,11 @@ export class PayloadIngester<
       bytes: Uint8Array,
       entryLength: bigint,
     ) => Uint8Array;
+    id: string;
   }) {
     this.processReceivedPayload = opts.processReceivedPayload;
+
+    this.id = opts.id;
 
     onAsyncIterate(this.events, async (event) => {
       if (event === CANCELLATION) {
@@ -105,7 +110,7 @@ export class PayloadIngester<
             path: entry.path,
             subspace: entry.subspaceId,
             timestamp: entry.timestamp,
-          }, new CancellableIngestion(fifo));
+          }, new CancellableIngestion(fifo), false, 0, this.id);
 
           this.currentIngestion = {
             kind: "active",

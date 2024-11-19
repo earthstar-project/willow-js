@@ -179,6 +179,8 @@ export type IngestEventFailure = {
 export type IngestEventNoOp = {
   kind: "no_op";
   reason: "obsolete_from_same_subspace" | "newer_prefix_found";
+  /** An ID representing the source of this ingested entry. */
+  externalSourceId?: string;
 };
 
 /** Emitted after a successuful entry ingestion. */
@@ -261,11 +263,15 @@ export type IngestPayloadEventFailure = {
 export type IngestPayloadEventNoOp = {
   kind: "no_op";
   reason: "already_have_it";
+  /** An ID representing the source of this ingested entry. */
+  externalSourceId?: string;
 };
 
 /** Emitted after the succesful ingestion of a payload. */
 export type IngestPayloadEventSuccess = {
   kind: "success";
+  /** An ID representing the source of this ingested entry. */
+  externalSourceId?: string;
 };
 
 /** Emitted after payload entry. */
