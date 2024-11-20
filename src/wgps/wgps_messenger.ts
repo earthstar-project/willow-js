@@ -382,6 +382,7 @@ export class WgpsMessenger<
   private currentlySentEntry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
   private currentlyReceivedEntry: Entry<NamespaceId, SubspaceId, PayloadDigest>;
   private currentlyReceivedOffset = 0n;
+  private currentlyReceivedLimit = 0n;
 
   private handlesPayloadRequestsOurs = new HandleStore<{
     offset: bigint;
@@ -756,7 +757,6 @@ export class WgpsMessenger<
 
       if (msg.kind === MsgKind.DataSendEntry) {
         this.currentlyReceivedEntry = msg.entry;
-        this.currentlyReceivedOffset = msg.offset;
       } else if (msg.kind === MsgKind.DataReplyPayload) {
         const request = this.handlesPayloadRequestsOurs.get(msg.handle);
 
@@ -767,7 +767,6 @@ export class WgpsMessenger<
         }
 
         this.currentlyReceivedEntry = request.entry;
-        this.currentlyReceivedOffset = request.offset;
       }
 
       switch (msg.kind) {
@@ -1502,6 +1501,8 @@ export class WgpsMessenger<
   ) {
     switch (message.kind) {
       case MsgKind.DataSendEntry: {
+        this.currentlyReceivedLimit = message.entry.payloadLength;
+
         const staticToken = await this.handlesStaticTokensTheirs.getEventually(
           message.staticTokenHandle,
         );
@@ -1526,7 +1527,7 @@ export class WgpsMessenger<
       case MsgKind.DataSendPayload: {
         if (
           message.amount + this.currentlyReceivedOffset >
-            this.currentlyReceivedEntry.payloadLength
+            this.currentlyReceivedLimit
         ) {
           throw new WgpsMessageValidationError("Partner sent too many bytes.");
         }
@@ -1534,7 +1535,7 @@ export class WgpsMessenger<
         this.currentlyReceivedOffset += message.amount;
 
         const endHere = this.currentlyReceivedOffset ===
-          this.currentlyReceivedEntry.payloadLength;
+          this.currentlyReceivedLimit;
 
         this.dataPayloadIngester.push(message.bytes, endHere);
 
