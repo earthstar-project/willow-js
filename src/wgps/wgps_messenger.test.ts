@@ -29,6 +29,7 @@ import { emptyDir, ensureDir } from "@std/fs";
 import { ANY_SUBSPACE, OPEN_END, type Range3d } from "@earthstar/willow-utils";
 import { assert, assertEquals, assertNotEquals } from "@std/assert";
 import { encodeBase64 } from "@std/encoding/base64";
+import { WgpsStatusEvent } from "./events.ts";
 
 type WgpsScenario = {
   name: string;
@@ -1756,7 +1757,11 @@ function testWgpsMessenger(scenario: WgpsScenario) {
           processReceivedPayload: (bytes) => bytes,
         });
 
-        await delay(20 * scenario.timeMultiplier);
+        await Promise.all([
+          reconciliationDone(messengerAlfie),
+          reconciliationDone(messengerBetty),
+        ]);
+        await delay(10 * scenario.timeMultiplier);
 
         const range: Range3d<TestSubspace> = {
           subspaceRange: {
@@ -2037,7 +2042,11 @@ function testWgpsMessenger(scenario: WgpsScenario) {
           processReceivedPayload: (bytes) => bytes,
         });
 
-        await delay(20 * scenario.timeMultiplier);
+        await Promise.all([
+          reconciliationDone(messengerAlfie),
+          reconciliationDone(messengerBetty),
+        ]);
+        await delay(10 * scenario.timeMultiplier);
 
         const range: Range3d<TestSubspace> = {
           subspaceRange: {
@@ -2327,7 +2336,11 @@ function testWgpsMessenger(scenario: WgpsScenario) {
           processReceivedPayload: (bytes) => bytes,
         });
 
-        await delay(20 * scenario.timeMultiplier);
+        await Promise.all([
+          reconciliationDone(messengerAlfie),
+          reconciliationDone(messengerBetty),
+        ]);
+        await delay(10 * scenario.timeMultiplier);
 
         const range: Range3d<TestSubspace> = {
           subspaceRange: {
@@ -2625,7 +2638,11 @@ function testWgpsMessenger(scenario: WgpsScenario) {
           },
         });
 
-        await delay(20 * scenario.timeMultiplier);
+        await Promise.all([
+          reconciliationDone(messengerAlfie),
+          reconciliationDone(messengerBetty),
+        ]);
+        await delay(10 * scenario.timeMultiplier);
 
         const range: Range3d<TestSubspace> = {
           subspaceRange: {
@@ -2844,7 +2861,11 @@ function testWgpsMessenger(scenario: WgpsScenario) {
           processReceivedPayload: (bytes) => bytes,
         });
 
-        await delay(100 * scenario.timeMultiplier);
+        await Promise.all([
+          reconciliationDone(messengerAlfie),
+          reconciliationDone(messengerBetty),
+        ]);
+        await delay(10 * scenario.timeMultiplier);
 
         const range: Range3d<TestSubspace> = {
           subspaceRange: {
@@ -3455,4 +3476,19 @@ export class StoreMap<
 
     return newStore;
   }
+}
+
+function reconciliationDone(wgps: any) {
+  return new Promise((resolve) => {
+    const status = wgps.status();
+    if (status.detail.remaining === 0 && status.detail.all > 0) {
+      resolve(true);
+    } else {
+      wgps.addEventListener("status", (e: WgpsStatusEvent) => {
+        if (e.detail.remaining === 0 && e.detail.all > 0) {
+          resolve(true);
+        }
+      });
+    }
+  });
 }
