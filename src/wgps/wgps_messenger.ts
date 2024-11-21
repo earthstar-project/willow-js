@@ -30,6 +30,7 @@ import {
 } from "./types.ts";
 import type { Intersection } from "./pai/types.ts";
 import { onAsyncIterate } from "./util.ts";
+import { WgpsStatusEvent } from "./events.ts";
 
 import { GuaranteedQueue } from "./guaranteed_queue.ts";
 import { AoiIntersectionFinder } from "./reconciliation/aoi_intersection_finder.ts";
@@ -186,7 +187,7 @@ export class WgpsMessenger<
   SubspaceId,
   PayloadDigest,
   AuthorisationOpts,
-> {
+> extends EventTarget {
   private closed = false;
 
   private interests: Map<
@@ -436,6 +437,8 @@ export class WgpsMessenger<
       AuthorisationOpts
     >,
   ) {
+    super();
+
     if (opts.maxPayloadSizePower < 0 || opts.maxPayloadSizePower > 64) {
       throw new ValidationError(
         "maxPayloadSizePower must be a natural number less than or equal to 64",
@@ -1065,6 +1068,8 @@ export class WgpsMessenger<
           kind: MsgKind.ReconciliationTerminatePayload,
         });
       }
+
+      this.dispatchEvent(this.status());
     });
 
     // Whenever the area of interest intersection finder finds an intersection from the setup phase...
@@ -1120,6 +1125,7 @@ export class WgpsMessenger<
             });
 
             this.myRangeCounter.getNext();
+            this.dispatchEvent(this.status());
           },
         );
 
@@ -1353,6 +1359,7 @@ export class WgpsMessenger<
           Number(this.yourRangeCounter.getNext()),
         );
 
+        this.dispatchEvent(this.status());
         break;
       }
       case MsgKind.ReconciliationAnnounceEntries: {
@@ -1391,6 +1398,7 @@ export class WgpsMessenger<
           });
         }
 
+        this.dispatchEvent(this.status());
         break;
       }
       case MsgKind.ReconciliationSendEntry: {
@@ -1682,6 +1690,15 @@ export class WgpsMessenger<
     message: StaticTokenChannelMsg<StaticToken>,
   ) {
     this.handlesStaticTokensTheirs.bind(message.staticToken);
+  }
+
+  status(): WgpsStatusEvent {
+    const yourInfo = this.yourRangeCounter.info();
+    const myInfo = this.myRangeCounter.info();
+    return new WgpsStatusEvent(
+      Number(yourInfo.remaining + myInfo.remaining),
+      Number(yourInfo.all + myInfo.all),
+    );
   }
 
   close() {
