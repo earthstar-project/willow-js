@@ -4,6 +4,7 @@ import {
   WgpsMessageValidationError,
   WillowError,
 } from "../errors.ts";
+import { RangeCounter } from "./range_counter.ts";
 import { decodeMessages } from "./decoding/decode_messages.ts";
 import { MessageEncoder } from "./encoding/message_encoder.ts";
 import { ReadyTransport } from "./ready_transport.ts";
@@ -311,7 +312,8 @@ export class WgpsMessenger<
 
   // Reconciliation
 
-  private yourRangeCounter = 0;
+  private yourRangeCounter = new RangeCounter();
+  private myRangeCounter = new RangeCounter();
 
   private getStore: GetStoreFn<
     Prefingerprint,
@@ -1016,6 +1018,8 @@ export class WgpsMessenger<
   private setupReconciliation() {
     // When our announcer releases an 'announcement pack' (everything needed to announce and send some entries)...
     onAsyncIterate(this.announcer.announcementPacks(), async (pack) => {
+      this.yourRangeCounter.done(pack.announcement.covers);
+
       // Bind any static tokens first.
       for (const staticToken of pack.staticTokenBinds) {
         this.encoder.encode({
@@ -1035,6 +1039,10 @@ export class WgpsMessenger<
         senderHandle: pack.announcement.senderHandle,
         covers: pack.announcement.covers,
       });
+
+      if (pack.announcement.wantResponse) {
+        this.myRangeCounter.getNext();
+      }
 
       // Then send the entries.
       for (const entry of pack.entries) {
@@ -1100,6 +1108,8 @@ export class WgpsMessenger<
           ({ fingerprint, range, covers }) => {
             // Send a ReconciliationSendFingerprint message
 
+            this.yourRangeCounter.done(covers);
+
             this.encoder.encode({
               kind: MsgKind.ReconciliationSendFingerprint,
               fingerprint,
@@ -1108,6 +1118,8 @@ export class WgpsMessenger<
               receiverHandle: intersection.theirs,
               covers,
             });
+
+            this.myRangeCounter.getNext();
           },
         );
 
@@ -1333,13 +1345,13 @@ export class WgpsMessenger<
           message.senderHandle,
         );
 
+        this.myRangeCounter.done(message.covers);
+
         await reconciler.respond(
           message.range,
           message.fingerprint,
-          this.yourRangeCounter,
+          Number(this.yourRangeCounter.getNext()),
         );
-
-        this.yourRangeCounter += 1;
 
         break;
       }
@@ -1364,6 +1376,8 @@ export class WgpsMessenger<
           range: message.range,
         };
 
+        this.myRangeCounter.done(message.covers);
+
         // If a response is wanted... queue up announcement
         if (message.wantResponse) {
           this.announcer.queueAnnounce({
@@ -1373,7 +1387,7 @@ export class WgpsMessenger<
             wantResponse: false,
             receiverHandle: message.senderHandle,
             senderHandle: message.receiverHandle,
-            covers: message.covers,
+            covers: this.yourRangeCounter.getNext(),
           });
         }
 

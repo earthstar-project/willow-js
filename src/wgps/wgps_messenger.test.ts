@@ -2654,6 +2654,282 @@ function testWgpsMessenger(scenario: WgpsScenario) {
   );
 
   Deno.test(
+    `Full Reconciliation with a lot of branching (${scenario.name})`,
+    async (test) => {
+      await test.step("sync", async () => {
+        const [alfie, betty] = transportPairInMemory();
+
+        const challengeHash = async (bytes: Uint8Array) => {
+          return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+        };
+
+        const storeMapAlfie = new StoreMap(
+          async (namespace) => {
+            const drivers = await scenario.getDrivers("alfie", namespace);
+
+            const store = new Store({
+              namespace,
+              schemes: {
+                authorisation: testSchemeAuthorisation,
+                fingerprint: testSchemeFingerprint,
+                namespace: testSchemeNamespace,
+                path: testSchemePath,
+                payload: testSchemePayload,
+                subspace: testSchemeSubspace,
+              },
+              ...drivers,
+            });
+
+            return store;
+          },
+          {
+            authorisation: testSchemeAuthorisation,
+            fingerprint: testSchemeFingerprint,
+            namespace: testSchemeNamespace,
+            path: testSchemePath,
+            payload: testSchemePayload,
+            subspace: testSchemeSubspace,
+          },
+        );
+
+        const storeFamilyAlfie = await storeMapAlfie.get(TestNamespace.Family);
+
+        const storeMapBetty = new StoreMap(
+          async (namespace) => {
+            const drivers = await scenario.getDrivers("betty", namespace);
+            const store = new Store({
+              namespace,
+              schemes: {
+                authorisation: testSchemeAuthorisation,
+                fingerprint: testSchemeFingerprint,
+                namespace: testSchemeNamespace,
+                path: testSchemePath,
+                payload: testSchemePayload,
+                subspace: testSchemeSubspace,
+              },
+              ...drivers,
+            });
+
+            return store;
+          },
+          {
+            authorisation: testSchemeAuthorisation,
+            fingerprint: testSchemeFingerprint,
+            namespace: testSchemeNamespace,
+            path: testSchemePath,
+            payload: testSchemePayload,
+            subspace: testSchemeSubspace,
+          },
+        );
+
+        const storeFamilyBetty = await storeMapBetty.get(TestNamespace.Family);
+
+        for (let i = 0; i < 100; i++) {
+          const payload = new Uint8Array(2 ** 4);
+          payload[0] = i;
+          const entry = {
+            subspace: TestSubspace.Gemma,
+            payload: payload,
+            path: [
+              new Uint8Array([1]),
+              crypto.getRandomValues(new Uint8Array(4)),
+            ],
+          };
+          if (i % 2) {
+            await storeFamilyAlfie.set(entry, TestSubspace.Gemma);
+          } else {
+            await storeFamilyBetty.set(entry, TestSubspace.Gemma);
+          }
+        }
+
+        const messengerAlfie = new WgpsMessenger({
+          challengeHash,
+          challengeLength: 128,
+          challengeHashLength: 32,
+          maxPayloadSizePower: 8,
+          transport: alfie,
+          schemes: {
+            subspaceCap: testSchemeSubspaceCap,
+            namespace: testSchemeNamespace,
+            accessControl: testSchemeAccessControl,
+            pai: testSchemePai,
+            path: testSchemePath,
+            subspace: testSchemeSubspace,
+            authorisationToken: testSchemeAuthorisationToken,
+            fingerprint: testSchemeFingerprint,
+            authorisation: testSchemeAuthorisation,
+            payload: testSchemePayload,
+          },
+          getStore: (namespace) => {
+            return storeMapAlfie.get(namespace);
+          },
+          interests: new Map([[
+            {
+              capability: {
+                namespace: TestNamespace.Family,
+                subspace: TestSubspace.Gemma,
+                path: [new Uint8Array([1])],
+                receiver: TestSubspace.Alfie,
+                time: {
+                  start: BigInt(0),
+                  end: OPEN_END,
+                },
+              } as TestReadCap,
+            },
+            [{
+              area: {
+                includedSubspaceId: TestSubspace.Gemma,
+                pathPrefix: [new Uint8Array([1])],
+                timeRange: {
+                  start: BigInt(0),
+                  end: OPEN_END,
+                },
+              },
+              maxCount: 0,
+              maxSize: BigInt(0),
+            }],
+          ]]),
+          transformPayload: (bytes) => bytes,
+          processReceivedPayload: (bytes) => bytes,
+        });
+
+        const messengerBetty = new WgpsMessenger({
+          challengeHash,
+          challengeLength: 128,
+          challengeHashLength: 32,
+          maxPayloadSizePower: 8,
+          transport: betty,
+          schemes: {
+            subspaceCap: testSchemeSubspaceCap,
+            namespace: testSchemeNamespace,
+            accessControl: testSchemeAccessControl,
+            pai: testSchemePai,
+            path: testSchemePath,
+            subspace: testSchemeSubspace,
+            authorisationToken: testSchemeAuthorisationToken,
+            fingerprint: testSchemeFingerprint,
+            authorisation: testSchemeAuthorisation,
+            payload: testSchemePayload,
+          },
+          getStore: (namespace) => {
+            return storeMapBetty.get(namespace);
+          },
+          interests: new Map([[
+            {
+              capability: {
+                namespace: TestNamespace.Family,
+                subspace: TestSubspace.Gemma,
+                path: [new Uint8Array([1])],
+                receiver: TestSubspace.Betty,
+                time: {
+                  start: BigInt(0),
+                  end: OPEN_END,
+                },
+              } as TestReadCap,
+            },
+            [{
+              area: {
+                includedSubspaceId: TestSubspace.Gemma,
+                pathPrefix: [new Uint8Array([1])],
+                timeRange: {
+                  start: BigInt(0),
+                  end: OPEN_END,
+                },
+              },
+              maxCount: 0,
+              maxSize: BigInt(0),
+            }],
+          ]]),
+          transformPayload: (bytes) => bytes,
+          processReceivedPayload: (bytes) => bytes,
+        });
+
+        await delay(100 * scenario.timeMultiplier);
+
+        const range: Range3d<TestSubspace> = {
+          subspaceRange: {
+            start: TestSubspace.Gemma,
+            end: TestSubspace.Dalton,
+          },
+          pathRange: {
+            start: [],
+            end: OPEN_END,
+          },
+          timeRange: {
+            start: 0n,
+            end: OPEN_END,
+          },
+        };
+
+        const { size: alfieFamilySize } = await storeFamilyAlfie
+          .summarise(range);
+        const { size: bettyFamilySize } = await storeFamilyBetty
+          .summarise(range);
+
+        assertEquals(alfieFamilySize, 100);
+        assertEquals(bettyFamilySize, 100);
+
+        let actualSizeFamilyAlfie = 0;
+        let actualSizeFamilyBetty = 0;
+        let alfieHasAllPayloads = true;
+        let bettyHasAllPayloads = true;
+
+        for await (
+          const [, payload] of storeFamilyAlfie.query({
+            area: {
+              includedSubspaceId: TestSubspace.Gemma,
+              pathPrefix: [],
+              timeRange: {
+                start: 0n,
+                end: OPEN_END,
+              },
+            },
+            maxCount: 0,
+            maxSize: 0n,
+          }, "subspace")
+        ) {
+          actualSizeFamilyAlfie += 1;
+
+          if (!payload) {
+            alfieHasAllPayloads = false;
+          }
+        }
+
+        for await (
+          const [, payload] of storeFamilyBetty.query({
+            area: {
+              includedSubspaceId: TestSubspace.Gemma,
+              pathPrefix: [],
+              timeRange: {
+                start: 0n,
+                end: OPEN_END,
+              },
+            },
+            maxCount: 0,
+            maxSize: 0n,
+          }, "subspace")
+        ) {
+          actualSizeFamilyBetty += 1;
+
+          if (!payload) {
+            bettyHasAllPayloads = false;
+          }
+        }
+
+        assertEquals(actualSizeFamilyAlfie, 100);
+        assertEquals(actualSizeFamilyBetty, 100);
+        assert(alfieHasAllPayloads, "Alfie does not have all payloads");
+        assert(bettyHasAllPayloads, "Betty does not have all payloads");
+
+        messengerAlfie.close();
+        messengerBetty.close();
+      });
+
+      await scenario.dispose();
+    },
+  );
+
+  Deno.test(
     `Reconciliation of many namespaces (${scenario.name})`,
     async (test) => {
       await test.step("sync", async () => {
