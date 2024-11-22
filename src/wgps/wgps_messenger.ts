@@ -4,6 +4,7 @@ import {
   WgpsMessageValidationError,
   WillowError,
 } from "../errors.ts";
+import { RangeCounter } from "./range_counter.ts";
 import { decodeMessages } from "./decoding/decode_messages.ts";
 import { MessageEncoder } from "./encoding/message_encoder.ts";
 import { ReadyTransport } from "./ready_transport.ts";
@@ -29,6 +30,7 @@ import {
 } from "./types.ts";
 import type { Intersection } from "./pai/types.ts";
 import { onAsyncIterate } from "./util.ts";
+import { WgpsStatusEvent } from "./events.ts";
 
 import { GuaranteedQueue } from "./guaranteed_queue.ts";
 import { AoiIntersectionFinder } from "./reconciliation/aoi_intersection_finder.ts";
@@ -185,7 +187,7 @@ export class WgpsMessenger<
   SubspaceId,
   PayloadDigest,
   AuthorisationOpts,
-> {
+> extends EventTarget {
   private closed = false;
 
   private interests: Map<
@@ -311,7 +313,8 @@ export class WgpsMessenger<
 
   // Reconciliation
 
-  private yourRangeCounter = 0;
+  private yourRangeCounter = new RangeCounter();
+  private myRangeCounter = new RangeCounter();
 
   private getStore: GetStoreFn<
     Prefingerprint,
@@ -435,6 +438,8 @@ export class WgpsMessenger<
       AuthorisationOpts
     >,
   ) {
+    super();
+
     if (opts.maxPayloadSizePower < 0 || opts.maxPayloadSizePower > 64) {
       throw new ValidationError(
         "maxPayloadSizePower must be a natural number less than or equal to 64",
@@ -1015,6 +1020,8 @@ export class WgpsMessenger<
   private setupReconciliation() {
     // When our announcer releases an 'announcement pack' (everything needed to announce and send some entries)...
     onAsyncIterate(this.announcer.announcementPacks(), async (pack) => {
+      this.yourRangeCounter.done(pack.announcement.covers);
+
       // Bind any static tokens first.
       for (const staticToken of pack.staticTokenBinds) {
         this.encoder.encode({
@@ -1034,6 +1041,10 @@ export class WgpsMessenger<
         senderHandle: pack.announcement.senderHandle,
         covers: pack.announcement.covers,
       });
+
+      if (pack.announcement.wantResponse) {
+        this.myRangeCounter.getNext();
+      }
 
       // Then send the entries.
       for (const entry of pack.entries) {
@@ -1056,6 +1067,8 @@ export class WgpsMessenger<
           kind: MsgKind.ReconciliationTerminatePayload,
         });
       }
+
+      this.dispatchEvent(this.status());
     });
 
     // Whenever the area of interest intersection finder finds an intersection from the setup phase...
@@ -1099,6 +1112,8 @@ export class WgpsMessenger<
           ({ fingerprint, range, covers }) => {
             // Send a ReconciliationSendFingerprint message
 
+            this.yourRangeCounter.done(covers);
+
             this.encoder.encode({
               kind: MsgKind.ReconciliationSendFingerprint,
               fingerprint,
@@ -1107,6 +1122,9 @@ export class WgpsMessenger<
               receiverHandle: intersection.theirs,
               covers,
             });
+
+            this.myRangeCounter.getNext();
+            this.dispatchEvent(this.status());
           },
         );
 
@@ -1332,14 +1350,15 @@ export class WgpsMessenger<
           message.senderHandle,
         );
 
+        this.myRangeCounter.done(message.covers);
+
         await reconciler.respond(
           message.range,
           message.fingerprint,
-          this.yourRangeCounter,
+          Number(this.yourRangeCounter.getNext()),
         );
 
-        this.yourRangeCounter += 1;
-
+        this.dispatchEvent(this.status());
         break;
       }
       case MsgKind.ReconciliationAnnounceEntries: {
@@ -1363,6 +1382,8 @@ export class WgpsMessenger<
           range: message.range,
         };
 
+        this.myRangeCounter.done(message.covers);
+
         // If a response is wanted... queue up announcement
         if (message.wantResponse) {
           this.announcer.queueAnnounce({
@@ -1372,10 +1393,11 @@ export class WgpsMessenger<
             wantResponse: false,
             receiverHandle: message.senderHandle,
             senderHandle: message.receiverHandle,
-            covers: message.covers,
+            covers: this.yourRangeCounter.getNext(),
           });
         }
 
+        this.dispatchEvent(this.status());
         break;
       }
       case MsgKind.ReconciliationSendEntry: {
@@ -1672,6 +1694,15 @@ export class WgpsMessenger<
     message: StaticTokenChannelMsg<StaticToken>,
   ) {
     this.handlesStaticTokensTheirs.bind(message.staticToken);
+  }
+
+  status(): WgpsStatusEvent {
+    const yourInfo = this.yourRangeCounter.info();
+    const myInfo = this.myRangeCounter.info();
+    return new WgpsStatusEvent(
+      Number(yourInfo.remaining + myInfo.remaining),
+      Number(yourInfo.all + myInfo.all),
+    );
   }
 
   close() {
