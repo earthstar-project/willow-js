@@ -19,7 +19,7 @@ export class KvDriverIndexedDB implements KvDriver {
   private db = Promise.withResolvers<IDBDatabase>();
 
   constructor(id: string) {
-    const request = ((window as any).indexedDB as IDBFactory).open(
+    const request = ((globalThis as any).indexedDB as IDBFactory).open(
       `willow_${id}`,
       1,
     );

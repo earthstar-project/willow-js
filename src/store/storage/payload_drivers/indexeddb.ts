@@ -16,7 +16,7 @@ export class PayloadDriverIndexedDb<PayloadDigest>
     id: string,
     readonly payloadScheme: PayloadScheme<PayloadDigest>,
   ) {
-    const request = ((window as any).indexedDB as IDBFactory).open(
+    const request = ((globalThis as any).indexedDB as IDBFactory).open(
       `willow_payloads_${id}`,
       1,
     );
