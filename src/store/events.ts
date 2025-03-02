@@ -1,13 +1,13 @@
 import type { Entry } from "@earthstar/willow-utils";
 import type { Payload } from "./types.ts";
 
-export enum StoreEvents {
-  EntryIngest = "entryingest",
-  EntryPayloadSet = "entrypayloadset",
-  EntryRemove = "entryremove",
-  PayloadIngest = "payloadingest",
-  PayloadRemove = "payloadRemove",
-}
+export const StoreEvents = {
+  EntryIngest: "entryingest",
+  EntryPayloadSet: "entrypayloadset",
+  EntryRemove: "entryremove",
+  PayloadIngest: "payloadingest",
+  PayloadRemove: "payloadRemove",
+} as const
 
 export type StoreEventsMapping<
   NamespacePublicKey,
