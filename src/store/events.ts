@@ -1,6 +1,52 @@
 import type { Entry } from "@earthstar/willow-utils";
 import type { Payload } from "./types.ts";
 
+export enum StoreEvents {
+  EntryIngest = "entryingest",
+  EntryPayloadSet = "entrypayloadset",
+  EntryRemove = "entryremove",
+  PayloadIngest = "payloadingest",
+  PayloadRemove = "payloadRemove",
+}
+
+export type StoreEventsMapping<
+  NamespacePublicKey,
+  SubspacePublicKey,
+  PayloadDigest,
+  AuthorisationToken,
+> = {
+  [StoreEvents.EntryPayloadSet]: EntryPayloadSetEvent<
+    NamespacePublicKey,
+    SubspacePublicKey,
+    PayloadDigest,
+    AuthorisationToken
+  >;
+  [StoreEvents.EntryIngest]: EntryIngestEvent<
+    NamespacePublicKey,
+    SubspacePublicKey,
+    PayloadDigest,
+    AuthorisationToken
+  >;
+  [StoreEvents.PayloadIngest]: PayloadIngestEvent<
+    NamespacePublicKey,
+    SubspacePublicKey,
+    PayloadDigest,
+    AuthorisationToken
+  >;
+  [StoreEvents.EntryRemove]: EntryRemoveEvent<
+    NamespacePublicKey,
+    SubspacePublicKey,
+    PayloadDigest,
+    AuthorisationToken
+  >;
+  [StoreEvents.PayloadRemove]: PayloadRemoveEvent<
+    NamespacePublicKey,
+    SubspacePublicKey,
+    PayloadDigest,
+    AuthorisationToken
+  >;
+};
+
 export class EntryPayloadSetEvent<
   NamespacePublicKey,
   SubspacePublicKey,
@@ -16,7 +62,7 @@ export class EntryPayloadSetEvent<
     authToken: AuthorisationToken,
     payload: Payload,
   ) {
-    super("entrypayloadset", {
+    super(StoreEvents.EntryPayloadSet, {
       detail: {
         entry,
         authToken,
@@ -42,7 +88,7 @@ export class EntryIngestEvent<
     entry: Entry<NamespacePublicKey, SubspacePublicKey, PayloadDigest>,
     authToken: AuthorisationToken,
   ) {
-    super("entryingest", {
+    super(StoreEvents.EntryIngest, {
       detail: {
         entry,
         authToken,
@@ -67,7 +113,7 @@ export class PayloadIngestEvent<
     authToken: AuthorisationToken,
     payload: Payload,
   ) {
-    super("payloadingest", {
+    super(StoreEvents.PayloadIngest, {
       detail: {
         entry,
         authToken,
@@ -99,7 +145,7 @@ export class EntryRemoveEvent<
       authToken: AuthorisationToken;
     },
   ) {
-    super("entryremove", {
+    super(StoreEvents.EntryRemove, {
       detail: {
         removed,
         removedBy,
@@ -128,7 +174,7 @@ export class PayloadRemoveEvent<
       authToken: AuthorisationToken;
     },
   ) {
-    super("payloadRemove", {
+    super(StoreEvents.PayloadRemove, {
       detail: {
         removedBy,
       },
