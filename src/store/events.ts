@@ -6,7 +6,7 @@ export const StoreEvents = {
   EntryPayloadSet: "entrypayloadset",
   EntryRemove: "entryremove",
   PayloadIngest: "payloadingest",
-  PayloadRemove: "payloadRemove",
+  PayloadRemove: "payloadremove",
 } as const
 
 export type StoreEventsMapping<
@@ -47,6 +47,7 @@ export type StoreEventsMapping<
   >;
 };
 
+/** Emitted after a {@linkcode Store} creates a new {@linkcode Entry} for a given payload. */
 export class EntryPayloadSetEvent<
   NamespacePublicKey,
   SubspacePublicKey,
