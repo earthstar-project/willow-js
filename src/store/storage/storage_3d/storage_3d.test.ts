@@ -293,14 +293,14 @@ Deno.test("Storage3d.summarise", async () => {
         return new Uint8Array(0);
       },
       decode: (_encoded: Uint8Array) => {
-        return <[number, Path, bigint, bigint][]>[];
+        return <[number, Path, bigint, bigint][]> [];
       },
       encodedLength: (_value: [number, Path, bigint, bigint][]) => {
         return 0;
       },
       decodeStream: <StreamDecoder<
         [number, Path, bigint, bigint][]
-      >><unknown>"unused",
+      >> <unknown> "unused",
     },
   };
 
@@ -736,8 +736,8 @@ Deno.test("Storage3d.query", async (test) => {
           order: orderRoll < 0.33
             ? "subspace"
             : orderRoll < 0.66
-              ? "path"
-              : "timestamp",
+            ? "path"
+            : "timestamp",
         });
       }
 
@@ -783,7 +783,7 @@ Deno.test("Storage3d.query", async (test) => {
       }
 
       store.addEventListener("entryremove", (event) => {
-        const { detail: { removed } } = event
+        const { detail: { removed } } = event;
 
         const encodedEntry = encodeEntry({
           encodeNamespace: testSchemeNamespace.encode,

@@ -7,7 +7,7 @@ export const StoreEvents = {
   EntryRemove: "entryremove",
   PayloadIngest: "payloadingest",
   PayloadRemove: "payloadremove",
-} as const
+} as const;
 
 export type StoreEventsMapping<
   NamespacePublicKey,
