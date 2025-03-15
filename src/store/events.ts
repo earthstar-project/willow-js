@@ -9,7 +9,7 @@ export const StoreEvents = {
   PayloadRemove: "payloadremove",
 } as const;
 
-export type StoreEventsMapping<
+export type StoreEventsMap<
   NamespacePublicKey,
   SubspacePublicKey,
   PayloadDigest,

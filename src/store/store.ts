@@ -16,7 +16,7 @@ import {
   PayloadIngestEvent,
   PayloadRemoveEvent,
   StoreEvents,
-  type StoreEventsMapping,
+  type StoreEventsMap,
 } from "./events.ts";
 import type { Storage3d } from "./storage/storage_3d/types.ts";
 import { WillowError } from "../errors.ts";
@@ -35,7 +35,7 @@ import {
   successorPath,
   successorPrefix,
 } from "@earthstar/willow-utils";
-import { TypedEventTarget } from "@derzade/typescript-event-target";
+import { TypedEventTarget } from "jsr:@derzade/typescript-event-target";
 
 /** A local set of a particular namespace's authorised entries to be written to, read from, and synced with other `Store`s. Applies the concepts of the [Willow Data Model](https://willowprotocol.org/specs/data-model/index.html#data_model) to the set of entries stored inside.
  *
@@ -52,7 +52,7 @@ export class Store<
   Prefingerprint,
   Fingerprint,
 > extends TypedEventTarget<
-  StoreEventsMapping<NamespaceId, SubspaceId, PayloadDigest, AuthorisationToken>
+  StoreEventsMap<NamespaceId, SubspaceId, PayloadDigest, AuthorisationToken>
 > {
   namespace: NamespaceId;
 
@@ -667,10 +667,10 @@ export class Store<
       (result.length > entry.payloadLength) ||
       (allowPartial === false && entry.payloadLength !== result.length) ||
       result.length === entry.payloadLength &&
-        this.schemes.payload.order(
-            result.digest,
-            entry.payloadDigest,
-          ) !== 0
+      this.schemes.payload.order(
+        result.digest,
+        entry.payloadDigest,
+      ) !== 0
     ) {
       await result.reject();
 
@@ -685,9 +685,9 @@ export class Store<
     if (
       result.length === entry.payloadLength &&
       this.schemes.payload.order(
-          result.digest,
-          entry.payloadDigest,
-        ) === 0
+        result.digest,
+        entry.payloadDigest,
+      ) === 0
     ) {
       const complete = await this.payloadDriver.get(entry.payloadDigest);
 
