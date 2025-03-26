@@ -45,6 +45,13 @@ export type IngestDropOpts<
   decodeStreamAuthorisationToken: StreamDecoder<AuthorisationToken>;
 };
 
+async function* terminatingFifoIterator<T>(fifo: FIFO<T | undefined>) {
+  for await (const chunk of fifo) {
+    if (!chunk) break;
+    yield chunk;
+  }
+}
+
 /** Decrypt an encrypted [drop](https://willowprotocol.org/specs/sideloading/index.html#drop) and ingest its contents into a {@linkcode Store} of the corresponding namespace.
  *
  * @returns The {@linkcode Store} which ingested the drop's contents.
@@ -135,13 +142,16 @@ export async function ingestDrop<
       );
     }
 
-    const fifo = new FIFO<Uint8Array>();
+    const fifo = new FIFO<Uint8Array | undefined>();
 
-    const payloadIngestPromise = store.ingestPayload({
-      path: entry.path,
-      subspace: entry.subspaceId,
-      timestamp: entry.timestamp,
-    }, fifo);
+    const payloadIngestPromise = store.ingestPayload(
+      {
+        path: entry.path,
+        subspace: entry.subspaceId,
+        timestamp: entry.timestamp,
+      },
+      terminatingFifoIterator(fifo)
+    );
 
     let remainingBytes = entry.payloadLength;
 
@@ -164,6 +174,8 @@ export async function ingestDrop<
         remainingBytes = 0n;
       }
     }
+
+    fifo.push(undefined);
 
     const payloadIngestResult = await payloadIngestPromise;
 
