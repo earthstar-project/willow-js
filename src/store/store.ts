@@ -15,6 +15,8 @@ import {
   EntryRemoveEvent,
   PayloadIngestEvent,
   PayloadRemoveEvent,
+  StoreEvents,
+  type StoreEventsMap,
 } from "./events.ts";
 import type { Storage3d } from "./storage/storage_3d/types.ts";
 import { WillowError } from "../errors.ts";
@@ -33,6 +35,7 @@ import {
   successorPath,
   successorPrefix,
 } from "@earthstar/willow-utils";
+import { TypedEventTarget } from "jsr:@derzade/typescript-event-target";
 
 /** A local set of a particular namespace's authorised entries to be written to, read from, and synced with other `Store`s. Applies the concepts of the [Willow Data Model](https://willowprotocol.org/specs/data-model/index.html#data_model) to the set of entries stored inside.
  *
@@ -48,7 +51,9 @@ export class Store<
   AuthorisationToken,
   Prefingerprint,
   Fingerprint,
-> extends EventTarget {
+> extends TypedEventTarget<
+  StoreEventsMap<NamespaceId, SubspaceId, PayloadDigest, AuthorisationToken>
+> {
   namespace: NamespaceId;
 
   private schemes: StoreSchemes<
@@ -206,7 +211,10 @@ export class Store<
       return ingestResult;
     }
 
-    this.dispatchEvent(new EntryPayloadSetEvent(entry, authToken, payload));
+    this.dispatchTypedEvent(
+      StoreEvents.EntryPayloadSet,
+      new EntryPayloadSetEvent(entry, authToken, payload),
+    );
 
     return ingestResult;
   }
@@ -396,7 +404,8 @@ export class Store<
         toRemovePrefixPath,
       );
 
-      this.dispatchEvent(
+      this.dispatchTypedEvent(
+        StoreEvents.EntryRemove,
         new EntryRemoveEvent(otherEntry, { entry, authToken: authorisation }),
       );
     }
@@ -413,7 +422,10 @@ export class Store<
     // Indicates that this ingestion is not being triggered by a local set,
     // so the payload will arrive separately.
     if (externalSourceId) {
-      this.dispatchEvent(new EntryIngestEvent(entry, authorisation));
+      this.dispatchTypedEvent(
+        StoreEvents.EntryIngest,
+        new EntryIngestEvent(entry, authorisation),
+      );
     }
 
     this.ingestionMutex.release(acquisitionId);
@@ -570,7 +582,8 @@ export class Store<
         ),
       ]);
 
-      this.dispatchEvent(
+      this.dispatchTypedEvent(
+        StoreEvents.PayloadRemove,
         new PayloadRemoveEvent({ entry, authToken }),
       );
 
@@ -578,7 +591,8 @@ export class Store<
 
       await this.entryDriver.writeAheadFlag.unflagRemoval();
 
-      this.dispatchEvent(
+      this.dispatchTypedEvent(
+        StoreEvents.EntryRemove,
         new EntryRemoveEvent(entry, {
           entry: {
             namespaceId: this.namespace,
@@ -653,10 +667,10 @@ export class Store<
       (result.length > entry.payloadLength) ||
       (allowPartial === false && entry.payloadLength !== result.length) ||
       result.length === entry.payloadLength &&
-        this.schemes.payload.order(
-            result.digest,
-            entry.payloadDigest,
-          ) !== 0
+      this.schemes.payload.order(
+        result.digest,
+        entry.payloadDigest,
+      ) !== 0
     ) {
       await result.reject();
 
@@ -671,9 +685,9 @@ export class Store<
     if (
       result.length === entry.payloadLength &&
       this.schemes.payload.order(
-          result.digest,
-          entry.payloadDigest,
-        ) === 0
+        result.digest,
+        entry.payloadDigest,
+      ) === 0
     ) {
       const complete = await this.payloadDriver.get(entry.payloadDigest);
 
@@ -691,7 +705,8 @@ export class Store<
         );
       }
 
-      this.dispatchEvent(
+      this.dispatchTypedEvent(
+        StoreEvents.PayloadIngest,
         new PayloadIngestEvent(entry, authToken, complete),
       );
     }

@@ -783,9 +783,7 @@ Deno.test("Storage3d.query", async (test) => {
       }
 
       store.addEventListener("entryremove", (event) => {
-        const { detail: { removed } } = event as CustomEvent<
-          { removed: Entry<TestNamespace, TestSubspace, Uint8Array> }
-        >;
+        const { detail: { removed } } = event;
 
         const encodedEntry = encodeEntry({
           encodeNamespace: testSchemeNamespace.encode,
